@@ -28,9 +28,12 @@ import java.util.Properties;
 
 /** Download locations and verified native archive definitions. */
 public record MonitoringDownloadConfig(Path downloadDirectory, Path installDirectory,
-                                       ToolArchive prometheus, ToolArchive grafana, String source) {
+                                       ToolArchive prometheus, ToolArchive grafana, RuntimePlatform platform,
+                                       String source) {
     private static final String RESOURCE = "/monitoring-download.properties";
     private static final String ENVIRONMENT = "SBK_DASHBOARD_MONITORING_PROPERTIES";
+    private static final String[] TOOL_PROPERTIES = {"download.url", "download.file", "download.sha256",
+        "archive.directory", "executable", "archive.format"};
 
     /**
      * Loads packaged defaults and applies an optional external properties file.
@@ -47,25 +50,47 @@ public record MonitoringDownloadConfig(Path downloadDirectory, Path installDirec
 
     static MonitoringDownloadConfig fromSources(String propertiesFile, Path dataDirectory,
                                                  Map<String, String> environment) throws IOException {
+        return fromSources(propertiesFile, dataDirectory, environment, RuntimePlatform.current());
+    }
+
+    static MonitoringDownloadConfig fromSources(String propertiesFile, Path dataDirectory,
+                                                 Map<String, String> environment, RuntimePlatform platform)
+            throws IOException {
         Properties properties = defaults();
         Path external = externalPath(propertiesFile, environment);
         String selectedSource = "packaged monitoring-download.properties";
         if (external != null) {
+            Properties overrides = new Properties();
             try (InputStream input = Files.newInputStream(external)) {
-                properties.load(input);
+                overrides.load(input);
             }
+            properties.putAll(overrides);
+            applyLegacyOverrides(properties, overrides, platform);
             selectedSource = external.toAbsolutePath().normalize().toString();
         }
         Map<String, String> variables = Map.of(
                 "data.directory", dataDirectory.toAbsolutePath().normalize().toString(),
                 "user.home", System.getProperty("user.home"),
-                "os.arch", System.getProperty("os.arch"),
-                "os.name", System.getProperty("os.name").toLowerCase(Locale.ROOT));
+                "os.arch", platform.architecture().name().toLowerCase(Locale.ROOT),
+                "os.name", platform.operatingSystem().name().toLowerCase(Locale.ROOT));
         Path downloads = path(property(properties, "download.directory"), variables);
         Path installs = path(property(properties, "install.directory"), variables);
         return new MonitoringDownloadConfig(downloads, installs,
-                tool(properties, variables, "prometheus"), tool(properties, variables, "grafana"),
-                selectedSource);
+                tool(properties, variables, "prometheus", platform),
+                tool(properties, variables, "grafana", platform), platform, selectedSource);
+    }
+
+    private static void applyLegacyOverrides(Properties properties, Properties overrides,
+                                             RuntimePlatform platform) {
+        for (String tool : new String[] {"prometheus", "grafana"}) {
+            for (String suffix : TOOL_PROPERTIES) {
+                String legacy = tool + '.' + suffix;
+                String selected = tool + '.' + platform.id() + '.' + suffix;
+                if (overrides.containsKey(legacy) && !overrides.containsKey(selected)) {
+                    properties.setProperty(selected, overrides.getProperty(legacy));
+                }
+            }
+        }
     }
 
     private static Properties defaults() throws IOException {
@@ -124,22 +149,34 @@ public record MonitoringDownloadConfig(Path downloadDirectory, Path installDirec
         return null;
     }
 
-    private static ToolArchive tool(Properties properties, Map<String, String> variables, String prefix) {
-        URI url = URI.create(expand(property(properties, prefix + ".download.url"), variables));
+    private static ToolArchive tool(Properties properties, Map<String, String> variables, String prefix,
+                                    RuntimePlatform platform) {
+        String platformPrefix = prefix + '.' + platform.id();
+        URI url = URI.create(expand(platformProperty(properties, platformPrefix, prefix, "download.url"), variables));
         if (url.getScheme() == null || url.getHost() == null || !url.getScheme().equalsIgnoreCase("https")) {
             throw new IllegalArgumentException(prefix + " download URL must be an absolute HTTPS URL");
         }
-        String file = expand(property(properties, prefix + ".download.file"), variables);
+        String file = expand(platformProperty(properties, platformPrefix, prefix, "download.file"), variables);
         if (!Path.of(file).getFileName().toString().equals(file)) {
             throw new IllegalArgumentException(prefix + " download file must be a file name");
         }
-        String checksum = property(properties, prefix + ".download.sha256").toLowerCase(Locale.ROOT);
+        String checksum = platformProperty(properties, platformPrefix, prefix, "download.sha256")
+                .toLowerCase(Locale.ROOT);
         if (!checksum.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException(prefix + " SHA-256 must contain 64 hexadecimal characters");
         }
-        Path archiveDirectory = relative(property(properties, prefix + ".archive.directory"), prefix);
-        Path executable = relative(property(properties, prefix + ".executable"), prefix);
-        return new ToolArchive(url, file, checksum, archiveDirectory, executable);
+        Path archiveDirectory = relative(platformProperty(properties, platformPrefix, prefix,
+                "archive.directory"), prefix);
+        Path executable = relative(platformProperty(properties, platformPrefix, prefix, "executable"), prefix);
+        ArchiveFormat format = ArchiveFormat.from(platformProperty(properties, platformPrefix, prefix,
+                "archive.format"));
+        return new ToolArchive(url, file, checksum, archiveDirectory, executable, format);
+    }
+
+    private static String platformProperty(Properties properties, String platformPrefix, String legacyPrefix,
+                                           String suffix) {
+        String value = properties.getProperty(platformPrefix + '.' + suffix);
+        return value == null || value.isBlank() ? property(properties, legacyPrefix + '.' + suffix) : value.trim();
     }
 
     private static Path relative(String value, String prefix) {
@@ -173,7 +210,27 @@ public record MonitoringDownloadConfig(Path downloadDirectory, Path installDirec
         return expanded;
     }
 
-    /** A checksummed tar.gz distribution and paths inside it. */
+    /** Supported native release archive formats. */
+    public enum ArchiveFormat {
+        TAR_GZ("tar.gz"), ZIP("zip");
+
+        private final String value;
+
+        ArchiveFormat(String value) {
+            this.value = value;
+        }
+
+        static ArchiveFormat from(String value) {
+            for (ArchiveFormat format : values()) {
+                if (format.value.equalsIgnoreCase(value.trim())) {
+                    return format;
+                }
+            }
+            throw new IllegalArgumentException("Unsupported archive format: " + value);
+        }
+    }
+
+    /** A checksummed native distribution and paths inside it. */
     public record ToolArchive(URI url, String fileName, String sha256,
-                              Path archiveDirectory, Path executable) { }
+                              Path archiveDirectory, Path executable, ArchiveFormat format) { }
 }

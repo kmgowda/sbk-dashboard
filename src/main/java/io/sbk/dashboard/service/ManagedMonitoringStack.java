@@ -19,6 +19,7 @@ package io.sbk.dashboard.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.sbk.dashboard.config.DashboardConfig;
 import io.sbk.dashboard.config.MonitoringConfig;
+import io.sbk.dashboard.config.RuntimePlatform;
 import io.sbk.dashboard.model.BenchmarkTarget;
 import io.sbk.dashboard.model.TargetStatus;
 import java.io.IOException;
@@ -33,6 +34,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -47,9 +49,11 @@ public final class ManagedMonitoringStack implements AutoCloseable {
     private final Path runtimeDirectory;
     private final PrometheusTargetDiscovery targetDiscovery;
     private final GrafanaDashboardProvisioner dashboardProvisioner;
+    private final ManagedProcessRegistry processRegistry;
     private final Map<String, TargetStatus> statuses = new ConcurrentHashMap<>();
     private final ScheduledExecutorService monitor = Executors.newSingleThreadScheduledExecutor();
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+    private final RuntimePlatform platform = RuntimePlatform.current();
     private volatile List<BenchmarkTarget> targets = List.of();
     private Process prometheusProcess;
     private Process grafanaProcess;
@@ -76,12 +80,13 @@ public final class ManagedMonitoringStack implements AutoCloseable {
                 runtimeDirectory.resolve("prometheus/targets.json"));
         this.dashboardProvisioner = new GrafanaDashboardProvisioner(
                 runtimeDirectory.resolve("grafana/dashboards"), monitoringConfig.grafanaPublicUrl());
+        this.processRegistry = new ManagedProcessRegistry(runtimeDirectory.resolve("managed-processes.json"));
         prepareConfiguration();
         reconcile(initialTargets);
         try {
             if (!continueExisting) {
                 PortProcessManager.terminateExisting(monitoringConfig.prometheusPort(),
-                        monitoringConfig.grafanaPort());
+                        monitoringConfig.grafanaPort(), processRegistry);
             }
             URI prometheusHealth = prometheusHealth();
             if (continueExisting && ready(prometheusHealth)) {
@@ -90,6 +95,7 @@ public final class ManagedMonitoringStack implements AutoCloseable {
             } else {
                 requireAvailableWhenContinuing("Prometheus", monitoringConfig.prometheusPort(), continueExisting);
                 prometheusProcess = startPrometheus();
+                processRegistry.record("prometheus", prometheusProcess, monitoringConfig.prometheusPort());
                 awaitReady("Prometheus", prometheusProcess, prometheusHealth);
             }
             URI grafanaHealth = grafanaHealth();
@@ -99,6 +105,7 @@ public final class ManagedMonitoringStack implements AutoCloseable {
             } else {
                 requireAvailableWhenContinuing("Grafana", monitoringConfig.grafanaPort(), continueExisting);
                 grafanaProcess = startGrafana();
+                processRegistry.record("grafana", grafanaProcess, monitoringConfig.grafanaPort());
                 awaitReady("Grafana", grafanaProcess, grafanaHealth);
             }
         } catch (IOException | InterruptedException exception) {
@@ -144,6 +151,8 @@ public final class ManagedMonitoringStack implements AutoCloseable {
         monitor.shutdownNow();
         stop(grafanaProcess);
         stop(prometheusProcess);
+        removeOwnership("grafana", grafanaProcess);
+        removeOwnership("prometheus", prometheusProcess);
     }
 
     private void prepareConfiguration() throws IOException {
@@ -177,14 +186,13 @@ public final class ManagedMonitoringStack implements AutoCloseable {
 
     private Process startGrafana() throws IOException {
         Path home = monitoringConfig.grafanaHome().toAbsolutePath().normalize();
-        Path executable = Files.isExecutable(home.resolve("bin/grafana"))
-                ? home.resolve("bin/grafana") : home.resolve("bin/grafana-server");
-        if (!Files.isExecutable(executable)) {
+        Path executable = grafanaExecutable(home);
+        if (executable == null) {
             throw new IOException("Grafana executable not found under " + home.resolve("bin"));
         }
         List<String> command = new ArrayList<>();
         command.add(executable.toString());
-        if (executable.getFileName().toString().equals("grafana")) {
+        if (executableBaseName(executable).equals("grafana")) {
             command.add("server");
         }
         command.add("--homepath=" + home);
@@ -331,9 +339,11 @@ public final class ManagedMonitoringStack implements AutoCloseable {
 
     private byte[] grafanaConfiguration() {
         Path directory = runtimeDirectory.resolve("grafana");
-        String value = "[paths]\ndata = " + directory.resolve("data") + "\nlogs = " + directory.resolve("logs")
-                + "\nplugins = " + directory.resolve("data/plugins") + "\nprovisioning = "
-                + directory.resolve("provisioning") + "\n\n[server]\nhttp_addr = 0.0.0.0\nhttp_port = "
+        String value = "[paths]\ndata = " + portablePath(directory.resolve("data")) + "\nlogs = "
+                + portablePath(directory.resolve("logs")) + "\nplugins = "
+                + portablePath(directory.resolve("data/plugins")) + "\nprovisioning = "
+                + portablePath(directory.resolve("provisioning"))
+                + "\n\n[server]\nhttp_addr = 0.0.0.0\nhttp_port = "
                 + monitoringConfig.grafanaPort() + "\n\n[auth]\ndisable_login_form = true\n\n"
                 + "[auth.anonymous]\nenabled = true\norg_name = Main Org.\norg_role = Viewer\n\n"
                 + "[users]\ndefault_theme = dark\n\n[dashboards]\nmin_refresh_interval = 1s\n";
@@ -343,22 +353,54 @@ public final class ManagedMonitoringStack implements AutoCloseable {
     private Path resolveExecutable(Path configured, String name) throws IOException {
         if (configured.isAbsolute() || configured.getNameCount() > 1) {
             Path normalized = configured.toAbsolutePath().normalize();
-            if (!Files.isExecutable(normalized)) {
+            if (!executable(normalized)) {
                 throw new IOException(name + " executable is not available: " + normalized);
             }
             return normalized;
         }
         for (String directory : System.getenv().getOrDefault("PATH", "").split(java.io.File.pathSeparator)) {
-            Path candidate = Path.of(directory).resolve(configured);
-            if (Files.isExecutable(candidate)) {
-                return candidate.toAbsolutePath().normalize();
+            for (String executableName : executableNames(configured.toString())) {
+                Path candidate = Path.of(directory).resolve(executableName);
+                if (executable(candidate)) {
+                    return candidate.toAbsolutePath().normalize();
+                }
             }
         }
         throw new IOException(name + " executable was not found on PATH: " + configured);
     }
 
     private String yaml(Path path) {
-        return path.toAbsolutePath().normalize().toString().replace("'", "''");
+        return portablePath(path).replace("'", "''");
+    }
+
+    private Path grafanaExecutable(Path home) {
+        for (String base : new String[] {"grafana", "grafana-server"}) {
+            for (String name : executableNames(base)) {
+                Path candidate = home.resolve("bin").resolve(name);
+                if (executable(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
+    }
+
+    private List<String> executableNames(String name) {
+        return platform.windows() && !name.toLowerCase(Locale.ROOT).endsWith(".exe")
+                ? List.of(name + ".exe", name) : List.of(name);
+    }
+
+    private boolean executable(Path path) {
+        return platform.windows() ? Files.isRegularFile(path) : Files.isExecutable(path);
+    }
+
+    private String executableBaseName(Path executable) {
+        String name = executable.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.endsWith(".exe") ? name.substring(0, name.length() - 4) : name;
+    }
+
+    private String portablePath(Path path) {
+        return path.toAbsolutePath().normalize().toString().replace('\\', '/');
     }
 
     private void stop(Process process) {
@@ -374,6 +416,17 @@ public final class ManagedMonitoringStack implements AutoCloseable {
         } catch (InterruptedException exception) {
             process.destroyForcibly();
             Thread.currentThread().interrupt();
+        }
+    }
+
+    private void removeOwnership(String component, Process process) {
+        if (process == null) {
+            return;
+        }
+        try {
+            processRegistry.remove(component, process.pid());
+        } catch (IOException exception) {
+            System.err.println("WARNING: Unable to update managed process ownership: " + exception.getMessage());
         }
     }
 

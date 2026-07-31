@@ -41,11 +41,16 @@ Prometheus and Grafana are native child processes, not Java threads or Maven lib
 exist as embeddable Java APIs. Java owns their configuration, startup, readiness, reconciliation, health, and
 shutdown. This preserves the exact Grafana dashboard behavior without containers.
 
-## Requirements
+## Supported platforms and requirements
 
 - JDK 25.x
 - Gradle 9.x (the wrapper provides Gradle 9.4.0)
 - Network access on the first run when Prometheus or Grafana is not already installed
+
+Automatic native installation is configured for Linux, macOS, and Windows on x86-64 and ARM64. The application
+normalizes JVM platform names to `linux-x86_64`, `linux-arm64`, `macos-x86_64`, `macos-arm64`,
+`windows-x86_64`, or `windows-arm64`, prints the selected platform, and fails before downloading on unsupported
+operating systems or processor architectures.
 
 The Gradle wrapper and generated application script select Java in this order:
 
@@ -57,11 +62,18 @@ The wrapper prints the selected Java source, Java version, and Gradle version be
 
 ## Automatic native monitoring installation
 
-No manual Prometheus or Grafana installation is required on the tested Linux x86-64 platform. Start with no
-arguments:
+No manual Prometheus or Grafana installation is required on a supported platform. Start with no arguments.
+
+Linux or macOS:
 
 ```bash
 build/install/sbk-dashboard/bin/sbk-dashboard
+```
+
+Windows:
+
+```bat
+build\install\sbk-dashboard\bin\sbk-dashboard.bat
 ```
 
 The server checks for `prometheus` on `PATH` and Grafana under `/usr/share/grafana`. If either is missing, it reads
@@ -73,7 +85,7 @@ byte-size progress; servers without a total content length display the downloade
 Default locations are:
 
 ```text
-~/.sbk-dashboard/downloads  # verified .tar.gz archives
+~/.sbk-dashboard/downloads  # verified .tar.gz or .zip archives
 ~/.sbk-dashboard/tools      # extracted Prometheus and Grafana distributions
 ```
 
@@ -89,21 +101,24 @@ The properties file specifies:
 ```properties
 download.directory=${data.directory}/downloads
 install.directory=${data.directory}/tools
-prometheus.download.url=https://...
-prometheus.download.file=prometheus-....tar.gz
-prometheus.download.sha256=...
-prometheus.archive.directory=prometheus-...
-prometheus.executable=prometheus
-grafana.download.url=https://...
-grafana.download.file=grafana-....tar.gz
-grafana.download.sha256=...
-grafana.archive.directory=grafana-...
-grafana.executable=bin/grafana
+prometheus.linux-x86_64.download.url=https://...
+prometheus.linux-x86_64.download.file=prometheus-....tar.gz
+prometheus.linux-x86_64.download.sha256=...
+prometheus.linux-x86_64.archive.directory=prometheus-...
+prometheus.linux-x86_64.executable=prometheus
+prometheus.linux-x86_64.archive.format=tar.gz
+
+prometheus.windows-x86_64.download.url=https://...
+prometheus.windows-x86_64.download.file=prometheus-....zip
+prometheus.windows-x86_64.download.sha256=...
+prometheus.windows-x86_64.archive.directory=prometheus-...
+prometheus.windows-x86_64.executable=prometheus.exe
+prometheus.windows-x86_64.archive.format=zip
 ```
 
+The packaged file contains corresponding Prometheus and Grafana entries for all six supported platform keys.
 `${data.directory}`, `${user.home}`, `${os.arch}`, and `${os.name}` placeholders are supported. Downloads must use
-HTTPS. For another operating system or CPU architecture, provide an external properties file containing the correct
-native release URLs, archive directories, and checksums.
+HTTPS. An external file can override any packaged property while retaining the remaining packaged defaults.
 
 ### Optional manual installation
 
@@ -151,7 +166,8 @@ not usable, the verified properties-based installation is used.
 The default is `-continue false`. Before starting its managed services, sbk-dashboard checks the actual listener
 owners on the configured Prometheus and Grafana ports. An existing process is stopped only when its executable is
 exactly `prometheus`, `grafana`, or `grafana-server`. Ownership for both ports is validated before either process is
-stopped. If an unrelated or unidentifiable process owns a port, startup fails safely and stops nothing.
+stopped. Listener discovery uses a cross-platform Java system-information library and persisted managed-child
+identity. If an unrelated or unidentifiable process owns a port, startup fails safely and stops nothing.
 
 ```bash
 sbk-dashboard -continue false
@@ -309,6 +325,7 @@ For a data directory `/var/lib/sbk-dashboard`:
 ├── targets.json
 ├── dashboard-mappings.json
 └── monitoring/
+    ├── managed-processes.json       # validated managed-child identity
     ├── prometheus/
     │   ├── prometheus.yml
     │   ├── targets.json
@@ -334,11 +351,12 @@ do not prevent `sbk-dashboard` from serving other dashboards.
 ./gradlew clean check installDist
 ```
 
-The automated suite covers option precedence, endpoint uniqueness/persistence, canonical dashboard packaging,
-endpoint scoping of all PromQL expressions, dynamic Prometheus discovery, dashboard reconciliation, UI inputs, and
-runtime link reporting.
+The automated suite covers all six platform mappings, TAR.GZ and ZIP extraction safety, Windows `.exe` selection,
+cross-platform listener ownership, option precedence, endpoint uniqueness/persistence, canonical dashboard
+packaging, endpoint scoping of all PromQL expressions, dynamic Prometheus discovery, dashboard reconciliation, UI
+inputs, and runtime link reporting.
 
-The end-to-end validation used:
+The native end-to-end validation executed on Linux x86-64 used:
 
 - JDK 25.0.2 and Gradle 9.4.0
 - the existing `/root/projects/SBK` build (SBK 10.4) with `PrometheusLogger`
@@ -349,3 +367,8 @@ The end-to-end validation used:
 It verified live endpoint-labelled samples in Prometheus, two distinct HTTP-200 Grafana URLs, all 53 panels per
 dashboard, endpoint scoping on every SBK PromQL expression, restart recovery, dynamic target updates, mapping
 persistence, and dashboard removal.
+
+Linux x86-64 additionally received a fresh-download test of every pinned archive, live progress, checksum
+verification, extraction, health checks, same-port process replacement, and managed ownership cleanup. macOS and
+Windows platform selection, archive metadata, ZIP safety, `.exe` handling, launch scripts, and distribution contents
+are covered automatically; their native binaries still require smoke testing on those operating systems.

@@ -18,7 +18,9 @@ package io.sbk.dashboard.service;
 
 import io.sbk.dashboard.config.MonitoringConfig;
 import io.sbk.dashboard.config.MonitoringDownloadConfig;
+import io.sbk.dashboard.config.MonitoringDownloadConfig.ArchiveFormat;
 import io.sbk.dashboard.config.MonitoringDownloadConfig.ToolArchive;
+import io.sbk.dashboard.config.RuntimePlatform;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -38,10 +40,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 
 /** Downloads and securely installs missing native Prometheus and Grafana distributions. */
@@ -78,7 +83,8 @@ public final class NativeToolBootstrap {
      */
     public MonitoringConfig resolve(MonitoringConfig configured, MonitoringDownloadConfig downloads)
             throws IOException, InterruptedException {
-        Path prometheus = findExecutable(configured.prometheusBinary());
+        System.out.println("Native platform: " + downloads.platform().id());
+        Path prometheus = findExecutable(configured.prometheusBinary(), downloads.platform());
         if (prometheus == null) {
             System.out.println("Prometheus is not installed at " + configured.prometheusBinary()
                     + "; bootstrapping from properties");
@@ -88,7 +94,7 @@ public final class NativeToolBootstrap {
         }
 
         Path grafanaHome = configured.grafanaHome().toAbsolutePath().normalize();
-        if (grafanaExecutable(grafanaHome) == null) {
+        if (grafanaExecutable(grafanaHome, downloads.platform()) == null) {
             System.out.println("Grafana is not installed under " + grafanaHome
                     + "; bootstrapping from properties");
             Path executable = install("Grafana", downloads, downloads.grafana());
@@ -106,7 +112,7 @@ public final class NativeToolBootstrap {
         if (!executable.startsWith(home)) {
             throw new IOException(name + " executable escapes its installation directory");
         }
-        if (Files.isExecutable(executable)) {
+        if (executable(executable, config.platform())) {
             System.out.println("Using cached " + name + ": " + executable);
             return executable;
         }
@@ -122,7 +128,7 @@ public final class NativeToolBootstrap {
             throw new IOException(name + " archive SHA-256 verification failed: " + archive);
         }
         installArchive(name, archive, config.installDirectory(), tool);
-        if (!Files.isExecutable(executable)) {
+        if (!executable(executable, config.platform())) {
             throw new IOException(name + " executable is missing after extraction: " + executable);
         }
         System.out.println(name + " installed at " + home);
@@ -177,7 +183,7 @@ public final class NativeToolBootstrap {
         Files.createDirectories(installDirectory);
         Path extraction = Files.createTempDirectory(installDirectory, ".extract-");
         try {
-            extractTarGzip(archive, extraction);
+            extract(archive, extraction, tool.format());
             Path extractedHome = extraction.resolve(tool.archiveDirectory()).normalize();
             if (!Files.isDirectory(extractedHome)) {
                 throw new IOException(name + " archive does not contain " + tool.archiveDirectory());
@@ -195,16 +201,21 @@ public final class NativeToolBootstrap {
         }
     }
 
+    private void extract(Path archive, Path destination, ArchiveFormat format) throws IOException {
+        if (format == ArchiveFormat.TAR_GZ) {
+            extractTarGzip(archive, destination);
+        } else {
+            extractZip(archive, destination);
+        }
+    }
+
     private void extractTarGzip(Path archive, Path destination) throws IOException {
         try (InputStream file = new BufferedInputStream(Files.newInputStream(archive));
              GzipCompressorInputStream gzip = new GzipCompressorInputStream(file);
              TarArchiveInputStream tar = new TarArchiveInputStream(gzip)) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
-                Path target = destination.resolve(entry.getName()).normalize();
-                if (!target.startsWith(destination)) {
-                    throw new IOException("Archive entry escapes extraction directory: " + entry.getName());
-                }
+                Path target = safeTarget(destination, entry.getName());
                 if (entry.isSymbolicLink() || entry.isLink()) {
                     throw new IOException("Archive links are not supported: " + entry.getName());
                 }
@@ -213,36 +224,85 @@ public final class NativeToolBootstrap {
                 } else if (entry.isFile()) {
                     Files.createDirectories(target.getParent());
                     Files.copy(tar, target, StandardCopyOption.REPLACE_EXISTING);
-                    if ((entry.getMode() & 0111) != 0 && !target.toFile().setExecutable(true, false)) {
-                        throw new IOException("Unable to mark executable: " + target);
+                    if ((entry.getMode() & 0111) != 0) {
+                        markExecutable(target);
                     }
                 }
             }
         }
     }
 
-    private Path findExecutable(Path configured) {
+    private void extractZip(Path archive, Path destination) throws IOException {
+        try (InputStream file = new BufferedInputStream(Files.newInputStream(archive));
+             ZipArchiveInputStream zip = new ZipArchiveInputStream(file)) {
+            ZipArchiveEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                Path target = safeTarget(destination, entry.getName());
+                if (entry.isUnixSymlink()) {
+                    throw new IOException("Archive links are not supported: " + entry.getName());
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(target);
+                } else {
+                    Files.createDirectories(target.getParent());
+                    Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+                    if ((entry.getUnixMode() & 0111) != 0) {
+                        markExecutable(target);
+                    }
+                }
+            }
+        }
+    }
+
+    private Path safeTarget(Path destination, String entry) throws IOException {
+        Path target = destination.resolve(entry.replace('\\', '/')).normalize();
+        if (!target.startsWith(destination)) {
+            throw new IOException("Archive entry escapes extraction directory: " + entry);
+        }
+        return target;
+    }
+
+    private void markExecutable(Path target) throws IOException {
+        if (!RuntimePlatform.current().windows() && !target.toFile().setExecutable(true, false)) {
+            throw new IOException("Unable to mark executable: " + target);
+        }
+    }
+
+    private Path findExecutable(Path configured, RuntimePlatform platform) {
         if (configured.isAbsolute() || configured.getNameCount() > 1) {
             Path normalized = configured.toAbsolutePath().normalize();
-            return Files.isExecutable(normalized) ? normalized : null;
+            return executable(normalized, platform) ? normalized : null;
         }
         for (String directory : System.getenv().getOrDefault("PATH", "").split(java.io.File.pathSeparator)) {
-            Path candidate = Path.of(directory).resolve(configured);
-            if (Files.isExecutable(candidate)) {
-                return candidate.toAbsolutePath().normalize();
+            for (String name : executableNames(configured.toString(), platform)) {
+                Path candidate = Path.of(directory).resolve(name);
+                if (executable(candidate, platform)) {
+                    return candidate.toAbsolutePath().normalize();
+                }
             }
         }
         return null;
     }
 
-    private Path grafanaExecutable(Path home) {
+    private Path grafanaExecutable(Path home, RuntimePlatform platform) {
         for (String name : new String[] {"grafana", "grafana-server"}) {
-            Path candidate = home.resolve("bin").resolve(name);
-            if (Files.isExecutable(candidate)) {
-                return candidate;
+            for (String executableName : executableNames(name, platform)) {
+                Path candidate = home.resolve("bin").resolve(executableName);
+                if (executable(candidate, platform)) {
+                    return candidate;
+                }
             }
         }
         return null;
+    }
+
+    private List<String> executableNames(String name, RuntimePlatform platform) {
+        return platform.windows() && !name.toLowerCase(Locale.ROOT).endsWith(".exe")
+                ? List.of(name + ".exe", name) : List.of(name);
+    }
+
+    private boolean executable(Path path, RuntimePlatform platform) {
+        return platform.windows() ? Files.isRegularFile(path) : Files.isExecutable(path);
     }
 
     private String checksum(Path path) throws IOException {

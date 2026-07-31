@@ -40,6 +40,8 @@ dependencies {
     implementation "commons-cli:commons-cli:${commonsCliVersion}"
     implementation "org.apache.commons:commons-compress:${commonsCompressVersion}"
     implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+    implementation "com.github.oshi:oshi-core:${oshiVersion}"
+    runtimeOnly "org.slf4j:slf4j-nop:${slf4jVersion}"
 
     testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -53,7 +55,8 @@ application {
             '-XX:+UseCompactObjectHeaders',
             '-XX:MaxRAMPercentage=50.0',
             '-XX:+DisableExplicitGC',
-            '-XX:+ExitOnOutOfMemoryError'
+            '-XX:+ExitOnOutOfMemoryError',
+            '--enable-native-access=ALL-UNNAMED'
     ]
 }
 
@@ -119,6 +122,7 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
     maxParallelForks = 1
     minHeapSize = '128m'
     maxHeapSize = '512m'
