@@ -67,7 +67,8 @@ build/install/sbk-dashboard/bin/sbk-dashboard
 The server checks for `prometheus` on `PATH` and Grafana under `/usr/share/grafana`. If either is missing, it reads
 [`config/monitoring-download.properties`](config/monitoring-download.properties), downloads the pinned archive,
 verifies its SHA-256 checksum before extraction, and installs it under the dashboard data directory. A successful
-archive is cached, so subsequent starts do not download it again.
+archive is cached, so subsequent starts do not download it again. First-time downloads display live percentage and
+byte-size progress; servers without a total content length display the downloaded byte count instead.
 
 Default locations are:
 

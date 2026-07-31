@@ -22,6 +22,8 @@ import io.sbk.dashboard.config.MonitoringDownloadConfig.ToolArchive;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -36,6 +38,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.stream.Stream;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
@@ -44,16 +47,24 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 /** Downloads and securely installs missing native Prometheus and Grafana distributions. */
 public final class NativeToolBootstrap {
     private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes(15);
+    private static final Duration PROGRESS_INTERVAL = Duration.ofSeconds(1);
+    private static final int PROGRESS_BUCKETS = 20;
     private final HttpClient httpClient;
+    private final PrintStream output;
 
     /** Creates a bootstrapper that follows release-download redirects. */
     public NativeToolBootstrap() {
         this(HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL)
-                .connectTimeout(Duration.ofSeconds(20)).build());
+                .connectTimeout(Duration.ofSeconds(20)).build(), System.out);
     }
 
     NativeToolBootstrap(HttpClient httpClient) {
+        this(httpClient, System.out);
+    }
+
+    NativeToolBootstrap(HttpClient httpClient, PrintStream output) {
         this.httpClient = httpClient;
+        this.output = output;
     }
 
     /**
@@ -125,9 +136,13 @@ public final class NativeToolBootstrap {
         System.out.println("Download destination: " + destination);
         try {
             HttpRequest request = HttpRequest.newBuilder(tool.url()).timeout(DOWNLOAD_TIMEOUT).GET().build();
-            HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(temporary));
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IOException(name + " download returned HTTP " + response.statusCode());
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream input = response.body()) {
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    throw new IOException(name + " download returned HTTP " + response.statusCode());
+                }
+                long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+                copyWithProgress(name, input, temporary, contentLength);
             }
             String actual = checksum(temporary);
             if (!actual.equals(tool.sha256())) {
@@ -139,6 +154,23 @@ public final class NativeToolBootstrap {
             Files.deleteIfExists(temporary);
         }
         System.out.println(name + " download verified successfully");
+    }
+
+    private void copyWithProgress(String name, InputStream input, Path destination, long contentLength)
+            throws IOException {
+        DownloadProgress progress = new DownloadProgress(name, contentLength, output);
+        byte[] buffer = new byte[64 * 1024];
+        try (OutputStream file = Files.newOutputStream(destination)) {
+            int count;
+            while ((count = input.read(buffer)) >= 0) {
+                if (count > 0) {
+                    file.write(buffer, 0, count);
+                    progress.add(count);
+                }
+            }
+        } finally {
+            progress.complete();
+        }
     }
 
     void installArchive(String name, Path archive, Path installDirectory, ToolArchive tool) throws IOException {
@@ -250,6 +282,68 @@ public final class NativeToolBootstrap {
             for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
                 Files.deleteIfExists(path);
             }
+        }
+    }
+
+    private static final class DownloadProgress {
+        private final String name;
+        private final long total;
+        private final PrintStream output;
+        private long downloaded;
+        private long lastUpdate = System.nanoTime();
+        private int lastBucket;
+
+        private DownloadProgress(String name, long total, PrintStream output) {
+            this.name = name;
+            this.total = total;
+            this.output = output;
+            show(false);
+        }
+
+        private void add(int count) {
+            downloaded += count;
+            long now = System.nanoTime();
+            int bucket = total > 0 ? (int) Math.min(PROGRESS_BUCKETS,
+                    (double) downloaded * PROGRESS_BUCKETS / total) : 0;
+            if (bucket > lastBucket || now - lastUpdate >= PROGRESS_INTERVAL.toNanos()) {
+                lastBucket = bucket;
+                lastUpdate = now;
+                show(false);
+            }
+        }
+
+        private void complete() {
+            show(true);
+        }
+
+        private void show(boolean complete) {
+            String progress;
+            if (total > 0) {
+                double percentage = Math.min(100.0, downloaded * 100.0 / total);
+                progress = String.format(Locale.ROOT, "%.1f%% (%s / %s)", percentage,
+                        formatBytes(downloaded), formatBytes(total));
+            } else {
+                progress = formatBytes(downloaded) + " downloaded";
+            }
+            output.print('\r' + name + " download progress: " + progress);
+            if (complete) {
+                output.println();
+            }
+            output.flush();
+        }
+
+        private static String formatBytes(long bytes) {
+            if (bytes < 1024) {
+                return bytes + " B";
+            }
+            String[] units = {"KiB", "MiB", "GiB", "TiB"};
+            double value = bytes;
+            int unit = -1;
+            do {
+                value /= 1024;
+                unit++;
+            } while (value >= 1024 && unit < units.length - 1);
+            return String.format(Locale.ROOT, "%.1f %s", value, units[unit]);
         }
     }
 }

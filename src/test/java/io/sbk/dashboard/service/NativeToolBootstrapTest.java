@@ -13,9 +13,13 @@ import com.sun.net.httpserver.HttpServer;
 import io.sbk.dashboard.config.MonitoringConfig;
 import io.sbk.dashboard.config.MonitoringDownloadConfig;
 import io.sbk.dashboard.config.MonitoringDownloadConfig.ToolArchive;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -61,7 +65,9 @@ class NativeToolBootstrapTest {
                     temporaryDirectory.resolve("missing-grafana"), 9090, 3000,
                     URI.create("http://localhost:3000"));
 
-            NativeToolBootstrap bootstrap = new NativeToolBootstrap();
+            ByteArrayOutputStream progress = new ByteArrayOutputStream();
+            NativeToolBootstrap bootstrap = new NativeToolBootstrap(HttpClient.newHttpClient(),
+                    new PrintStream(progress, true, StandardCharsets.UTF_8));
             MonitoringConfig resolved = bootstrap.resolve(requested, downloads);
             MonitoringConfig cached = bootstrap.resolve(resolved, downloads);
 
@@ -69,6 +75,9 @@ class NativeToolBootstrapTest {
             assertTrue(Files.isExecutable(resolved.grafanaHome().resolve("bin/grafana")));
             assertEquals(resolved, cached);
             assertEquals(1, requests.get());
+            String progressText = progress.toString(StandardCharsets.UTF_8);
+            assertTrue(progressText.contains("Prometheus download progress: 0.0%"));
+            assertTrue(progressText.contains("Prometheus download progress: 100.0%"));
         } finally {
             server.stop(0);
         }
@@ -101,7 +110,7 @@ class NativeToolBootstrapTest {
     }
 
     private void addFile(TarArchiveOutputStream tar, String name, String value) throws IOException {
-        byte[] content = value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] content = value.getBytes(StandardCharsets.UTF_8);
         TarArchiveEntry entry = new TarArchiveEntry(name);
         entry.setMode(0755);
         entry.setSize(content.length);
