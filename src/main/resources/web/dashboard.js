@@ -116,7 +116,7 @@ async function loadTarget() {
     const target = (await response.json()).find(item => item.id === targetId);
     if (!target) throw new Error('Endpoint not found');
     document.title = `${target.name} · SBK Dashboard`;
-    document.querySelector('#kind').textContent = `${target.kind} · DEDICATED ENDPOINT`;
+    document.querySelector('#kind').textContent = 'DEDICATED ENDPOINT';
     document.querySelector('#name').textContent = target.name;
     document.querySelector('#address').textContent = `${target.host}:${target.port}${target.metricsPath}`;
 }

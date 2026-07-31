@@ -13,8 +13,6 @@ function element(tag, className, text) {
 
 function renderTarget(target) {
     const card = element('article', 'target-card');
-    card.append(element('div', 'kind', target.kind));
-
     const details = element('div');
     details.append(element('h3', null, target.name));
     const endpoint = element('div', 'endpoint', `${target.host}:${target.port}${target.metricsPath}`);
@@ -71,7 +69,6 @@ form.addEventListener('submit', async event => {
         name: values.get('name'),
         host: values.get('host'),
         port: Number(values.get('port')),
-        kind: values.get('kind'),
         metricsPath: values.get('metricsPath')
     };
     try {
@@ -84,7 +81,7 @@ form.addEventListener('submit', async event => {
         if (!response.ok) throw new Error(body.error || 'Unable to register endpoint');
         form.elements.name.value = '';
         form.elements.host.value = '';
-        message.textContent = 'Endpoint registered. Grafana will discover its dashboard shortly.';
+        message.textContent = 'Endpoint registered. Its dedicated dashboard is ready.';
         await loadTargets();
     } catch (error) {
         message.textContent = error.message;
@@ -93,9 +90,6 @@ form.addEventListener('submit', async event => {
     }
 });
 
-form.elements.kind.addEventListener('change', event => {
-    form.elements.port.value = event.target.value === 'SBM' ? '9719' : '9718';
-});
 document.querySelector('#refresh').addEventListener('click', loadTargets);
 loadTargets();
 window.setInterval(loadTargets, 10000);

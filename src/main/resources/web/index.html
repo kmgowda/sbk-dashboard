@@ -23,7 +23,7 @@
         <div>
             <p class="eyebrow">STORAGE BENCHMARK OBSERVABILITY</p>
             <h1>Every benchmark.<br><em>One clear signal.</em></h1>
-            <p class="hero-copy">Register SBK and SBM Prometheus endpoints. Each one receives an isolated,
+            <p class="hero-copy">Register Prometheus metric endpoints. Each one receives an isolated,
                 live dedicated dashboard for throughput, latency, connections, and workload health.</p>
         </div>
         <div class="hero-stat">
@@ -42,10 +42,7 @@
             <form id="target-form">
                 <label>Display name<input name="name" maxlength="100" placeholder="NVMe endurance run"></label>
                 <label>Host or IP<input name="host" required placeholder="benchmark-01.internal"></label>
-                <div class="form-row">
-                    <label>Port<input name="port" required type="number" min="1" max="65535" value="9718"></label>
-                    <label>Producer<select name="kind"><option value="SBK">SBK</option><option value="SBM">SBM</option></select></label>
-                </div>
+                <label>Port<input name="port" required type="number" min="1" max="65535" value="9718"></label>
                 <label>Metrics path<input name="metricsPath" required value="/metrics"></label>
                 <button type="submit"><span>Register endpoint</span><b aria-hidden="true">→</b></button>
                 <p id="form-message" role="status"></p>
@@ -63,7 +60,7 @@
             <div id="empty-state" class="empty-state">
                 <div class="radar"><i></i><i></i><i></i></div>
                 <h3>No endpoints registered</h3>
-                <p>Add your first SBK or SBM exporter to create its dedicated dashboard.</p>
+                <p>Add your first metrics exporter to create its dedicated dashboard.</p>
             </div>
         </section>
     </section>

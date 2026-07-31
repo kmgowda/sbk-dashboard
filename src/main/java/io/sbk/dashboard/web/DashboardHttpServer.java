@@ -20,7 +20,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.sbk.dashboard.config.DashboardConfig;
-import io.sbk.dashboard.model.BenchmarkKind;
 import io.sbk.dashboard.model.BenchmarkTarget;
 import io.sbk.dashboard.model.EndpointSnapshot;
 import io.sbk.dashboard.model.TargetStatus;
@@ -116,7 +115,7 @@ public final class DashboardHttpServer implements AutoCloseable {
         requireMethod(exchange, "POST");
         CreateTargetRequest request = readJson(exchange, CreateTargetRequest.class);
         BenchmarkTarget target = registry.register(request.name(), request.host(), request.port(),
-                request.metricsPath(), request.kind());
+                request.metricsPath());
         scraper.register(target);
         json(exchange, 201, view(target));
     }
@@ -182,7 +181,7 @@ public final class DashboardHttpServer implements AutoCloseable {
         TargetStatus status = scraper.status(target.id());
         String dashboardUrl = "/dashboard.html?id=" + target.id();
         return new TargetView(target.id(), target.name(), target.host(), target.port(), target.metricsPath(),
-                target.kind(), target.createdAt(), status, dashboardUrl);
+                target.createdAt(), status, dashboardUrl);
     }
 
     private <T> T readJson(HttpExchange exchange, Class<T> type) throws IOException {
@@ -238,9 +237,9 @@ public final class DashboardHttpServer implements AutoCloseable {
         return 240;
     }
 
-    private record CreateTargetRequest(String name, String host, int port, String metricsPath, BenchmarkKind kind) { }
+    private record CreateTargetRequest(String name, String host, int port, String metricsPath) { }
 
-    private record TargetView(String id, String name, String host, int port, String metricsPath, BenchmarkKind kind,
+    private record TargetView(String id, String name, String host, int port, String metricsPath,
                               String createdAt, TargetStatus status, String dashboardUrl) { }
 
     private static final class MethodNotAllowedException extends RuntimeException {

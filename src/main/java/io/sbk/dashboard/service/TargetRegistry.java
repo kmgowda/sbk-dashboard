@@ -72,6 +72,20 @@ public final class TargetRegistry {
     }
 
     /**
+     * Registers an endpoint without requiring producer classification.
+     *
+     * @param name user-facing name
+     * @param host DNS name, IPv4 address, or IPv6 address
+     * @param port Prometheus exporter port
+     * @param metricsPath HTTP metrics path
+     * @return new endpoint
+     * @throws IOException when state cannot be persisted
+     */
+    public BenchmarkTarget register(String name, String host, int port, String metricsPath) throws IOException {
+        return register(name, host, port, metricsPath, null);
+    }
+
+    /**
      * Registers a unique host and port pair.
      *
      * @param name user-facing name

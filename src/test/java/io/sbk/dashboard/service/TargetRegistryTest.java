@@ -34,6 +34,17 @@ class TargetRegistryTest {
         assertEquals(1, reloaded.list().size());
     }
 
+    /** Verifies producer classification is not required for registration. */
+    @Test
+    void registersWithoutProducerClassification() throws Exception {
+        TargetRegistry registry = new TargetRegistry(config());
+
+        BenchmarkTarget target = registry.register("Unclassified run", "bench.example", 9719, "/metrics");
+
+        assertEquals("bench.example", target.host());
+        assertEquals(9719, target.port());
+    }
+
     /** Verifies host and port are the uniqueness boundary. */
     @Test
     void rejectsDuplicateAddress() throws Exception {

@@ -134,10 +134,12 @@ curl -X POST http://localhost:9721/api/targets \
     "name": "NVMe write run",
     "host": "benchmark-01.internal",
     "port": 9718,
-    "metricsPath": "/metrics",
-    "kind": "SBK"
+    "metricsPath": "/metrics"
   }'
 ```
+
+Producer classification is not required. The same registration fields work for either exporter; the landing page
+retains `SBK :9718` and `SBM :9719` only as convenient default-port guidance.
 
 Other endpoints:
 
