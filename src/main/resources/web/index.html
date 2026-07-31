@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07111f">
+    <title>SBK Dashboard</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="ambient ambient-one"></div>
+<div class="ambient ambient-two"></div>
+<header class="topbar">
+    <a class="brand" href="/" aria-label="SBK Dashboard home">
+        <span class="brand-mark">S</span>
+        <span><strong>SBK</strong><small>performance control plane</small></span>
+    </a>
+    <div class="server-state"><i></i> Server online</div>
+</header>
+
+<main>
+    <section class="hero">
+        <div>
+            <p class="eyebrow">STORAGE BENCHMARK OBSERVABILITY</p>
+            <h1>Every benchmark.<br><em>One clear signal.</em></h1>
+            <p class="hero-copy">Register SBK and SBM Prometheus endpoints. Each one receives an isolated,
+                live dedicated dashboard for throughput, latency, connections, and workload health.</p>
+        </div>
+        <div class="hero-stat">
+            <span id="target-count">0</span>
+            <p>managed endpoints</p>
+            <div class="pulse-line"><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
+        </div>
+    </section>
+
+    <section class="workspace">
+        <aside class="register-panel">
+            <div class="section-heading">
+                <span>01</span>
+                <div><h2>Add an endpoint</h2><p>Prometheus exporter address</p></div>
+            </div>
+            <form id="target-form">
+                <label>Display name<input name="name" maxlength="100" placeholder="NVMe endurance run"></label>
+                <label>Host or IP<input name="host" required placeholder="benchmark-01.internal"></label>
+                <div class="form-row">
+                    <label>Port<input name="port" required type="number" min="1" max="65535" value="9718"></label>
+                    <label>Producer<select name="kind"><option value="SBK">SBK</option><option value="SBM">SBM</option></select></label>
+                </div>
+                <label>Metrics path<input name="metricsPath" required value="/metrics"></label>
+                <button type="submit"><span>Register endpoint</span><b aria-hidden="true">→</b></button>
+                <p id="form-message" role="status"></p>
+            </form>
+            <div class="hint"><b>Defaults</b><span>SBK :9718</span><span>SBM :9719</span></div>
+        </aside>
+
+        <section class="targets-panel">
+            <div class="section-heading list-heading">
+                <span>02</span>
+                <div><h2>Benchmark dashboards</h2><p>Live endpoint inventory</p></div>
+                <button id="refresh" class="icon-button" title="Refresh endpoints" aria-label="Refresh endpoints">↻</button>
+            </div>
+            <div id="targets" class="target-list" aria-live="polite"></div>
+            <div id="empty-state" class="empty-state">
+                <div class="radar"><i></i><i></i><i></i></div>
+                <h3>No endpoints registered</h3>
+                <p>Add your first SBK or SBM exporter to create its dedicated dashboard.</p>
+            </div>
+        </section>
+    </section>
+</main>
+
+<footer><span>SBK Dashboard</span><span>Embedded Java metrics engine</span><span>Authentication disabled</span></footer>
+<script src="/app.js" defer></script>
+</body>
+</html>

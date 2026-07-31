@@ -1,0 +1,6 @@
+/**
+ * Copyright (c) KMG. All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0.
+ */
+
+rootProject.name = 'sbk-dashboard'

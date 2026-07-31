@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#07111f">
+    <title>Benchmark · SBK Dashboard</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body class="dashboard-page">
+<div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+<header class="topbar">
+    <a class="brand" href="/"><span class="brand-mark">S</span><span><strong>SBK</strong><small>dedicated benchmark dashboard</small></span></a>
+    <a class="back-link" href="/">← Endpoint inventory</a>
+</header>
+<main>
+    <section class="dashboard-hero">
+        <div><p class="eyebrow" id="kind">BENCHMARK ENDPOINT</p><h1 id="name">Loading…</h1>
+            <p class="hero-copy" id="address"></p></div>
+        <div class="live-state"><span id="status" class="status pending">pending</span><small id="updated">Waiting for first scrape</small></div>
+    </section>
+    <section id="summary" class="summary-grid"></section>
+    <div class="dashboard-heading"><div><p class="eyebrow">LIVE TIME SERIES</p><h2>Performance signals</h2></div><span>Auto-refresh · 5 seconds</span></div>
+    <section id="charts" class="chart-grid"></section>
+    <section class="metrics-table-panel">
+        <div class="dashboard-heading"><div><p class="eyebrow">COMPLETE EXPORT</p><h2>Latest metric values</h2></div><span id="metric-count">0 series</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Metric</th><th>Labels</th><th>Current</th><th>Minimum</th><th>Maximum</th></tr></thead><tbody id="metrics"></tbody></table></div>
+    </section>
+    <div id="dashboard-message" class="dashboard-message" role="status"></div>
+</main>
+<footer><span>In-JVM collection</span><span id="retention">Rolling history</span><span>No external processes</span></footer>
+<script src="/dashboard.js" defer></script>
+</body>
+</html>

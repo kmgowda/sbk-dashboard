@@ -1,0 +1,127 @@
+/**
+ * Copyright (c) KMG. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+plugins {
+    id 'application'
+    id 'checkstyle'
+    id 'jacoco'
+    id 'java'
+}
+
+group = 'io.github.kmgowda.sbk'
+version = dashboardVersion
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(Integer.parseInt(javaVersion))
+    }
+    sourceCompatibility = JavaVersion.toVersion(javaVersion)
+    targetCompatibility = JavaVersion.toVersion(javaVersion)
+}
+
+dependencies {
+    implementation "commons-cli:commons-cli:${commonsCliVersion}"
+    implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+application {
+    mainClass = 'io.sbk.dashboard.SbkDashboardMain'
+    applicationName = 'sbk-dashboard'
+    applicationDefaultJvmArgs = [
+            '-XX:+UseZGC',
+            '-XX:+UseCompactObjectHeaders',
+            '-XX:MaxRAMPercentage=50.0',
+            '-XX:+DisableExplicitGC',
+            '-XX:+ExitOnOutOfMemoryError'
+    ]
+}
+
+tasks.named('startScripts') {
+    doLast {
+        String unixMarker = '# Determine the Java command to use to start the JVM.'
+        String unixJavaHome = '''# Prefer the SBK-specific JDK setting over generic Java discovery.
+if [ -n "$SBK_JAVA_HOME" ] ; then
+    JAVA_HOME=$SBK_JAVA_HOME
+    export JAVA_HOME
+fi
+
+'''
+        String unixText = unixScript.getText('UTF-8')
+        if (!unixText.contains(unixMarker)) {
+            throw new GradleException('Unable to add SBK_JAVA_HOME support to Unix start script')
+        }
+        unixScript.setText(unixText.replace(unixMarker, unixJavaHome + unixMarker), 'UTF-8')
+
+        String windowsMarker = '@rem Find java.exe'
+        String windowsJavaHome = '''@rem Prefer the SBK-specific JDK setting over generic Java discovery.
+if defined SBK_JAVA_HOME set JAVA_HOME=%SBK_JAVA_HOME%
+
+'''
+        String windowsText = windowsScript.getText('UTF-8')
+        if (!windowsText.contains(windowsMarker)) {
+            throw new GradleException('Unable to add SBK_JAVA_HOME support to Windows start script')
+        }
+        windowsScript.setText(windowsText.replace(windowsMarker,
+                windowsJavaHome + windowsMarker), 'UTF-8')
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs.addAll([
+            '-Xlint:deprecation',
+            '-Xlint:divzero',
+            '-Xlint:empty',
+            '-Xlint:fallthrough',
+            '-Xlint:finally',
+            '-Xlint:overrides',
+            '-Xlint:path'
+    ])
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    maxParallelForks = 1
+    minHeapSize = '128m'
+    maxHeapSize = '512m'
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat = 'full'
+    }
+}
+
+checkstyle {
+    toolVersion = checkstyleToolVersion
+    configDirectory = file("${rootDir}/checkstyle")
+    configFile = file("${rootDir}/checkstyle/checkstyle.xml")
+}
+
+jacocoTestReport {
+    dependsOn test
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
+check.dependsOn jacocoTestReport
