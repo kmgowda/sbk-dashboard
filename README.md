@@ -145,6 +145,29 @@ build/install/sbk-dashboard/bin/sbk-dashboard
 Supplying `-prometheus-bin` and `-grafana-home` still selects an existing manual installation. If those locations are
 not usable, the verified properties-based installation is used.
 
+### Existing-process behavior
+
+The default is `-continue false`. Before starting its managed services, sbk-dashboard checks the actual listener
+owners on the configured Prometheus and Grafana ports. An existing process is stopped only when its executable is
+exactly `prometheus`, `grafana`, or `grafana-server`. Ownership for both ports is validated before either process is
+stopped. If an unrelated or unidentifiable process owns a port, startup fails safely and stops nothing.
+
+```bash
+sbk-dashboard -continue false
+```
+
+Use continue mode when healthy compatible Prometheus and Grafana processes are already running on the configured
+ports:
+
+```bash
+sbk-dashboard -continue true
+```
+
+In continue mode, sbk-dashboard attaches through their health endpoints and starts only a missing component. Attached
+processes are not terminated when sbk-dashboard exits. Existing services must already use configuration compatible
+with this dashboard's Prometheus discovery and Grafana provisioning directories; the usual case is processes left
+running by the same sbk-dashboard data directory.
+
 Defaults:
 
 - SBK Dashboard: `http://localhost:9721/`
@@ -182,6 +205,7 @@ build/install/sbk-dashboard/bin/sbk-dashboard \
 -h, --help                    Show help and exit
 -port <port>                  Registration server port (default 9721)
 -auth <true|false>            Must be false in this release
+-continue <true|false>        Reuse healthy existing monitoring processes (default false)
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus TSDB retention days (default 7)
 -prometheus-bin <path>        Prometheus executable (default: PATH, then automatic download)

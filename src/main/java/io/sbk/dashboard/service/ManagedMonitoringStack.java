@@ -53,6 +53,8 @@ public final class ManagedMonitoringStack implements AutoCloseable {
     private volatile List<BenchmarkTarget> targets = List.of();
     private Process prometheusProcess;
     private Process grafanaProcess;
+    private boolean prometheusAttached;
+    private boolean grafanaAttached;
 
     /**
      * Prepares configuration, starts both native servers, and reconciles registered endpoints.
@@ -60,11 +62,13 @@ public final class ManagedMonitoringStack implements AutoCloseable {
      * @param dashboardConfig dashboard runtime configuration
      * @param monitoringConfig native monitoring configuration
      * @param initialTargets persisted endpoints
+     * @param continueExisting attach to compatible services already using the configured ports
      * @throws IOException when configuration or processes cannot be initialized
      * @throws InterruptedException when startup is interrupted
      */
     public ManagedMonitoringStack(DashboardConfig dashboardConfig, MonitoringConfig monitoringConfig,
-                                  List<BenchmarkTarget> initialTargets) throws IOException, InterruptedException {
+                                  List<BenchmarkTarget> initialTargets, boolean continueExisting)
+            throws IOException, InterruptedException {
         this.dashboardConfig = dashboardConfig;
         this.monitoringConfig = monitoringConfig;
         this.runtimeDirectory = dashboardConfig.dataDirectory().resolve("monitoring");
@@ -75,12 +79,28 @@ public final class ManagedMonitoringStack implements AutoCloseable {
         prepareConfiguration();
         reconcile(initialTargets);
         try {
-            prometheusProcess = startPrometheus();
-            awaitReady("Prometheus", prometheusProcess,
-                    URI.create("http://127.0.0.1:" + monitoringConfig.prometheusPort() + "/-/ready"));
-            grafanaProcess = startGrafana();
-            awaitReady("Grafana", grafanaProcess,
-                    URI.create("http://127.0.0.1:" + monitoringConfig.grafanaPort() + "/api/health"));
+            if (!continueExisting) {
+                PortProcessManager.terminateExisting(monitoringConfig.prometheusPort(),
+                        monitoringConfig.grafanaPort());
+            }
+            URI prometheusHealth = prometheusHealth();
+            if (continueExisting && ready(prometheusHealth)) {
+                prometheusAttached = true;
+                System.out.println("Continuing existing Prometheus on port " + monitoringConfig.prometheusPort());
+            } else {
+                requireAvailableWhenContinuing("Prometheus", monitoringConfig.prometheusPort(), continueExisting);
+                prometheusProcess = startPrometheus();
+                awaitReady("Prometheus", prometheusProcess, prometheusHealth);
+            }
+            URI grafanaHealth = grafanaHealth();
+            if (continueExisting && ready(grafanaHealth)) {
+                grafanaAttached = true;
+                System.out.println("Continuing existing Grafana on port " + monitoringConfig.grafanaPort());
+            } else {
+                requireAvailableWhenContinuing("Grafana", monitoringConfig.grafanaPort(), continueExisting);
+                grafanaProcess = startGrafana();
+                awaitReady("Grafana", grafanaProcess, grafanaHealth);
+            }
         } catch (IOException | InterruptedException exception) {
             close();
             throw exception;
@@ -114,8 +134,8 @@ public final class ManagedMonitoringStack implements AutoCloseable {
 
     /** Returns whether both managed native processes are alive. */
     public boolean healthy() {
-        return prometheusProcess != null && prometheusProcess.isAlive()
-                && grafanaProcess != null && grafanaProcess.isAlive();
+        return componentHealthy(prometheusProcess, prometheusAttached, prometheusHealth())
+                && componentHealthy(grafanaProcess, grafanaAttached, grafanaHealth());
     }
 
     /** Stops monitoring and both managed native processes. */
@@ -206,6 +226,38 @@ public final class ManagedMonitoringStack implements AutoCloseable {
             Thread.sleep(250);
         }
         throw new IOException(name + " did not become ready within " + STARTUP_TIMEOUT.toSeconds() + " seconds");
+    }
+
+    private boolean ready(URI health) {
+        try {
+            HttpResponse<Void> response = httpClient.send(HttpRequest.newBuilder(health)
+                    .timeout(Duration.ofSeconds(2)).GET().build(), HttpResponse.BodyHandlers.discarding());
+            return response.statusCode() >= 200 && response.statusCode() < 300;
+        } catch (IOException exception) {
+            return false;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private boolean componentHealthy(Process process, boolean attached, URI health) {
+        return attached ? ready(health) : process != null && process.isAlive();
+    }
+
+    private void requireAvailableWhenContinuing(String name, int port, boolean continueExisting) throws IOException {
+        if (continueExisting && !PortProcessManager.available(port)) {
+            throw new IOException("Port " + port + " is occupied but does not expose a healthy " + name
+                    + " service; -continue true cannot attach to it");
+        }
+    }
+
+    private URI prometheusHealth() {
+        return URI.create("http://127.0.0.1:" + monitoringConfig.prometheusPort() + "/-/ready");
+    }
+
+    private URI grafanaHealth() {
+        return URI.create("http://127.0.0.1:" + monitoringConfig.grafanaPort() + "/api/health");
     }
 
     private void refreshStatuses() {

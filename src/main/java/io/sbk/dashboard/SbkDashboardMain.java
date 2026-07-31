@@ -52,10 +52,11 @@ public final class SbkDashboardMain {
                 return;
             }
             int port = parsePort(command.getOptionValue("port", Integer.toString(DashboardConfig.DEFAULT_PORT)));
-            boolean authentication = parseBoolean(command.getOptionValue("auth", "false"));
+            boolean authentication = parseBoolean(command.getOptionValue("auth", "false"), "auth");
             if (authentication) {
                 throw new IllegalArgumentException("Authentication is reserved for a future release; use -auth false");
             }
+            boolean continueExisting = parseBoolean(command.getOptionValue("continue", "false"), "continue");
             DashboardConfig dashboardConfig = DashboardConfig.fromOptions(port, false,
                     command.getOptionValue("data"), command.getOptionValue("retention"));
             MonitoringConfig monitoringConfig = MonitoringConfig.fromOptions(
@@ -66,7 +67,7 @@ public final class SbkDashboardMain {
                     command.getOptionValue("monitoring-properties"), dashboardConfig.dataDirectory());
             System.out.println("Monitoring download properties: " + downloadConfig.source());
             monitoringConfig = new NativeToolBootstrap().resolve(monitoringConfig, downloadConfig);
-            run(dashboardConfig, monitoringConfig, downloadConfig, command);
+            run(dashboardConfig, monitoringConfig, downloadConfig, continueExisting, command);
         } catch (ParseException | IllegalArgumentException exception) {
             System.err.println("Error: " + exception.getMessage());
             printHelp(options);
@@ -80,10 +81,11 @@ public final class SbkDashboardMain {
     }
 
     private static void run(DashboardConfig config, MonitoringConfig monitoringConfig,
-                            MonitoringDownloadConfig downloadConfig, CommandLine command)
+                            MonitoringDownloadConfig downloadConfig, boolean continueExisting, CommandLine command)
             throws IOException, InterruptedException {
         TargetRegistry registry = new TargetRegistry(config);
-        ManagedMonitoringStack monitoring = new ManagedMonitoringStack(config, monitoringConfig, registry.list());
+        ManagedMonitoringStack monitoring = new ManagedMonitoringStack(config, monitoringConfig,
+                registry.list(), continueExisting);
         DashboardHttpServer server;
         try {
             server = new DashboardHttpServer(config, registry, monitoring);
@@ -107,7 +109,7 @@ public final class SbkDashboardMain {
         System.out.println("Grafana: " + monitoringConfig.grafanaPublicUrl());
         System.out.println("Data directory: " + config.dataDirectory());
         System.out.println("Persistent history retention: " + config.diskRetentionDays() + " day(s) per endpoint");
-        printEffectiveOptions(config, monitoringConfig, downloadConfig, command);
+        printEffectiveOptions(config, monitoringConfig, downloadConfig, continueExisting, command);
         stopped.await();
     }
 
@@ -119,10 +121,12 @@ public final class SbkDashboardMain {
     }
 
     private static void printEffectiveOptions(DashboardConfig config, MonitoringConfig monitoringConfig,
-                                              MonitoringDownloadConfig downloadConfig, CommandLine command) {
+                                              MonitoringDownloadConfig downloadConfig, boolean continueExisting,
+                                              CommandLine command) {
         System.out.println("Effective configuration:");
         printOption("port", config.port(), command.hasOption("port") ? "command line" : "default");
         printOption("auth", config.authenticationEnabled(), command.hasOption("auth") ? "command line" : "default");
+        printOption("continue", continueExisting, command.hasOption("continue") ? "command line" : "default");
         printOption("data", config.dataDirectory(), source(command, "data", "SBK_DASHBOARD_DATA_DIR"));
         printOption("retention-days", config.diskRetentionDays(),
                 source(command, "retention", "SBK_DASHBOARD_DISK_RETENTION_DAYS"));
@@ -165,6 +169,8 @@ public final class SbkDashboardMain {
         options.addOption(Option.builder("auth").hasArg().argName("true|false")
                 .desc("Authentication switch; false only (default: false, true reserved for future development)")
                 .get());
+        options.addOption(Option.builder("continue").hasArg().argName("true|false")
+                .desc("Reuse healthy existing Prometheus/Grafana processes; default: false (replace them)").get());
         options.addOption(Option.builder("data").longOpt("data-dir").hasArg().argName("directory")
                 .desc("Persistent data directory (environment: SBK_DASHBOARD_DATA_DIR; default: ~/.sbk-dashboard)")
                 .get());
@@ -201,14 +207,14 @@ public final class SbkDashboardMain {
         }
     }
 
-    private static boolean parseBoolean(String value) {
+    private static boolean parseBoolean(String value, String option) {
         if (value.equalsIgnoreCase("true")) {
             return true;
         }
         if (value.equalsIgnoreCase("false")) {
             return false;
         }
-        throw new IllegalArgumentException("-auth must be true or false");
+        throw new IllegalArgumentException('-' + option + " must be true or false");
     }
 
     private static void printHelp(Options options) {

@@ -79,8 +79,9 @@ public final class DashboardHttpServer implements AutoCloseable {
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/api/health")) {
                 requireMethod(exchange, "GET");
-                json(exchange, monitoring.healthy() ? 200 : 503,
-                        Map.of("status", monitoring.healthy() ? "ok" : "degraded", "authentication", false,
+                boolean healthy = monitoring.healthy();
+                json(exchange, healthy ? 200 : 503,
+                        Map.of("status", healthy ? "ok" : "degraded", "authentication", false,
                         "targets", registry.list().size()));
             } else if (path.equals("/api/targets")) {
                 handleTargets(exchange);
