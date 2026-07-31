@@ -185,12 +185,18 @@ public final class ManagedMonitoringStack implements AutoCloseable {
         long deadline = System.nanoTime() + STARTUP_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
             if (!process.isAlive()) {
-                throw new IOException(name + " exited during startup with code " + process.exitValue());
+                throw new IOException(name + " exited during startup with code " + process.exitValue()
+                        + "; check whether port " + health.getPort() + " is already in use");
             }
             try {
                 HttpResponse<Void> response = httpClient.send(HttpRequest.newBuilder(health)
                         .timeout(Duration.ofSeconds(2)).GET().build(), HttpResponse.BodyHandlers.discarding());
                 if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                    Thread.sleep(500);
+                    if (!process.isAlive()) {
+                        throw new IOException(name + " exited during startup with code " + process.exitValue()
+                                + "; check whether port " + health.getPort() + " is already in use");
+                    }
                     System.out.println(name + " ready at " + health);
                     return;
                 }

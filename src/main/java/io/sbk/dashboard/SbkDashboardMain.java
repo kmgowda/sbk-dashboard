@@ -18,7 +18,9 @@ package io.sbk.dashboard;
 
 import io.sbk.dashboard.config.DashboardConfig;
 import io.sbk.dashboard.config.MonitoringConfig;
+import io.sbk.dashboard.config.MonitoringDownloadConfig;
 import io.sbk.dashboard.service.ManagedMonitoringStack;
+import io.sbk.dashboard.service.NativeToolBootstrap;
 import io.sbk.dashboard.service.TargetRegistry;
 import io.sbk.dashboard.web.DashboardHttpServer;
 import java.io.IOException;
@@ -60,7 +62,11 @@ public final class SbkDashboardMain {
                     command.getOptionValue("prometheus-bin"), command.getOptionValue("grafana-home"),
                     command.getOptionValue("prometheus-port"), command.getOptionValue("grafana-port"),
                     command.getOptionValue("grafana-url"));
-            run(dashboardConfig, monitoringConfig, command);
+            MonitoringDownloadConfig downloadConfig = MonitoringDownloadConfig.fromOptions(
+                    command.getOptionValue("monitoring-properties"), dashboardConfig.dataDirectory());
+            System.out.println("Monitoring download properties: " + downloadConfig.source());
+            monitoringConfig = new NativeToolBootstrap().resolve(monitoringConfig, downloadConfig);
+            run(dashboardConfig, monitoringConfig, downloadConfig, command);
         } catch (ParseException | IllegalArgumentException exception) {
             System.err.println("Error: " + exception.getMessage());
             printHelp(options);
@@ -74,7 +80,8 @@ public final class SbkDashboardMain {
     }
 
     private static void run(DashboardConfig config, MonitoringConfig monitoringConfig,
-                            CommandLine command) throws IOException, InterruptedException {
+                            MonitoringDownloadConfig downloadConfig, CommandLine command)
+            throws IOException, InterruptedException {
         TargetRegistry registry = new TargetRegistry(config);
         ManagedMonitoringStack monitoring = new ManagedMonitoringStack(config, monitoringConfig, registry.list());
         DashboardHttpServer server;
@@ -100,7 +107,7 @@ public final class SbkDashboardMain {
         System.out.println("Grafana: " + monitoringConfig.grafanaPublicUrl());
         System.out.println("Data directory: " + config.dataDirectory());
         System.out.println("Persistent history retention: " + config.diskRetentionDays() + " day(s) per endpoint");
-        printEffectiveOptions(config, monitoringConfig, command);
+        printEffectiveOptions(config, monitoringConfig, downloadConfig, command);
         stopped.await();
     }
 
@@ -112,7 +119,7 @@ public final class SbkDashboardMain {
     }
 
     private static void printEffectiveOptions(DashboardConfig config, MonitoringConfig monitoringConfig,
-                                              CommandLine command) {
+                                              MonitoringDownloadConfig downloadConfig, CommandLine command) {
         System.out.println("Effective configuration:");
         printOption("port", config.port(), command.hasOption("port") ? "command line" : "default");
         printOption("auth", config.authenticationEnabled(), command.hasOption("auth") ? "command line" : "default");
@@ -131,6 +138,10 @@ public final class SbkDashboardMain {
                 source(command, "grafana-port", "SBK_DASHBOARD_GRAFANA_PORT"));
         printOption("grafana-url", monitoringConfig.grafanaPublicUrl(),
                 source(command, "grafana-url", "SBK_DASHBOARD_GRAFANA_URL"));
+        printOption("monitoring-properties", downloadConfig.source(),
+                source(command, "monitoring-properties", "SBK_DASHBOARD_MONITORING_PROPERTIES"));
+        printOption("monitoring-download-directory", downloadConfig.downloadDirectory(), "properties file");
+        printOption("monitoring-install-directory", downloadConfig.installDirectory(), "properties file");
     }
 
     private static String source(CommandLine command, String option, String environment) {
@@ -162,16 +173,19 @@ public final class SbkDashboardMain {
                         + "default: " + DashboardConfig.DEFAULT_DISK_RETENTION_DAYS + " days)")
                 .get());
         options.addOption(Option.builder("prometheus-bin").hasArg().argName("path")
-                .desc("Prometheus executable (environment: SBK_DASHBOARD_PROMETHEUS_BIN; default: PATH)").get());
+                .desc("Prometheus executable (default: PATH, then verified automatic download)").get());
         options.addOption(Option.builder("grafana-home").hasArg().argName("directory")
                 .desc("Grafana installation home (environment: SBK_DASHBOARD_GRAFANA_HOME; "
-                        + "default: /usr/share/grafana)").get());
+                        + "default: /usr/share/grafana, then verified automatic download)").get());
         options.addOption(Option.builder("prometheus-port").hasArg().argName("port")
                 .desc("Managed Prometheus port (default: " + MonitoringConfig.DEFAULT_PROMETHEUS_PORT + ')').get());
         options.addOption(Option.builder("grafana-port").hasArg().argName("port")
                 .desc("Managed Grafana port (default: " + MonitoringConfig.DEFAULT_GRAFANA_PORT + ')').get());
         options.addOption(Option.builder("grafana-url").hasArg().argName("url")
                 .desc("Public Grafana base URL (environment: SBK_DASHBOARD_GRAFANA_URL)").get());
+        options.addOption(Option.builder("monitoring-properties").hasArg().argName("file")
+                .desc("Prometheus/Grafana download properties file (environment: "
+                        + "SBK_DASHBOARD_MONITORING_PROPERTIES)").get());
         return options;
     }
 

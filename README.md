@@ -45,8 +45,7 @@ shutdown. This preserves the exact Grafana dashboard behavior without containers
 
 - JDK 25.x
 - Gradle 9.x (the wrapper provides Gradle 9.4.0)
-- Prometheus 3.x native executable; tested with 3.10.0
-- Grafana OSS native installation; tested with 12.4.1
+- Network access on the first run when Prometheus or Grafana is not already installed
 
 The Gradle wrapper and generated application script select Java in this order:
 
@@ -56,7 +55,56 @@ The Gradle wrapper and generated application script select Java in this order:
 
 The wrapper prints the selected Java source, Java version, and Gradle version before every build.
 
-## Install native monitoring servers
+## Automatic native monitoring installation
+
+No manual Prometheus or Grafana installation is required on the tested Linux x86-64 platform. Start with no
+arguments:
+
+```bash
+build/install/sbk-dashboard/bin/sbk-dashboard
+```
+
+The server checks for `prometheus` on `PATH` and Grafana under `/usr/share/grafana`. If either is missing, it reads
+[`config/monitoring-download.properties`](config/monitoring-download.properties), downloads the pinned archive,
+verifies its SHA-256 checksum before extraction, and installs it under the dashboard data directory. A successful
+archive is cached, so subsequent starts do not download it again.
+
+Default locations are:
+
+```text
+~/.sbk-dashboard/downloads  # verified .tar.gz archives
+~/.sbk-dashboard/tools      # extracted Prometheus and Grafana distributions
+```
+
+The installed application also contains an editable `conf/monitoring-download.properties`. Override the file
+explicitly when required:
+
+```bash
+sbk-dashboard -monitoring-properties /etc/sbk-dashboard/monitoring-download.properties
+```
+
+The properties file specifies:
+
+```properties
+download.directory=${data.directory}/downloads
+install.directory=${data.directory}/tools
+prometheus.download.url=https://...
+prometheus.download.file=prometheus-....tar.gz
+prometheus.download.sha256=...
+prometheus.archive.directory=prometheus-...
+prometheus.executable=prometheus
+grafana.download.url=https://...
+grafana.download.file=grafana-....tar.gz
+grafana.download.sha256=...
+grafana.archive.directory=grafana-...
+grafana.executable=bin/grafana
+```
+
+`${data.directory}`, `${user.home}`, `${os.arch}`, and `${os.name}` placeholders are supported. Downloads must use
+HTTPS. For another operating system or CPU architecture, provide an external properties file containing the correct
+native release URLs, archive directories, and checksums.
+
+### Optional manual installation
 
 Example for Linux x86-64, using the versions validated by this project:
 
@@ -91,10 +139,11 @@ build/install/sbk-dashboard/bin/sbk-dashboard
 ## Start
 
 ```bash
-build/install/sbk-dashboard/bin/sbk-dashboard \
-  -prometheus-bin /opt/sbk-monitoring/prometheus-3.10.0.linux-amd64/prometheus \
-  -grafana-home /opt/sbk-monitoring/grafana-12.4.1
+build/install/sbk-dashboard/bin/sbk-dashboard
 ```
+
+Supplying `-prometheus-bin` and `-grafana-home` still selects an existing manual installation. If those locations are
+not usable, the verified properties-based installation is used.
 
 Defaults:
 
@@ -135,11 +184,12 @@ build/install/sbk-dashboard/bin/sbk-dashboard \
 -auth <true|false>            Must be false in this release
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus TSDB retention days (default 7)
--prometheus-bin <path>        Prometheus executable (default: prometheus on PATH)
+-prometheus-bin <path>        Prometheus executable (default: PATH, then automatic download)
 -prometheus-port <port>       Managed Prometheus port (default 9090)
--grafana-home <path>          Grafana installation home (default /usr/share/grafana)
+-grafana-home <path>          Grafana home (default /usr/share/grafana, then automatic download)
 -grafana-port <port>          Managed Grafana port (default 3000)
 -grafana-url <url>            Browser-accessible Grafana base URL
+-monitoring-properties <file> Download URLs, checksums, and installation directories
 ```
 
 Command-line values take precedence over environment variables, and environment variables take precedence over
@@ -157,6 +207,7 @@ built-in defaults.
 | `SBK_DASHBOARD_GRAFANA_HOME` | Fallback for `-grafana-home` |
 | `SBK_DASHBOARD_GRAFANA_PORT` | Fallback for `-grafana-port` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
+| `SBK_DASHBOARD_MONITORING_PROPERTIES` | External native download properties file |
 
 `SBK_DASHBOARD_RETENTION_SAMPLES` and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used. Prometheus's disk retention is
 the single time-series retention mechanism.
@@ -228,6 +279,8 @@ For a data directory `/var/lib/sbk-dashboard`:
 
 ```text
 /var/lib/sbk-dashboard/
+├── downloads/                       # verified native release archives
+├── tools/                           # automatically installed native servers
 ├── targets.json
 ├── dashboard-mappings.json
 └── monitoring/

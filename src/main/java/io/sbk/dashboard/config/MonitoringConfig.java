@@ -45,6 +45,12 @@ public record MonitoringConfig(Path prometheusBinary, Path grafanaHome, int prom
                 grafanaPublicUrl, System.getenv());
     }
 
+    /** Returns this configuration with resolved native tool locations. */
+    public MonitoringConfig withNativeTools(Path resolvedPrometheus, Path resolvedGrafanaHome) {
+        return new MonitoringConfig(resolvedPrometheus, resolvedGrafanaHome, prometheusPort,
+                grafanaPort, grafanaPublicUrl);
+    }
+
     static MonitoringConfig fromSources(String prometheusBinary, String grafanaHome,
                                         String prometheusPort, String grafanaPort,
                                         String grafanaPublicUrl, Map<String, String> environment) {

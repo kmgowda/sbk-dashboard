@@ -38,6 +38,7 @@ java {
 
 dependencies {
     implementation "commons-cli:commons-cli:${commonsCliVersion}"
+    implementation "org.apache.commons:commons-compress:${commonsCompressVersion}"
     implementation "com.fasterxml.jackson.core:jackson-databind:${jacksonVersion}"
 
     testImplementation "org.junit.jupiter:junit-jupiter:${junitVersion}"
@@ -59,6 +60,17 @@ application {
 tasks.named('processResources') {
     from('grafana/dashboards') {
         into 'grafana/dashboards'
+    }
+    from('config/monitoring-download.properties')
+}
+
+distributions {
+    main {
+        contents {
+            from('config') {
+                into 'conf'
+            }
+        }
     }
 }
 
