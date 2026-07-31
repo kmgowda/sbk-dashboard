@@ -86,6 +86,6 @@ class TargetRegistryTest {
     }
 
     private DashboardConfig config() {
-        return new DashboardConfig(9721, false, temporaryDirectory.resolve("data"), 5, 120);
+        return new DashboardConfig(9721, false, temporaryDirectory.resolve("data"), 5, 7);
     }
 }

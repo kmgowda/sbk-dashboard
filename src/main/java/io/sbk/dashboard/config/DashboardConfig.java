@@ -21,28 +21,11 @@ import java.util.Map;
 
 /** Runtime paths and public service locations. */
 public record DashboardConfig(int port, boolean authenticationEnabled, Path dataDirectory,
-                              int scrapeIntervalSeconds, int retentionSamples, int diskRetentionDays,
-                              int segmentSizeBytes) {
+                              int scrapeIntervalSeconds, int diskRetentionDays) {
     /** Default dashboard HTTP port. */
     public static final int DEFAULT_PORT = 9721;
     /** Default persistent history retention per endpoint. */
     public static final int DEFAULT_DISK_RETENTION_DAYS = 7;
-    private static final int DEFAULT_SEGMENT_SIZE_MB = 32;
-
-    /**
-     * Creates configuration with default persistent-store limits.
-     *
-     * @param port dashboard HTTP port
-     * @param authenticationEnabled authentication state
-     * @param dataDirectory application data directory
-     * @param scrapeIntervalSeconds scrape interval
-     * @param retentionSamples in-memory series capacity
-     */
-    public DashboardConfig(int port, boolean authenticationEnabled, Path dataDirectory,
-                           int scrapeIntervalSeconds, int retentionSamples) {
-        this(port, authenticationEnabled, dataDirectory, scrapeIntervalSeconds, retentionSamples,
-                DEFAULT_DISK_RETENTION_DAYS, DEFAULT_SEGMENT_SIZE_MB * 1024 * 1024);
-    }
 
     /**
      * Creates configuration from CLI values and environment overrides.
@@ -77,16 +60,12 @@ public record DashboardConfig(int port, boolean authenticationEnabled, Path data
                 "SBK_DASHBOARD_DATA_DIR", defaultData);
         Path data = Path.of(selectedData).toAbsolutePath().normalize();
         int scrapeInterval = positiveInteger(environment, "SBK_DASHBOARD_SCRAPE_SECONDS", 5);
-        int retention = positiveInteger(environment, "SBK_DASHBOARD_RETENTION_SAMPLES", 2160);
         String selectedDiskRetention = commandOrEnvironment(diskRetentionDays, "-retention", environment,
                 "SBK_DASHBOARD_DISK_RETENTION_DAYS", Integer.toString(DEFAULT_DISK_RETENTION_DAYS));
         String retentionSource = diskRetentionDays == null
                 ? "SBK_DASHBOARD_DISK_RETENTION_DAYS" : "-retention";
         int diskRetention = positiveInteger(retentionSource, selectedDiskRetention);
-        int segmentSizeMb = positiveInteger(environment, "SBK_DASHBOARD_SEGMENT_SIZE_MB",
-                DEFAULT_SEGMENT_SIZE_MB);
-        return new DashboardConfig(port, authenticationEnabled, data, scrapeInterval, retention,
-                diskRetention, Math.multiplyExact(segmentSizeMb, 1024 * 1024));
+        return new DashboardConfig(port, authenticationEnabled, data, scrapeInterval, diskRetention);
     }
 
     private static String environment(Map<String, String> environment, String name, String defaultValue) {

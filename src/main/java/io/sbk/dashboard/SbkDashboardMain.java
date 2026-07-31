@@ -17,7 +17,8 @@
 package io.sbk.dashboard;
 
 import io.sbk.dashboard.config.DashboardConfig;
-import io.sbk.dashboard.service.PrometheusScrapeService;
+import io.sbk.dashboard.config.MonitoringConfig;
+import io.sbk.dashboard.service.ManagedMonitoringStack;
 import io.sbk.dashboard.service.TargetRegistry;
 import io.sbk.dashboard.web.DashboardHttpServer;
 import java.io.IOException;
@@ -53,8 +54,13 @@ public final class SbkDashboardMain {
             if (authentication) {
                 throw new IllegalArgumentException("Authentication is reserved for a future release; use -auth false");
             }
-            run(DashboardConfig.fromOptions(port, false,
-                    command.getOptionValue("data"), command.getOptionValue("retention")), command);
+            DashboardConfig dashboardConfig = DashboardConfig.fromOptions(port, false,
+                    command.getOptionValue("data"), command.getOptionValue("retention"));
+            MonitoringConfig monitoringConfig = MonitoringConfig.fromOptions(
+                    command.getOptionValue("prometheus-bin"), command.getOptionValue("grafana-home"),
+                    command.getOptionValue("prometheus-port"), command.getOptionValue("grafana-port"),
+                    command.getOptionValue("grafana-url"));
+            run(dashboardConfig, monitoringConfig, command);
         } catch (ParseException | IllegalArgumentException exception) {
             System.err.println("Error: " + exception.getMessage());
             printHelp(options);
@@ -67,20 +73,21 @@ public final class SbkDashboardMain {
         }
     }
 
-    private static void run(DashboardConfig config, CommandLine command) throws IOException, InterruptedException {
+    private static void run(DashboardConfig config, MonitoringConfig monitoringConfig,
+                            CommandLine command) throws IOException, InterruptedException {
         TargetRegistry registry = new TargetRegistry(config);
-        PrometheusScrapeService scraper = new PrometheusScrapeService(registry, config);
+        ManagedMonitoringStack monitoring = new ManagedMonitoringStack(config, monitoringConfig, registry.list());
         DashboardHttpServer server;
         try {
-            server = new DashboardHttpServer(config, registry, scraper);
+            server = new DashboardHttpServer(config, registry, monitoring);
         } catch (IOException | RuntimeException exception) {
-            scraper.close();
+            monitoring.close();
             throw exception;
         }
         CountDownLatch stopped = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             server.close();
-            scraper.close();
+            monitoring.close();
             stopped.countDown();
         }, "sbk-dashboard-shutdown"));
         server.start();
@@ -88,10 +95,12 @@ public final class SbkDashboardMain {
         System.out.println("Dashboard links:");
         DashboardLinks.discover(config.port()).forEach(link -> System.out.println("  " + link));
         System.out.println("Authentication: disabled");
-        System.out.println("Metrics engine: embedded Java threads");
+        System.out.println("Metrics engine: managed Prometheus at http://127.0.0.1:"
+                + monitoringConfig.prometheusPort());
+        System.out.println("Grafana: " + monitoringConfig.grafanaPublicUrl());
         System.out.println("Data directory: " + config.dataDirectory());
         System.out.println("Persistent history retention: " + config.diskRetentionDays() + " day(s) per endpoint");
-        printEffectiveOptions(config, command);
+        printEffectiveOptions(config, monitoringConfig, command);
         stopped.await();
     }
 
@@ -102,7 +111,8 @@ public final class SbkDashboardMain {
         System.out.println("Supplied arguments: " + (args.length == 0 ? "(none)" : String.join(" ", args)));
     }
 
-    private static void printEffectiveOptions(DashboardConfig config, CommandLine command) {
+    private static void printEffectiveOptions(DashboardConfig config, MonitoringConfig monitoringConfig,
+                                              CommandLine command) {
         System.out.println("Effective configuration:");
         printOption("port", config.port(), command.hasOption("port") ? "command line" : "default");
         printOption("auth", config.authenticationEnabled(), command.hasOption("auth") ? "command line" : "default");
@@ -111,10 +121,16 @@ public final class SbkDashboardMain {
                 source(command, "retention", "SBK_DASHBOARD_DISK_RETENTION_DAYS"));
         printOption("scrape-seconds", config.scrapeIntervalSeconds(),
                 environmentSource("SBK_DASHBOARD_SCRAPE_SECONDS"));
-        printOption("retention-samples", config.retentionSamples(),
-                environmentSource("SBK_DASHBOARD_RETENTION_SAMPLES"));
-        printOption("segment-size-mb", config.segmentSizeBytes() / (1024 * 1024),
-                environmentSource("SBK_DASHBOARD_SEGMENT_SIZE_MB"));
+        printOption("prometheus-bin", monitoringConfig.prometheusBinary(),
+                source(command, "prometheus-bin", "SBK_DASHBOARD_PROMETHEUS_BIN"));
+        printOption("prometheus-port", monitoringConfig.prometheusPort(),
+                source(command, "prometheus-port", "SBK_DASHBOARD_PROMETHEUS_PORT"));
+        printOption("grafana-home", monitoringConfig.grafanaHome(),
+                source(command, "grafana-home", "SBK_DASHBOARD_GRAFANA_HOME"));
+        printOption("grafana-port", monitoringConfig.grafanaPort(),
+                source(command, "grafana-port", "SBK_DASHBOARD_GRAFANA_PORT"));
+        printOption("grafana-url", monitoringConfig.grafanaPublicUrl(),
+                source(command, "grafana-url", "SBK_DASHBOARD_GRAFANA_URL"));
     }
 
     private static String source(CommandLine command, String option, String environment) {
@@ -145,6 +161,17 @@ public final class SbkDashboardMain {
                 .desc("Persistent retention per endpoint (environment: SBK_DASHBOARD_DISK_RETENTION_DAYS; "
                         + "default: " + DashboardConfig.DEFAULT_DISK_RETENTION_DAYS + " days)")
                 .get());
+        options.addOption(Option.builder("prometheus-bin").hasArg().argName("path")
+                .desc("Prometheus executable (environment: SBK_DASHBOARD_PROMETHEUS_BIN; default: PATH)").get());
+        options.addOption(Option.builder("grafana-home").hasArg().argName("directory")
+                .desc("Grafana installation home (environment: SBK_DASHBOARD_GRAFANA_HOME; "
+                        + "default: /usr/share/grafana)").get());
+        options.addOption(Option.builder("prometheus-port").hasArg().argName("port")
+                .desc("Managed Prometheus port (default: " + MonitoringConfig.DEFAULT_PROMETHEUS_PORT + ')').get());
+        options.addOption(Option.builder("grafana-port").hasArg().argName("port")
+                .desc("Managed Grafana port (default: " + MonitoringConfig.DEFAULT_GRAFANA_PORT + ')').get());
+        options.addOption(Option.builder("grafana-url").hasArg().argName("url")
+                .desc("Public Grafana base URL (environment: SBK_DASHBOARD_GRAFANA_URL)").get());
         return options;
     }
 
@@ -173,8 +200,8 @@ public final class SbkDashboardMain {
     private static void printHelp(Options options) {
         try {
             HelpFormatter.builder().get().printHelp("sbk-dashboard",
-                    "In-JVM SBK/SBM metrics collection and dashboard server", options,
-                    "No external monitoring processes are required.", true);
+                    "SBK/SBM dashboard control server with managed Prometheus and Grafana", options,
+                    "Prometheus and Grafana run as child processes; Docker is not required.", true);
         } catch (IOException exception) {
             throw new IllegalStateException("Unable to print command help", exception);
         }

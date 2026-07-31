@@ -21,10 +21,9 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.sbk.dashboard.config.DashboardConfig;
 import io.sbk.dashboard.model.BenchmarkTarget;
-import io.sbk.dashboard.model.EndpointSnapshot;
 import io.sbk.dashboard.model.TargetStatus;
 import io.sbk.dashboard.service.JsonSupport;
-import io.sbk.dashboard.service.PrometheusScrapeService;
+import io.sbk.dashboard.service.ManagedMonitoringStack;
 import io.sbk.dashboard.service.TargetRegistry;
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,7 +40,7 @@ public final class DashboardHttpServer implements AutoCloseable {
     private static final int MAX_REQUEST_BYTES = 64 * 1024;
     private final DashboardConfig config;
     private final TargetRegistry registry;
-    private final PrometheusScrapeService scraper;
+    private final ManagedMonitoringStack monitoring;
     private final HttpServer server;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -50,14 +49,14 @@ public final class DashboardHttpServer implements AutoCloseable {
      *
      * @param config runtime configuration
      * @param registry target registry
-     * @param scraper embedded metrics collection engine
+     * @param monitoring managed Prometheus and Grafana stack
      * @throws IOException when the listening socket cannot be created
      */
     public DashboardHttpServer(DashboardConfig config, TargetRegistry registry,
-                               PrometheusScrapeService scraper) throws IOException {
+                               ManagedMonitoringStack monitoring) throws IOException {
         this.config = config;
         this.registry = registry;
-        this.scraper = scraper;
+        this.monitoring = monitoring;
         this.server = HttpServer.create(new InetSocketAddress(config.port()), 1024);
         server.setExecutor(executor);
         server.createContext("/", this::handle);
@@ -80,7 +79,8 @@ public final class DashboardHttpServer implements AutoCloseable {
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/api/health")) {
                 requireMethod(exchange, "GET");
-                json(exchange, 200, Map.of("status", "ok", "authentication", false,
+                json(exchange, monitoring.healthy() ? 200 : 503,
+                        Map.of("status", monitoring.healthy() ? "ok" : "degraded", "authentication", false,
                         "targets", registry.list().size()));
             } else if (path.equals("/api/targets")) {
                 handleTargets(exchange);
@@ -116,7 +116,13 @@ public final class DashboardHttpServer implements AutoCloseable {
         CreateTargetRequest request = readJson(exchange, CreateTargetRequest.class);
         BenchmarkTarget target = registry.register(request.name(), request.host(), request.port(),
                 request.metricsPath());
-        scraper.register(target);
+        try {
+            monitoring.reconcile(registry.list());
+        } catch (IOException exception) {
+            registry.remove(target.id());
+            monitoring.reconcile(registry.list());
+            throw exception;
+        }
         json(exchange, 201, view(target));
     }
 
@@ -131,9 +137,7 @@ public final class DashboardHttpServer implements AutoCloseable {
         }
         if (action.equals("dashboard")) {
             requireMethod(exchange, "GET");
-            int points = queryPoints(exchange.getRequestURI().getRawQuery());
-            EndpointSnapshot snapshot = scraper.snapshot(id, points);
-            json(exchange, 200, snapshot);
+            json(exchange, 200, Map.of("dashboardUrl", monitoring.dashboardUrl(id)));
             return;
         }
         if (!action.isEmpty()) {
@@ -145,7 +149,7 @@ public final class DashboardHttpServer implements AutoCloseable {
             json(exchange, 404, Map.of("error", "Target not found"));
             return;
         }
-        scraper.unregister(id);
+        monitoring.reconcile(registry.list());
         exchange.sendResponseHeaders(204, -1);
     }
 
@@ -153,11 +157,8 @@ public final class DashboardHttpServer implements AutoCloseable {
         requireMethod(exchange, "GET");
         String resource = switch (path) {
             case "/", "/index.html" -> "/web/index.html";
-            case "/dashboard.html" -> "/web/dashboard.html";
             case "/app.css" -> "/web/app.css";
             case "/app.js" -> "/web/app.js";
-            case "/dashboard.js" -> "/web/dashboard.js";
-            case "/grafana/dashboards/sbk-dashboard.json" -> "/grafana/dashboards/sbk-dashboard.json";
             default -> null;
         };
         if (resource == null) {
@@ -179,8 +180,8 @@ public final class DashboardHttpServer implements AutoCloseable {
     }
 
     private TargetView view(BenchmarkTarget target) {
-        TargetStatus status = scraper.status(target.id());
-        String dashboardUrl = "/dashboard.html?id=" + target.id();
+        TargetStatus status = monitoring.status(target.id());
+        String dashboardUrl = monitoring.dashboardUrl(target.id());
         return new TargetView(target.id(), target.name(), target.host(), target.port(), target.metricsPath(),
                 target.createdAt(), status, dashboardUrl);
     }
@@ -222,23 +223,6 @@ public final class DashboardHttpServer implements AutoCloseable {
             return "application/json; charset=utf-8";
         }
         return "text/html; charset=utf-8";
-    }
-
-    private int queryPoints(String query) {
-        if (query == null || query.isBlank()) {
-            return 240;
-        }
-        for (String parameter : query.split("&")) {
-            String[] pair = parameter.split("=", 2);
-            if (pair.length == 2 && pair[0].equals("points")) {
-                try {
-                    return Math.max(10, Math.min(1000, Integer.parseInt(pair[1])));
-                } catch (NumberFormatException exception) {
-                    throw new IllegalArgumentException("points must be a number", exception);
-                }
-            }
-        }
-        return 240;
     }
 
     private record CreateTargetRequest(String name, String host, int port, String metricsPath) { }

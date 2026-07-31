@@ -1,304 +1,273 @@
 # SBK Dashboard
 
-SBK Dashboard is a high-capacity, single-JVM server for observing remote Storage Benchmark Kit (SBK) and Storage
-Benchmark Monitor (SBM) processes. It requires no monitoring executables, child processes, containers, or external
-services.
+`sbk-dashboard` is a single Java control server for dedicated SBK/SBM Grafana dashboards. It starts and owns one
+native Prometheus server and one native Grafana server, dynamically registers remote PrometheusLogger endpoints,
+and provisions one isolated copy of the canonical SBK dashboard for every unique `host:port`.
 
-The application implements the required monitoring path in Java:
+This phase is deliberately non-containerized. Docker, Podman, Kubernetes, and Compose are not required or used.
 
-- one independently scheduled collector per registered `host:port`;
-- virtual-thread HTTP scraping of SBK/SBM Prometheus exposition endpoints;
-- an in-JVM Prometheus text-format parser;
-- bounded, primitive-array time-series storage partitioned by endpoint;
-- checksummed append-only disk segments with restart recovery and retention;
-- live endpoint status based on scrape results;
-- JSON query APIs; and
-- a dedicated, interactive dashboard for every unique hostname and port combination.
+## What it does
 
-Prometheus Server and Grafana Server themselves are Go applications and cannot be started as Java threads from
-Maven libraries. Prometheus Java libraries instrument Java applications, while Grafana clients call an external
-Grafana server. This project therefore uses a Java-specific implementation of the required scraping, storage, query,
-and visualization behavior rather than disguising operating-system processes as embedded components.
+- Presents a web page where an operator adds a hostname/IP address, port, and metrics path.
+- Stores endpoint registrations and deterministic Grafana URL mappings on disk.
+- Atomically rewrites Prometheus file-based service discovery whenever an endpoint is added or removed.
+- Scrapes each remote SBK/SBM endpoint through managed Prometheus.
+- Copies the exact dashboard from
+  [`/root/projects/SBK/grafana/dashboards/sbk-dashboard.json`](grafana/dashboards/sbk-dashboard.json).
+- Generates one Grafana-provisioned clone per endpoint. Panel layout, visualization settings, datasource UID, and all
+  53 canonical panels remain intact; PromQL selectors receive only an endpoint-isolation label.
+- Retains time-series data in Prometheus TSDB for 7 days by default. Prometheus performs background retention and
+  automatically deletes expired blocks while the server is running.
+- Stops managed Prometheus and Grafana processes when `sbk-dashboard` shuts down.
+
+## Architecture
+
+```text
+Browser
+   |
+   +--> sbk-dashboard :9721  (registration UI and API)
+           |
+           +--> targets.json + dashboard-mappings.json
+           +--> managed Prometheus :9090 ---> remote-host:9718/metrics
+           |         |
+           |         +--> persistent TSDB with time-based retention
+           |
+           +--> managed Grafana :3000
+                     |
+                     +--> sbk-<endpoint-id>.json (one per host:port)
+```
+
+Prometheus and Grafana are native child processes, not Java threads or Maven libraries. Their server engines do not
+exist as embeddable Java APIs. Java owns their configuration, startup, readiness, reconciliation, health, and
+shutdown. This preserves the exact Grafana dashboard behavior without containers.
 
 ## Requirements
 
-- JDK 25
-- Gradle 9.x (the Gradle 9.4 wrapper is included)
+- JDK 25.x
+- Gradle 9.x (the wrapper provides Gradle 9.4.0)
+- Prometheus 3.x native executable; tested with 3.10.0
+- Grafana OSS native installation; tested with 12.4.1
 
-## Build and start
-
-```bash
-export SBK_JAVA_HOME=/path/to/jdk-25
-
-./gradlew check installDist
-./build/install/sbk-dashboard/bin/sbk-dashboard -port 9721 -auth false
-```
-
-Both the Gradle wrapper and packaged `sbk-dashboard` launcher select Java in this order:
+The Gradle wrapper and generated application script select Java in this order:
 
 1. `SBK_JAVA_HOME`
 2. `JAVA_HOME`
-3. the `java` executable available on `PATH`
+3. `java` on `PATH`
 
-JDK 25 is still required. Therefore, a fallback Java older than 25 is detected and rejected with a clear version
-error. Every `./gradlew` invocation prints the selected Java source, Java version, and Gradle version before running:
+The wrapper prints the selected Java source, Java version, and Gradle version before every build.
 
-```text
-Java source: SBK_JAVA_HOME
-Java version: java version "25.0.2" ...
-Gradle version: 9.4.0
-```
+## Install native monitoring servers
 
-Wrapper versions are not duplicated as literals in the scripts. The required Java version is read from
-`javaVersion` in `gradle.properties`, and the Gradle version is derived from `distributionUrl` in
-`gradle/wrapper/gradle-wrapper.properties`. The Gradle build uses the same `javaVersion` property for its toolchain,
-source compatibility, and target compatibility.
-
-Open <http://localhost:9721>. No other program needs to be installed or started.
-
-Command-line options:
-
-```text
--h                  Show help and exit
--port <port>         Dashboard HTTP port (default: 9721)
--auth <true|false>   Authentication switch (default: false)
--data <directory>    Persistent data directory (default: ~/.sbk-dashboard)
--retention <days>    Persistent retention per endpoint (default: 7)
-```
-
-`--data-dir` and `--retention-days` are long aliases for `-data` and `-retention`.
-
-`-auth true` is rejected because authentication is reserved for future development. This avoids falsely indicating
-that the service is protected.
-
-At startup, `sbk-dashboard` prints its Java version and home, the supplied command line, and every effective setting
-with its source. It also prints complete dashboard links for `localhost`, `127.0.0.1`, and every usable non-loopback
-IPv4 or IPv6 address assigned to an active network interface. This makes command-line overrides, environment
-settings, defaults, and browser entry points directly visible:
-
-```text
-Java version: 25.0.2 (Oracle Corporation)
-Java home: /path/to/jdk-25
-Supplied arguments: -port 9721 -data /var/lib/sbk-dashboard -retention 7
-Dashboard links:
-  http://localhost:9721/
-  http://127.0.0.1:9721/
-  http://192.0.2.10:9721/
-Effective configuration:
-  port=9721 [command line]
-  auth=false [default]
-  data=/var/lib/sbk-dashboard [command line]
-  retention-days=7 [command line]
-  scrape-seconds=5 [default]
-  retention-samples=2160 [default]
-  segment-size-mb=32 [default]
-```
-
-## Add an SBK endpoint
-
-Run SBK with `PrometheusLogger`. Its default exporter is `9718/metrics`:
+Example for Linux x86-64, using the versions validated by this project:
 
 ```bash
-/path/to/SBK/build/install/sbk/bin/sbk \
-  -class file -file /tmp/sbk.bin \
-  -writers 1 -size 4096 -seconds 60 \
-  -out PrometheusLogger
+mkdir -p /opt/sbk-monitoring
+cd /opt/sbk-monitoring
+
+curl -fLO https://github.com/prometheus/prometheus/releases/download/v3.10.0/prometheus-3.10.0.linux-amd64.tar.gz
+tar -xzf prometheus-3.10.0.linux-amd64.tar.gz
+
+curl -fLO https://dl.grafana.com/grafana/release/12.4.1/grafana_12.4.1_22846628243_linux_amd64.tar.gz
+tar -xzf grafana_12.4.1_22846628243_linux_amd64.tar.gz
 ```
 
-Register `hostname:9718` in the web UI. For a custom exporter port:
+Grafana publishes the SHA-256 checksum
+`55d6d71c813dd7426fe0b8d3a237e8d4ee4bf8a806ff90494207e146473ceb41` for that standalone archive.
+Use the checksums published with the Prometheus release to verify its archive before installation.
+
+## Build
 
 ```bash
-/path/to/SBK/build/install/sbk/bin/sbk \
-  -class file -file /tmp/sbk.bin \
-  -writers 1 -size 4096 -seconds 60 \
-  -out PrometheusLogger -context 19818/metrics
+export SBK_JAVA_HOME=/path/to/jdk-25
+./gradlew clean check installDist
 ```
 
-The dedicated dashboard URL returned for a registration is:
+The installed command is:
 
 ```text
-http://dashboard-host:9721/dashboard.html?id=<endpoint-id>
+build/install/sbk-dashboard/bin/sbk-dashboard
 ```
 
-The endpoint ID is a stable hash of the normalized hostname and port. Consequently, the same host can have several
-independent dashboards when different ports are registered, but the same `host:port` cannot be registered twice.
-
-## API
-
-Register an endpoint:
+## Start
 
 ```bash
-curl -X POST http://localhost:9721/api/targets \
+build/install/sbk-dashboard/bin/sbk-dashboard \
+  -prometheus-bin /opt/sbk-monitoring/prometheus-3.10.0.linux-amd64/prometheus \
+  -grafana-home /opt/sbk-monitoring/grafana-12.4.1
+```
+
+Defaults:
+
+- SBK Dashboard: `http://localhost:9721/`
+- Prometheus: `http://localhost:9090/`
+- Grafana: `http://localhost:3000/`
+- Authentication: disabled
+- Data directory: `~/.sbk-dashboard`
+- Prometheus retention: 7 days
+- Scrape interval: 5 seconds
+
+At startup, the application prints the Java version, supplied arguments, every effective option and its source,
+and full dashboard links for `localhost`, `127.0.0.1`, and discovered non-loopback addresses.
+
+### Production-style example
+
+Use `-grafana-url` for the URL that users' browsers can reach. It may differ from Grafana's local listen address.
+
+```bash
+build/install/sbk-dashboard/bin/sbk-dashboard \
+  -port 9721 \
+  -data /var/lib/sbk-dashboard \
+  -retention 14 \
+  -prometheus-bin /opt/prometheus/prometheus \
+  -prometheus-port 9090 \
+  -grafana-home /opt/grafana \
+  -grafana-port 3000 \
+  -grafana-url http://dashboard.example.com:3000
+```
+
+`-auth false` is the only supported authentication setting. Authentication is reserved for future development.
+
+## Command options
+
+```text
+-h, --help                    Show help and exit
+-port <port>                  Registration server port (default 9721)
+-auth <true|false>            Must be false in this release
+-data, --data-dir <path>      Persistent data directory
+-retention, --retention-days  Prometheus TSDB retention days (default 7)
+-prometheus-bin <path>        Prometheus executable (default: prometheus on PATH)
+-prometheus-port <port>       Managed Prometheus port (default 9090)
+-grafana-home <path>          Grafana installation home (default /usr/share/grafana)
+-grafana-port <port>          Managed Grafana port (default 3000)
+-grafana-url <url>            Browser-accessible Grafana base URL
+```
+
+Command-line values take precedence over environment variables, and environment variables take precedence over
+built-in defaults.
+
+| Environment variable | Purpose |
+|---|---|
+| `SBK_JAVA_HOME` | Preferred JDK home for Gradle and the installed application |
+| `JAVA_HOME` | Java fallback when `SBK_JAVA_HOME` is unset |
+| `SBK_DASHBOARD_DATA_DIR` | Fallback for `-data` |
+| `SBK_DASHBOARD_DISK_RETENTION_DAYS` | Fallback for `-retention` |
+| `SBK_DASHBOARD_SCRAPE_SECONDS` | Prometheus scrape interval; default 5 |
+| `SBK_DASHBOARD_PROMETHEUS_BIN` | Fallback for `-prometheus-bin` |
+| `SBK_DASHBOARD_PROMETHEUS_PORT` | Fallback for `-prometheus-port` |
+| `SBK_DASHBOARD_GRAFANA_HOME` | Fallback for `-grafana-home` |
+| `SBK_DASHBOARD_GRAFANA_PORT` | Fallback for `-grafana-port` |
+| `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
+
+`SBK_DASHBOARD_RETENTION_SAMPLES` and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used. Prometheus's disk retention is
+the single time-series retention mechanism.
+
+## Run SBK and register it
+
+Start the existing SBK build with `PrometheusLogger`:
+
+```bash
+cd /root/projects/SBK
+./build/install/sbk/bin/sbk \
+  -class file \
+  -file /tmp/sbk-dashboard-example.dat \
+  -writers 1 \
+  -size 4096 \
+  -seconds 120 \
+  -records 1000 \
+  -out PrometheusLogger \
+  -context 9718/metrics
+```
+
+Open `http://localhost:9721/`, enter:
+
+```text
+Host:         127.0.0.1
+Port:         9718
+Metrics path: /metrics
+```
+
+The returned target contains a stable URL such as:
+
+```text
+http://localhost:3000/d/sbk-f9720cad2e38eec6/
+```
+
+The same host on port `9719` gets a different endpoint ID, dashboard JSON, Prometheus label, mapping, and URL.
+
+### API example
+
+```bash
+curl -fsS -X POST http://localhost:9721/api/targets \
   -H 'Content-Type: application/json' \
-  -d '{
-    "name": "NVMe write run",
-    "host": "benchmark-01.internal",
+  --data '{
+    "name": "NVMe benchmark",
+    "host": "benchmark-01.example",
     "port": 9718,
     "metricsPath": "/metrics"
   }'
 ```
 
-Producer classification is not required. The same registration fields work for either exporter; the landing page
-retains `SBK :9718` and `SBM :9719` only as convenient default-port guidance.
+List targets and their scrape status/dashboard URL:
 
-Other endpoints:
+```bash
+curl -fsS http://localhost:9721/api/targets
+```
+
+Remove a target:
+
+```bash
+curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
+```
+
+Removal updates discovery and mappings immediately. Grafana's file provisioner removes the dashboard shortly
+afterward.
+
+## Persistent files
+
+For a data directory `/var/lib/sbk-dashboard`:
 
 ```text
-GET    /api/health
-GET    /api/targets
-DELETE /api/targets/<id>
-GET    /api/targets/<id>/dashboard?points=240
+/var/lib/sbk-dashboard/
+├── targets.json
+├── dashboard-mappings.json
+└── monitoring/
+    ├── prometheus/
+    │   ├── prometheus.yml
+    │   ├── targets.json
+    │   └── data/                 # Prometheus TSDB
+    ├── grafana/
+    │   ├── grafana.ini
+    │   ├── data/                 # Grafana SQLite database
+    │   ├── provisioning/
+    │   └── dashboards/           # sbk-<endpoint-id>.json
+    └── logs/
+        ├── prometheus.log
+        └── grafana.log
 ```
 
-The dashboard API returns status, collection time, every discovered metric series, labels, current/minimum/maximum
-values, and bounded timestamp/value points.
-
-## Thread and memory model
-
-Each registered endpoint owns an independent scheduled collector. A small scheduled executor triggers collectors,
-while HTTP operations execute on JDK virtual threads. An atomic running flag prevents overlapping scrapes when a
-remote endpoint responds slowly. Connect and request timeouts prevent unavailable systems from consuming threads
-indefinitely.
-
-Each unique metric name and label set is stored in a fixed-size primitive `long[]`/`double[]` ring. This avoids an
-object allocation for every sample and gives a deterministic memory ceiling:
-
-```text
-approximately endpoints × metric-series × retention-samples × 16 bytes
-```
-
-The default memory retention is 2,160 samples per series, or three hours at the default five-second interval. API
-responses downsample long series to the requested point limit.
-
-Runtime settings:
-
-| Command option | Environment variable | Default | Purpose |
-|---|---|---|---|
-| `-data`, `--data-dir` | `SBK_DASHBOARD_DATA_DIR` | `~/.sbk-dashboard` | Endpoint registry and time-series directory |
-| `-retention`, `--retention-days` | `SBK_DASHBOARD_DISK_RETENTION_DAYS` | `7` | Persistent history retained independently per endpoint |
-| — | `SBK_DASHBOARD_SCRAPE_SECONDS` | `5` | Per-endpoint scrape interval |
-| — | `SBK_DASHBOARD_RETENTION_SAMPLES` | `2160` | Ring capacity per unique metric series |
-| — | `SBK_DASHBOARD_SEGMENT_SIZE_MB` | `32` | Per-endpoint segment rollover size |
-
-For data directory and disk retention, precedence is **command option → environment variable → built-in default**.
-
-The endpoint registry and metric history persist across restarts. Each successful scrape is encoded as one binary
-frame with a length and CRC32 checksum, appended to that endpoint's active segment, and synchronized before the
-scrape is reported as durable. Segment files live under `$SBK_DASHBOARD_DATA_DIR/timeseries/<endpoint-id>/`.
-
-Startup replays valid retained frames into the bounded memory rings before live scraping begins. An incomplete or
-corrupt tail is ignored without losing earlier complete frames. Segments roll at the configured size or after one
-hour; old closed segments are deleted according to the per-endpoint retention period during recovery and periodic
-maintenance. Removing an endpoint also removes its exact persisted partition.
-
-An independent Java background task runs retention maintenance every hour. It scans every endpoint partition and
-deletes expired segments even when that SBK/SBM endpoint is stopped, unreachable, or no longer producing new
-samples. If an inactive writer still owns an expired segment, maintenance safely closes it before deletion; a later
-scrape automatically creates a fresh segment. Cleanup for one endpoint cannot delete another endpoint's history.
-
-Historical-data problems are non-fatal. An unreadable, truncated, or checksum-damaged segment produces a
-`WARNING` on standard error and, when applicable, in the endpoint status detail. Earlier valid frames are retained,
-and live scraping continues. If the complete time-series directory cannot be opened, the dashboard still starts and
-collects into memory while reporting that persistence is unavailable.
-
-### Retention examples
-
-No retention setting is required for the normal seven-day policy:
-
-```bash
-./build/install/sbk-dashboard/bin/sbk-dashboard -port 9721 -auth false
-```
-
-Keep 30 days of persistent history for every registered endpoint:
-
-```bash
-./build/install/sbk-dashboard/bin/sbk-dashboard \
-  -port 9721 -auth false -retention 30
-```
-
-Use a dedicated data directory and retain one day, which is useful for short test runs:
-
-```bash
-export SBK_DASHBOARD_SEGMENT_SIZE_MB=16
-./build/install/sbk-dashboard/bin/sbk-dashboard \
-  -port 9721 -auth false \
-  -data /var/lib/sbk-dashboard \
-  -retention 1
-```
-
-Environment-only configuration remains supported:
-
-```bash
-export SBK_DASHBOARD_DATA_DIR=/srv/sbk-dashboard
-export SBK_DASHBOARD_DISK_RETENTION_DAYS=14
-./build/install/sbk-dashboard/bin/sbk-dashboard -port 9721
-```
-
-This command overrides both environment values:
-
-```bash
-./build/install/sbk-dashboard/bin/sbk-dashboard \
-  -port 9721 -data /srv/sbk-dashboard-fast -retention 30
-```
-
-Each endpoint has its own directory. For example, two registered addresses, `host-a:9718` and `host-a:9719`, produce
-two independently retained partitions:
-
-```text
-$SBK_DASHBOARD_DATA_DIR/timeseries/<host-a-9718-endpoint-id>/
-$SBK_DASHBOARD_DATA_DIR/timeseries/<host-a-9719-endpoint-id>/
-```
-
-After changing the retention value, restart `sbk-dashboard`. Segments older than the new policy are removed during
-startup recovery; this is expected retention cleanup and does not prevent the server from starting.
-
-## Dashboard behavior
-
-The dedicated endpoint page includes:
-
-- throughput and records-per-second summaries;
-- average, maximum, and tail latency signals;
-- active reader/writer/connection state;
-- every available series, ordered and titled using the imported SBK Grafana panel expressions; and
-- a searchable-style complete metric table with labels and observed ranges.
-
-The authoritative dashboard definition is copied unchanged from the SBK project into
-`grafana/dashboards/sbk-dashboard.json` and packaged at the same classpath location. The browser loads that JSON,
-walks all nested Grafana panels, extracts their Prometheus expressions, and uses the resulting 53-panel/242-metric
-definition to order and label live Java-rendered charts. Metrics exported by a newer SBK/SBM version but not yet in
-the definition remain visible as additional series and in the complete metric table. This preserves the
-single-JVM/no-external-Grafana architecture while using the supplied Grafana dashboard as the display specification.
-
-The browser fetches only the registered endpoint's repository partition. Metrics from different hosts or ports
-cannot be combined accidentally.
+Registrations and dashboard URLs are deterministic and recover after restart. Prometheus retains historical samples
+in its TSDB independently of whether a remote exporter is currently reachable. Missing/corrupt historical blocks
+are handled by Prometheus's own recovery behavior; target scrape failures are reported as non-fatal `down` status and
+do not prevent `sbk-dashboard` from serving other dashboards.
 
 ## Verification
 
 ```bash
-./gradlew check
-./gradlew installDist
-./build/install/sbk-dashboard/bin/sbk-dashboard -h
+./gradlew clean check installDist
 ```
 
-Tests cover Prometheus exposition parsing, escaped labels, bounded ring retention, endpoint uniqueness, scheduled
-scraping from a live HTTP exporter, segment rollover, checksum recovery, truncated tails, startup replay, and
-partition deletion. Retention tests also verify background deletion of an expired active segment while the store is
-running, preservation of another endpoint's current segment, and successful writing after cleanup.
+The automated suite covers option precedence, endpoint uniqueness/persistence, canonical dashboard packaging,
+endpoint scoping of all PromQL expressions, dynamic Prometheus discovery, dashboard reconciliation, UI inputs, and
+runtime link reporting.
 
-The implementation has also been tested against the real SBK project at `/root/projects/SBK` with:
+The end-to-end validation used:
 
-```bash
-/root/projects/SBK/build/install/sbk/bin/sbk \
-  -class file -file /tmp/sbk-dashboard-real-e2e.bin \
-  -writers 1 -size 4096 -seconds 15 -throughput 10 \
-  -out PrometheusLogger -context 19818/metrics
-```
+- JDK 25.0.2 and Gradle 9.4.0
+- the existing `/root/projects/SBK` build (SBK 10.4) with `PrometheusLogger`
+- Prometheus 3.10.0
+- Grafana OSS 12.4.1
+- two live SBK endpoints on the same host with different ports
 
-During that run the embedded Java collector discovered 90 metric series and displayed approximately 10 MB/s and
-2,560 records/s on the dedicated dashboard.
-
-## Security boundary
-
-Authentication is disabled in phase one. Run the server on a trusted management network or behind an authenticated
-reverse proxy. The registration API accepts internal DNS names and IP addresses because polling arbitrary benchmark
-hosts is its primary function.
+It verified live endpoint-labelled samples in Prometheus, two distinct HTTP-200 Grafana URLs, all 53 panels per
+dashboard, endpoint scoping on every SBK PromQL expression, restart recovery, dynamic target updates, mapping
+persistence, and dashboard removal.
