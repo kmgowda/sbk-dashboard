@@ -1,6 +1,10 @@
 const query = new URLSearchParams(window.location.search);
 const targetId = query.get('id');
 const charts = new Map();
+const grafanaDefinitions = [];
+const grafanaMetricNames = new Set();
+const grafanaDefinitionCache = new Map();
+let grafanaPanelCount = 0;
 
 function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -49,9 +53,11 @@ function renderSummary(series) {
 }
 
 function chartCandidates(series) {
-    const signal = /MBPerSec|RecordsPerSec|AvgLatency|MaxLatency|_(99|99_9)$|Writers$|Readers$|Connections$/;
-    const selected = series.filter(item => signal.test(item.name) && item.points.length > 0);
-    return (selected.length ? selected : series.filter(item => item.points.length > 0)).slice(0, 12);
+    return series.filter(item => item.points.length > 0).sort((left, right) => {
+        const leftOrder = grafanaDefinition(left)?.order ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = grafanaDefinition(right)?.order ?? Number.MAX_SAFE_INTEGER;
+        return leftOrder - rightOrder || left.name.localeCompare(right.name) || left.key.localeCompare(right.key);
+    });
 }
 
 function chartCard(metric) {
@@ -59,7 +65,9 @@ function chartCard(metric) {
     if (!card) {
         card = el('article', 'chart-card');
         const top = el('div', 'chart-top');
-        top.append(el('div', null, metric.name), el('strong', 'chart-value'));
+        const title = el('div', null, grafanaDefinition(metric)?.title || 'Additional exported metric');
+        title.append(el('small', null, metric.name));
+        top.append(title, el('strong', 'chart-value'));
         const canvas = document.createElement('canvas');
         canvas.height = 180;
         card.append(top, canvas);
@@ -69,6 +77,46 @@ function chartCard(metric) {
     card.querySelector('.chart-value').textContent = format(metric.current, metric.name);
     draw(card.metricCanvas, metric.points);
     return card;
+}
+
+function grafanaDefinition(metric) {
+    if (grafanaDefinitionCache.has(metric.key)) return grafanaDefinitionCache.get(metric.key);
+    const definition = grafanaDefinitions.find(candidate => candidate.name === metric.name
+        && Object.entries(candidate.labels).every(([name, value]) => metric.labels[name] === value));
+    grafanaDefinitionCache.set(metric.key, definition || null);
+    return definition;
+}
+
+function addGrafanaExpression(expression, title) {
+    const metricPattern = /(SBK_[A-Za-z0-9_]+)(?:\{([^}]*)\})?/g;
+    for (const match of expression.matchAll(metricPattern)) {
+        const labels = {};
+        const labelPattern = /([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"/g;
+        for (const label of (match[2] || '').matchAll(labelPattern)) labels[label[1]] = label[2];
+        grafanaMetricNames.add(match[1]);
+        grafanaDefinitions.push({name: match[1], labels, title, order: grafanaDefinitions.length});
+    }
+}
+
+function configureGrafanaDashboard(definition) {
+    function visit(panels) {
+        for (const panel of panels || []) {
+            if (panel.type !== 'row') grafanaPanelCount++;
+            for (const target of panel.targets || []) {
+                addGrafanaExpression(target.expr || '', panel.title);
+            }
+            visit(panel.panels);
+        }
+    }
+    visit(definition.panels);
+    document.querySelector('#definition-info').textContent =
+        `${definition.title} · ${grafanaPanelCount} panels · ${grafanaMetricNames.size} configured metrics · Auto-refresh 5 seconds`;
+}
+
+async function loadGrafanaDashboard() {
+    const response = await fetch('/grafana/dashboards/sbk-dashboard.json', {cache: 'no-store'});
+    if (!response.ok) throw new Error('Unable to load the SBK Grafana dashboard definition');
+    configureGrafanaDashboard(await response.json());
 }
 
 function draw(canvas, points) {
@@ -138,6 +186,7 @@ async function refresh() {
     }
 }
 
-loadTarget().then(refresh).catch(error => document.querySelector('#dashboard-message').textContent = error.message);
+Promise.all([loadGrafanaDashboard(), loadTarget()]).then(refresh)
+    .catch(error => document.querySelector('#dashboard-message').textContent = error.message);
 window.setInterval(refresh, 5000);
 window.addEventListener('resize', refresh);

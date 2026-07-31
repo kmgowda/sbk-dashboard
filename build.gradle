@@ -56,6 +56,12 @@ application {
     ]
 }
 
+tasks.named('processResources') {
+    from('grafana/dashboards') {
+        into 'grafana/dashboards'
+    }
+}
+
 tasks.named('startScripts') {
     doLast {
         String unixMarker = '# Determine the Java command to use to start the JVM.'

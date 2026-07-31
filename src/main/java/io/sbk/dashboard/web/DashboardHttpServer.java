@@ -157,6 +157,7 @@ public final class DashboardHttpServer implements AutoCloseable {
             case "/app.css" -> "/web/app.css";
             case "/app.js" -> "/web/app.js";
             case "/dashboard.js" -> "/web/dashboard.js";
+            case "/grafana/dashboards/sbk-dashboard.json" -> "/grafana/dashboards/sbk-dashboard.json";
             default -> null;
         };
         if (resource == null) {
@@ -216,6 +217,9 @@ public final class DashboardHttpServer implements AutoCloseable {
         }
         if (resource.endsWith(".js")) {
             return "text/javascript; charset=utf-8";
+        }
+        if (resource.endsWith(".json")) {
+            return "application/json; charset=utf-8";
         }
         return "text/html; charset=utf-8";
     }

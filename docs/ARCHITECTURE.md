@@ -20,9 +20,14 @@
 
 The complete runtime is one JVM. No operating-system child processes or external monitoring servers participate.
 
+The dashboard renderer loads the unchanged `grafana/dashboards/sbk-dashboard.json` definition bundled with the
+application. Its nested panel titles and Prometheus expressions provide the authoritative metric ordering and chart
+labels. The Java collector supplies the corresponding endpoint-partitioned series directly; no Grafana server is
+required to interpret queries or host the UI.
+
 ## Registration lifecycle
 
-1. Validate and normalize hostname, port, metrics path, and SBK/SBM kind.
+1. Validate and normalize hostname, port, and metrics path.
 2. Hash normalized `host:port` to produce the stable endpoint identifier.
 3. Atomically persist the endpoint registry.
 4. Create an independent scheduled collector and run its first scrape immediately.

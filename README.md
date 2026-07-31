@@ -259,8 +259,15 @@ The dedicated endpoint page includes:
 - throughput and records-per-second summaries;
 - average, maximum, and tail latency signals;
 - active reader/writer/connection state;
-- up to twelve live time-series charts selected from performance metrics; and
+- every available series, ordered and titled using the imported SBK Grafana panel expressions; and
 - a searchable-style complete metric table with labels and observed ranges.
+
+The authoritative dashboard definition is copied unchanged from the SBK project into
+`grafana/dashboards/sbk-dashboard.json` and packaged at the same classpath location. The browser loads that JSON,
+walks all nested Grafana panels, extracts their Prometheus expressions, and uses the resulting 53-panel/242-metric
+definition to order and label live Java-rendered charts. Metrics exported by a newer SBK/SBM version but not yet in
+the definition remain visible as additional series and in the complete metric table. This preserves the
+single-JVM/no-external-Grafana architecture while using the supplied Grafana dashboard as the display specification.
 
 The browser fetches only the registered endpoint's repository partition. Metrics from different hosts or ports
 cannot be combined accidentally.
