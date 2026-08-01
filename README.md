@@ -1,209 +1,127 @@
 # SBK Dashboard
 
-`sbk-dashboard` is a single Java control server for dedicated SBK/SBM Grafana dashboards. It starts and owns one
-native Prometheus server and one native Grafana server, dynamically registers remote PrometheusLogger endpoints,
-and provisions one isolated copy of the canonical SBK dashboard for every unique `host:port`.
+`sbk-dashboard` is a Python 3 control server for dedicated SBK/SBM Grafana dashboards. It owns one native
+Prometheus server and one native Grafana server, dynamically registers remote PrometheusLogger endpoints, and
+provisions one isolated copy of the canonical SBK dashboard for every unique `host:port`.
 
-This phase is deliberately non-containerized. Docker, Podman, Kubernetes, and Compose are not required or used.
+This implementation is non-containerized. Prometheus and Grafana are official native child processes—not Python
+libraries—and the Python server manages their verified installation, configuration, readiness, reconciliation,
+health, and shutdown.
 
-## What it does
+## Features
 
-- Presents a web page where an operator adds a hostname/IP address, port, and metrics path.
-- Stores endpoint registrations and deterministic Grafana URL mappings on disk.
-- Atomically rewrites Prometheus file-based service discovery whenever an endpoint is added or removed.
-- Scrapes each remote SBK/SBM endpoint through managed Prometheus.
-- Copies the exact dashboard from
-  [`/root/projects/SBK/grafana/dashboards/sbk-dashboard.json`](grafana/dashboards/sbk-dashboard.json).
-- Generates one Grafana-provisioned clone per endpoint. Panel layout, visualization settings, datasource UID, and all
-  53 canonical panels remain intact; PromQL selectors receive only an endpoint-isolation label.
-- Retains time-series data in Prometheus TSDB for 7 days by default. Prometheus performs background retention and
-  automatically deletes expired blocks while the server is running.
-- Stops managed Prometheus and Grafana processes when `sbk-dashboard` shuts down.
+- Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints.
+- Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
+- Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
+- A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
+- Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
+- Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
+- Verified Prometheus and Grafana downloads with live progress when native installations are absent.
+- Safe `-continue false` process replacement and `-continue true` attachment.
+- Explicit state-machine lifecycle with automatic restart and bounded exponential backoff for owned native services.
+- Fixed HTTP worker pool, bounded admission queue, request timeouts, response-size limits, and endpoint-count limits.
+- Process-group/descendant shutdown and bounded rotating native console logs.
+- Linux, macOS, and Windows support on x86-64 and ARM64.
+- Standard Python virtual-environment and Conda installation workflows.
 
 ## Architecture
 
 ```text
 Browser
    |
-   +--> sbk-dashboard :9721  (registration UI and API)
+   +--> Python sbk-dashboard :9721  (registration UI and API)
            |
            +--> targets.json + dashboard-mappings.json
-           +--> managed Prometheus :9090 ---> remote-host:9718/metrics
+           +--> native Prometheus :9090 ---> remote-host:9718/metrics
            |         |
-           |         +--> persistent TSDB with time-based retention
+           |         +--> persistent TSDB and background retention
            |
-           +--> managed Grafana :3000
+           +--> native Grafana :3000
                      |
                      +--> sbk-<endpoint-id>.json (one per host:port)
 ```
 
-Prometheus and Grafana are native child processes, not Java threads or Maven libraries. Their server engines do not
-exist as embeddable Java APIs. Java owns their configuration, startup, readiness, reconciliation, health, and
-shutdown. This preserves the exact Grafana dashboard behavior without containers.
+The Python process is the control plane. Metrics ingestion, storage, PromQL, dashboard provisioning, and rendering
+remain in the official Prometheus and Grafana servers. See [the architecture document](docs/ARCHITECTURE.md).
 
-## Supported platforms and requirements
+## Requirements
 
-- JDK 25.x
-- Gradle 9.x (the wrapper provides Gradle 9.4.0)
-- Network access on the first run when Prometheus or Grafana is not already installed
+- Python 3.10 or newer
+- `pip` for a venv installation, or Conda
+- Network access on the first run if Prometheus or Grafana is not installed
 
-Automatic native installation is configured for Linux, macOS, and Windows on x86-64 and ARM64. The application
-normalizes JVM platform names to `linux-x86_64`, `linux-arm64`, `macos-x86_64`, `macos-arm64`,
-`windows-x86_64`, or `windows-arm64`, prints the selected platform, and fails before downloading on unsupported
-operating systems or processor architectures.
+The only runtime Python dependency is `psutil`, used for cross-platform process and listener ownership checks.
 
-The Gradle wrapper and generated application script select Java in this order:
-
-1. `SBK_JAVA_HOME`
-2. `JAVA_HOME`
-3. `java` on `PATH`
-
-The wrapper prints the selected Java source, Java version, and Gradle version before every build.
-
-## Automatic native monitoring installation
-
-No manual Prometheus or Grafana installation is required on a supported platform. Start with no arguments.
+## Install with venv
 
 Linux or macOS:
 
 ```bash
-build/install/sbk-dashboard/bin/sbk-dashboard
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+sbk-dashboard -h
 ```
 
-Windows:
+Windows PowerShell:
 
-```bat
-build\install\sbk-dashboard\bin\sbk-dashboard.bat
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+sbk-dashboard -h
 ```
 
-The server checks for `prometheus` on `PATH` and Grafana under `/usr/share/grafana`. If either is missing, it reads
-[`config/monitoring-download.properties`](config/monitoring-download.properties), downloads the pinned archive,
-verifies its SHA-256 checksum before extraction, and installs it under the dashboard data directory. A successful
-archive is cached, so subsequent starts do not download it again. First-time downloads display live percentage and
-byte-size progress; servers without a total content length display the downloaded byte count instead.
+For an editable development installation, use `python -m pip install -e ".[dev]"`.
 
-Default locations are:
+## Install with Conda
 
-```text
-~/.sbk-dashboard/downloads  # verified .tar.gz or .zip archives
-~/.sbk-dashboard/tools      # extracted Prometheus and Grafana distributions
-```
-
-The installed application also contains an editable `conf/monitoring-download.properties`. Override the file
-explicitly when required:
+Create the declared environment:
 
 ```bash
-sbk-dashboard -monitoring-properties /etc/sbk-dashboard/monitoring-download.properties
+conda env create -f environment.yml
+conda activate sbk-dashboard
+sbk-dashboard -h
 ```
 
-The properties file specifies:
-
-```properties
-download.directory=${data.directory}/downloads
-install.directory=${data.directory}/tools
-prometheus.linux-x86_64.download.url=https://...
-prometheus.linux-x86_64.download.file=prometheus-....tar.gz
-prometheus.linux-x86_64.download.sha256=...
-prometheus.linux-x86_64.archive.directory=prometheus-...
-prometheus.linux-x86_64.executable=prometheus
-prometheus.linux-x86_64.archive.format=tar.gz
-
-prometheus.windows-x86_64.download.url=https://...
-prometheus.windows-x86_64.download.file=prometheus-....zip
-prometheus.windows-x86_64.download.sha256=...
-prometheus.windows-x86_64.archive.directory=prometheus-...
-prometheus.windows-x86_64.executable=prometheus.exe
-prometheus.windows-x86_64.archive.format=zip
-```
-
-The packaged file contains corresponding Prometheus and Grafana entries for all six supported platform keys.
-`${data.directory}`, `${user.home}`, `${os.arch}`, and `${os.name}` placeholders are supported. Downloads must use
-HTTPS. An external file can override any packaged property while retaining the remaining packaged defaults.
-
-### Optional manual installation
-
-Example for Linux x86-64, using the versions validated by this project:
+Or install into an existing Conda environment:
 
 ```bash
-mkdir -p /opt/sbk-monitoring
-cd /opt/sbk-monitoring
-
-curl -fLO https://github.com/prometheus/prometheus/releases/download/v3.10.0/prometheus-3.10.0.linux-amd64.tar.gz
-tar -xzf prometheus-3.10.0.linux-amd64.tar.gz
-
-curl -fLO https://dl.grafana.com/grafana/release/12.4.1/grafana_12.4.1_22846628243_linux_amd64.tar.gz
-tar -xzf grafana_12.4.1_22846628243_linux_amd64.tar.gz
+conda create -n sbk-dashboard python=3.12 pip
+conda activate sbk-dashboard
+python -m pip install .
 ```
 
-Grafana publishes the SHA-256 checksum
-`55d6d71c813dd7426fe0b8d3a237e8d4ee4bf8a806ff90494207e146473ceb41` for that standalone archive.
-Use the checksums published with the Prometheus release to verify its archive before installation.
-
-## Build
-
-```bash
-export SBK_JAVA_HOME=/path/to/jdk-25
-./gradlew clean check installDist
-```
-
-The installed command is:
-
-```text
-build/install/sbk-dashboard/bin/sbk-dashboard
-```
+Using `pip` inside the activated Conda environment installs the console command and package resources in that
+environment without requiring a system-wide Python installation.
 
 ## Start
 
 ```bash
-build/install/sbk-dashboard/bin/sbk-dashboard
+sbk-dashboard
 ```
-
-Supplying `-prometheus-bin` and `-grafana-home` still selects an existing manual installation. If those locations are
-not usable, the verified properties-based installation is used.
-
-### Existing-process behavior
-
-The default is `-continue false`. Before starting its managed services, sbk-dashboard checks the actual listener
-owners on the configured Prometheus and Grafana ports. An existing process is stopped only when its executable is
-exactly `prometheus`, `grafana`, or `grafana-server`. Ownership for both ports is validated before either process is
-stopped. Listener discovery uses a cross-platform Java system-information library and persisted managed-child
-identity. If an unrelated or unidentifiable process owns a port, startup fails safely and stops nothing.
-
-```bash
-sbk-dashboard -continue false
-```
-
-Use continue mode when healthy compatible Prometheus and Grafana processes are already running on the configured
-ports:
-
-```bash
-sbk-dashboard -continue true
-```
-
-In continue mode, sbk-dashboard attaches through their health endpoints and starts only a missing component. Attached
-processes are not terminated when sbk-dashboard exits. Existing services must already use configuration compatible
-with this dashboard's Prometheus discovery and Grafana provisioning directories; the usual case is processes left
-running by the same sbk-dashboard data directory.
 
 Defaults:
 
-- SBK Dashboard: `http://localhost:9721/`
+- Management UI: `http://localhost:9721/`
 - Prometheus: `http://localhost:9090/`
 - Grafana: `http://localhost:3000/`
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
 - Prometheus retention: 7 days
 - Scrape interval: 5 seconds
+- Existing-process continuation: disabled
 
-At startup, the application prints the Java version, supplied arguments, every effective option and its source,
-and full dashboard links for `localhost`, `127.0.0.1`, and discovered non-loopback addresses.
+Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
+all effective options and their sources, and dashboard links for `localhost`, `127.0.0.1`, and discovered network
+addresses.
 
-### Production-style example
-
-Use `-grafana-url` for the URL that users' browsers can reach. It may differ from Grafana's local listen address.
+### Production example
 
 ```bash
-build/install/sbk-dashboard/bin/sbk-dashboard \
+sbk-dashboard \
   -port 9721 \
   -data /var/lib/sbk-dashboard \
   -retention 14 \
@@ -214,32 +132,29 @@ build/install/sbk-dashboard/bin/sbk-dashboard \
   -grafana-url http://dashboard.example.com:3000
 ```
 
-`-auth false` is the only supported authentication setting. Authentication is reserved for future development.
+`-grafana-url` is the address reachable by users' browsers; it may differ from Grafana's local listen address.
 
 ## Command options
 
 ```text
 -h, --help                    Show help and exit
--port <port>                  Registration server port (default 9721)
+-port <port>                  Management HTTP port (default 9721)
 -auth <true|false>            Must be false in this release
--continue <true|false>        Reuse healthy existing monitoring processes (default false)
+-continue <true|false>        Reuse healthy existing services (default false)
 -data, --data-dir <path>      Persistent data directory
--retention, --retention-days  Prometheus TSDB retention days (default 7)
--prometheus-bin <path>        Prometheus executable (default: PATH, then automatic download)
--prometheus-port <port>       Managed Prometheus port (default 9090)
--grafana-home <path>          Grafana home (default /usr/share/grafana, then automatic download)
--grafana-port <port>          Managed Grafana port (default 3000)
+-retention, --retention-days  Prometheus retention days (default 7)
+-prometheus-bin <path>        Prometheus executable (PATH, then download)
+-prometheus-port <port>       Prometheus port (default 9090)
+-grafana-home <path>          Grafana home (system path, then download)
+-grafana-port <port>          Grafana port (default 3000)
 -grafana-url <url>            Browser-accessible Grafana base URL
--monitoring-properties <file> Download URLs, checksums, and installation directories
+-monitoring-properties <file> Download URLs, checksums, and install directories
 ```
 
-Command-line values take precedence over environment variables, and environment variables take precedence over
-built-in defaults.
+Command-line values override environment variables, which override built-in defaults.
 
 | Environment variable | Purpose |
 |---|---|
-| `SBK_JAVA_HOME` | Preferred JDK home for Gradle and the installed application |
-| `JAVA_HOME` | Java fallback when `SBK_JAVA_HOME` is unset |
 | `SBK_DASHBOARD_DATA_DIR` | Fallback for `-data` |
 | `SBK_DASHBOARD_DISK_RETENTION_DAYS` | Fallback for `-retention` |
 | `SBK_DASHBOARD_SCRAPE_SECONDS` | Prometheus scrape interval; default 5 |
@@ -248,14 +163,91 @@ built-in defaults.
 | `SBK_DASHBOARD_GRAFANA_HOME` | Fallback for `-grafana-home` |
 | `SBK_DASHBOARD_GRAFANA_PORT` | Fallback for `-grafana-port` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
-| `SBK_DASHBOARD_MONITORING_PROPERTIES` | External native download properties file |
+| `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
+| `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
+| `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |
+| `SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS` | Per-client socket timeout; default 15 |
+| `SBK_DASHBOARD_HEALTH_RESPONSE_MB` | Maximum Prometheus target-health response; default 4 MiB |
+| `SBK_DASHBOARD_SUPERVISOR_SECONDS` | Native health and restart interval; default 5 |
+| `SBK_DASHBOARD_PROCESS_LOG_MB` | Maximum bytes per native console log generation; default 10 MiB |
+| `SBK_DASHBOARD_PROCESS_LOG_BACKUPS` | Rotated native console log generations; default 3 |
+| `SBK_DASHBOARD_MAX_TARGETS` | Persisted endpoint limit; default 10,000 |
 
-`SBK_DASHBOARD_RETENTION_SAMPLES` and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used. Prometheus's disk retention is
-the single time-series retention mechanism.
+`SBK_JAVA_HOME`, `JAVA_HOME`, `SBK_DASHBOARD_RETENTION_SAMPLES`, and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used by
+the Python implementation. Prometheus time-based retention is the only sample-retention mechanism.
+
+## Automatic native installation
+
+The packaged `monitoring-download.properties` contains pinned Prometheus and Grafana URLs, checksums, archive
+layouts, and executable names for:
+
+- `linux-x86_64` and `linux-arm64`
+- `macos-x86_64` and `macos-arm64`
+- `windows-x86_64` and `windows-arm64`
+
+Missing tools are downloaded to `${data.directory}/downloads`, checksum-verified, safely extracted, and installed
+under `${data.directory}/tools`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special
+entries are rejected.
+
+Override only the required values in an external file:
+
+```properties
+download.directory=/srv/sbk-dashboard/downloads
+install.directory=/srv/sbk-dashboard/tools
+prometheus.download.url=https://mirror.example/prometheus.tar.gz
+prometheus.download.file=prometheus.tar.gz
+prometheus.download.sha256=<64 lowercase hexadecimal characters>
+prometheus.archive.directory=prometheus-version-platform
+prometheus.executable=prometheus
+prometheus.archive.format=tar.gz
+```
+
+Pass it using `-monitoring-properties /path/to/monitoring-download.properties`. Platform-qualified values such as
+`prometheus.windows-x86_64.download.url` are also supported. Unspecified values retain packaged defaults.
+
+## Existing-process behavior
+
+By default, `-continue false` verifies the owners of the configured Prometheus and Grafana ports before stopping
+anything. It stops only executables named `prometheus`, `grafana`, or `grafana-server`; an unrelated or unidentified
+listener fails startup safely.
+
+Use `-continue true` to attach to healthy compatible services already on the configured ports:
+
+```bash
+sbk-dashboard -continue true
+```
+
+Attached services are not stopped at dashboard shutdown. They must already use configuration compatible with this
+data directory's Prometheus discovery and Grafana provisioning paths.
+
+Owned services are supervised every five seconds. An exited child is restarted immediately; a running service that
+fails three consecutive health probes is replaced. Repeated launch failures use exponential backoff capped at 60
+seconds, preventing a crash loop from consuming CPU or filling logs. Attached `-continue true` services are observed
+but never restarted or terminated because sbk-dashboard does not own them.
+
+## Production resource and lifecycle controls
+
+- The management server has eight workers and a queue of 64 by default. Excess requests receive HTTP 503 instead of
+  allocating more threads or unbounded queued futures.
+- Client sockets time out, JSON requests are limited to 64 KiB, and Prometheus health responses default to 4 MiB.
+- Registrations and status maps cannot exceed `SBK_DASHBOARD_MAX_TARGETS`.
+- Prometheus and Grafana console output is continuously drained in 64 KiB chunks and rotated at 10 MiB with three
+  backups by default. No subprocess output pipe is allowed to accumulate in memory.
+- Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
+  and `failed` states. Shutdown is idempotent and reports incomplete child termination.
+- Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
+  descendants; Windows uses a new process group plus recursive process-tree termination.
+- A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
+  joined at shutdown; subprocess log-pump threads exit at EOF and are joined.
+
+For unattended 24/7 use, run `sbk-dashboard` under the host service manager—such as systemd, launchd, or Windows
+Service Control Manager—with automatic restart enabled for failure of the Python control process itself. The internal
+supervisor covers Prometheus and Grafana failures; the host service manager covers VM events and control-plane
+failure.
 
 ## Run SBK and register it
 
-Start the existing SBK build with `PrometheusLogger`:
+Start SBK with `PrometheusLogger`:
 
 ```bash
 cd /root/projects/SBK
@@ -270,105 +262,61 @@ cd /root/projects/SBK
   -context 9718/metrics
 ```
 
-Open `http://localhost:9721/`, enter:
+Open `http://localhost:9721/` and add host `127.0.0.1`, port `9718`, path `/metrics`. The returned dashboard URL is
+similar to `http://localhost:3000/d/sbk-f9720cad2e38eec6/`. Registering the same host on port `9719` produces a
+different endpoint ID, target label, dashboard JSON, mapping, and URL.
 
-```text
-Host:         127.0.0.1
-Port:         9718
-Metrics path: /metrics
-```
-
-The returned target contains a stable URL such as:
-
-```text
-http://localhost:3000/d/sbk-f9720cad2e38eec6/
-```
-
-The same host on port `9719` gets a different endpoint ID, dashboard JSON, Prometheus label, mapping, and URL.
-
-### API example
+### API
 
 ```bash
 curl -fsS -X POST http://localhost:9721/api/targets \
   -H 'Content-Type: application/json' \
-  --data '{
-    "name": "NVMe benchmark",
-    "host": "benchmark-01.example",
-    "port": 9718,
-    "metricsPath": "/metrics"
-  }'
-```
+  --data '{"name":"NVMe benchmark","host":"benchmark-01.example","port":9718,"metricsPath":"/metrics"}'
 
-List targets and their scrape status/dashboard URL:
-
-```bash
 curl -fsS http://localhost:9721/api/targets
-```
-
-Remove a target:
-
-```bash
 curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
 ```
 
-Removal updates discovery and mappings immediately. Grafana's file provisioner removes the dashboard shortly
-afterward.
-
 ## Persistent files
 
-For a data directory `/var/lib/sbk-dashboard`:
-
 ```text
-/var/lib/sbk-dashboard/
-├── downloads/                       # verified native release archives
-├── tools/                           # automatically installed native servers
-├── targets.json
-├── dashboard-mappings.json
+~/.sbk-dashboard/
+├── downloads/                     # verified native archives
+├── tools/                         # installed native distributions
+├── targets.json                   # endpoint registry
+├── dashboard-mappings.json        # stable target-to-URL mappings
 └── monitoring/
-    ├── managed-processes.json       # validated managed-child identity
+    ├── managed-processes.json     # validated managed-child identity
     ├── prometheus/
     │   ├── prometheus.yml
     │   ├── targets.json
-    │   └── data/                 # Prometheus TSDB
+    │   └── data/                  # persistent Prometheus TSDB
     ├── grafana/
     │   ├── grafana.ini
-    │   ├── data/                 # Grafana SQLite database
+    │   ├── data/
     │   ├── provisioning/
-    │   └── dashboards/           # sbk-<endpoint-id>.json
+    │   └── dashboards/            # sbk-<endpoint-id>.json
     └── logs/
-        ├── prometheus.log
-        └── grafana.log
+        ├── prometheus.log[.1-.3]
+        └── grafana-console.log[.1-.3]
 ```
 
-Registrations and dashboard URLs are deterministic and recover after restart. Prometheus retains historical samples
-in its TSDB independently of whether a remote exporter is currently reachable. Missing/corrupt historical blocks
-are handled by Prometheus's own recovery behavior; target scrape failures are reported as non-fatal `down` status and
-do not prevent `sbk-dashboard` from serving other dashboards.
+Existing Java-created `targets.json`, monitoring data, and dashboard mappings remain compatible, so the same data
+directory can be reused after upgrading.
 
-## Verification
+## Build and test
 
 ```bash
-./gradlew clean check installDist
+python -m pip install -e ".[dev]"
+ruff check src tests
+python -m pytest
+coverage run -m pytest
+coverage report
+python -m build
 ```
 
-The automated suite covers all six platform mappings, TAR.GZ and ZIP extraction safety, Windows `.exe` selection,
-cross-platform listener ownership, option precedence, endpoint uniqueness/persistence, canonical dashboard
-packaging, endpoint scoping of all PromQL expressions, dynamic Prometheus discovery, dashboard reconciliation, UI
-inputs, and runtime link reporting.
-
-The native end-to-end validation executed on Linux x86-64 used:
-
-- JDK 25.0.2 and Gradle 9.4.0
-- the existing `/root/projects/SBK` build (SBK 10.4) with `PrometheusLogger`
-- Prometheus 3.10.0
-- Grafana OSS 12.4.1
-- two live SBK endpoints on the same host with different ports
-
-It verified live endpoint-labelled samples in Prometheus, two distinct HTTP-200 Grafana URLs, all 53 panels per
-dashboard, endpoint scoping on every SBK PromQL expression, restart recovery, dynamic target updates, mapping
-persistence, and dashboard removal.
-
-Linux x86-64 additionally received a fresh-download test of every pinned archive, live progress, checksum
-verification, extraction, health checks, same-port process replacement, and managed ownership cleanup. macOS and
-Windows platform selection, archive metadata, ZIP safety, `.exe` handling, launch scripts, and distribution contents
-are covered automatically; their native binaries still require smoke testing on those operating systems.
+Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,
+log rotation, configuration precedence, all six native platform definitions, safe TAR.GZ and ZIP extraction,
+endpoint persistence and compatibility, dashboard cloning and complete PromQL scoping, discovery generation,
+management APIs, health attachment, process ownership, and package resources. Native Linux validation is described
+in [testing documentation](docs/TESTING.md).
