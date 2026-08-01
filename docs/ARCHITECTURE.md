@@ -7,12 +7,14 @@ modules and are never embedded in the Python interpreter.
 
 ```text
                     +---------------- Python process ----------------+
- Browser ---------->| ThreadingHTTPServer                             |
+ Browser ---------->| BoundedThreadPoolHttpServer                    |
                     |   |                                             |
                     |   +-- TargetRegistry ---- targets.json          |
                     |   +-- PrometheusTargetDiscovery                 |
                     |   +-- GrafanaDashboardProvisioner               |
-                    |   +-- lifecycle and health monitor              |
+                    |   +-- ManagedMonitoringStack facade             |
+                    |         +-- single native supervisor            |
+                    |         +-- ManagedNativeService x 2            |
                     +---|---------------------|-----------------------+
                         | child process       | child process
                         v                     v
@@ -58,9 +60,17 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
 
 ## Concurrency
 
-- `ThreadingHTTPServer` creates an independent thread for each HTTP request.
+- The HTTP Active Object uses a fixed worker pool (eight by default) and a bounded admission semaphore/queue (64 by
+  default). Work beyond that capacity receives HTTP 503 without creating a thread or queued future.
+- Accepted client sockets have a 15-second timeout. Request bodies are bounded at 64 KiB and Prometheus target-health
+  responses at 4 MiB by default.
 - Registry mutations, status snapshots, discovery writes, and provisioning reconciliations are protected by locks.
-- One daemon health thread reads Prometheus target state every five seconds.
+- Status publication uses immutable tuple/dictionary replacement, so readers never observe partially reconciled
+  state. The map is capped by the configured endpoint limit.
+- One supervisor thread checks both native services and refreshes target state. It sleeps on a shutdown event, so
+  shutdown interrupts the wait without polling delay.
+- Each owned service has one 64 KiB chunked log-pump thread. Pipes are continuously drained, logs are bounded and
+  rotated, and pumps are joined and descriptors closed at shutdown or restart.
 - Prometheus independently schedules and executes endpoint scrapes.
 - Grafana independently handles browser sessions and queries.
 
@@ -78,7 +88,57 @@ validated before any process is stopped. Persisted PID, creation time, executabl
 where listener ownership is unavailable. With `-continue true`, health endpoints are checked and compatible
 services are attached rather than owned.
 
-Only processes launched by the current invocation are terminated during normal shutdown.
+Each stack and component follows a validated lifecycle state machine:
+
+```text
+new -> starting -> running -> stopping -> stopped
+          |           |
+          v           v
+        failed <--- starting (supervised restart)
+```
+
+Illegal transitions fail immediately. Construction has no process side effects; `start()` acquires resources and
+`close()` is idempotent. Startup failure performs reverse-order cleanup. Shutdown first stops admission, signals the
+supervisor, joins it, and then stops Grafana and Prometheus in reverse dependency order.
+
+Owned POSIX children start in new sessions. Termination addresses the process group and captured descendant tree,
+first gracefully and then forcibly after a bounded timeout. Windows children start in new process groups and are
+terminated recursively with `psutil`. PIDs, executable paths, creation times, and ports are persisted to defend
+against PID reuse.
+
+The supervisor restarts an exited owned process, or one that remains unhealthy for three checks. Failed restarts use
+exponential backoff capped at 60 seconds. Attached processes are health-checked but never restarted or terminated.
+Only processes launched by the current invocation are owned during normal shutdown.
+
+## Object-oriented design
+
+The implementation uses patterns where they enforce runtime invariants:
+
+- **Facade:** `ManagedMonitoringStack` exposes reconciliation, status, health, start, and close while hiding two
+  service lifecycles and generated configuration.
+- **State:** `LifecycleController` validates every stack, HTTP server, and native-service transition.
+- **Command:** immutable `NativeServiceSpec` objects supply platform-resolved launch commands and resource policy.
+- **Strategy:** `HealthProbe` separates readiness policy from native process ownership and makes supervision
+  independently testable.
+- **Supervisor:** one bounded control loop observes services, applies thresholds/backoff, and reconciles status.
+- **Repository:** `TargetRegistry` and `ManagedProcessRegistry` own validation and atomic persistence.
+- **Active Object / Bulkhead:** the HTTP executor isolates request concurrency with fixed workers and backpressure.
+- **RAII-style context ownership:** every response, archive, file, socket, process pipe, thread pool, and child process
+  has an explicit close/join path.
+
+These patterns are composition-based. There is no inheritance hierarchy for its own sake; immutable dataclasses
+describe state and policies, while lifecycle-owning objects encapsulate mutation behind locks.
+
+## Resource bounds and 24/7 operation
+
+Python-side growth is bounded by the endpoint limit, fixed HTTP workers/queue, maximum request/health payloads, one
+status per endpoint, two child descriptors, and fixed log generations. Repeated warning text is emitted only when the
+failure changes, avoiding identical five-second log spam. Endpoint reconciliation serializes one dashboard clone at
+a time rather than retaining all cloned JSON trees.
+
+Prometheus TSDB memory/disk use and Grafana query memory remain native-service concerns. Time retention constrains
+Prometheus history, while operators must size the VM for metric cardinality and dashboard query load. A host service
+manager should supervise the Python process; its internal supervisor is responsible for its owned native children.
 
 ## Cross-platform strategy
 

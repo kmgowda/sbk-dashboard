@@ -1,0 +1,149 @@
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+
+import psutil
+
+from sbk_dashboard.processes import (
+    LifecycleController,
+    LifecycleState,
+    ManagedNativeService,
+    ManagedProcessRegistry,
+    NativeServiceSpec,
+    RotatingProcessLog,
+)
+from sbk_dashboard.web import BoundedThreadPoolHttpServer
+
+
+class AlwaysReady:
+    def ready(self):
+        return True
+
+
+class LifecycleTest(unittest.TestCase):
+    def test_state_machine_accepts_only_defined_transitions(self):
+        lifecycle = LifecycleController()
+        self.assertEqual(LifecycleState.NEW, lifecycle.state)
+        lifecycle.transition(LifecycleState.STARTING)
+        lifecycle.transition(LifecycleState.RUNNING)
+        lifecycle.transition(LifecycleState.STOPPING)
+        lifecycle.transition(LifecycleState.STOPPED)
+        with self.assertRaisesRegex(RuntimeError, "Invalid lifecycle transition"):
+            lifecycle.transition(LifecycleState.RUNNING)
+
+    def test_managed_service_restarts_crashed_child_and_stops_process_group(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            registry = ManagedProcessRegistry(root / "managed.json")
+            shutdown = threading.Event()
+            command = [sys.executable, "-c", "import time; time.sleep(60)"]
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Test", "test", 12345, lambda: command, AlwaysReady(), root / "test.log", 1024, 2
+                ),
+                registry,
+                shutdown,
+            )
+            service.start(False)
+            first_pid = service.pid
+            self.assertIsNotNone(first_pid)
+            psutil.Process(first_pid).kill()
+            psutil.Process(first_pid).wait(3)
+            self.assertTrue(service.supervise())
+            second_pid = service.pid
+            self.assertNotEqual(first_pid, second_pid)
+            service.stop()
+            self.assertEqual(LifecycleState.STOPPED, service.lifecycle.state)
+            self.assertFalse(psutil.pid_exists(second_pid))
+
+    @unittest.skipIf(os.name == "nt", "POSIX process-group assertion")
+    def test_stop_terminates_descendants(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = (
+                "import subprocess,sys,time; "
+                "subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); time.sleep(60)"
+            )
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Tree", "tree", 12346, lambda: [sys.executable, "-c", script], AlwaysReady(),
+                    root / "tree.log", 1024, 1,
+                ),
+                ManagedProcessRegistry(root / "managed.json"),
+                threading.Event(),
+            )
+            service.start(False)
+            parent = psutil.Process(service.pid)
+            deadline = time.monotonic() + 3
+            children = []
+            while time.monotonic() < deadline and not children:
+                children = parent.children(recursive=True)
+                time.sleep(0.05)
+            self.assertTrue(children)
+            child_pids = [child.pid for child in children]
+            service.stop()
+            self.assertTrue(all(not psutil.pid_exists(pid) for pid in child_pids))
+
+    def test_log_pump_rotates_and_stops(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "native.log"
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 5000)"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            pump = RotatingProcessLog(process, path, 1024, 2)
+            pump.start()
+            process.wait(3)
+            pump.close()
+            files = list(path.parent.glob("native.log*"))
+            self.assertLessEqual(len(files), 3)
+            self.assertTrue(files)
+            self.assertTrue(all(item.stat().st_size <= 1024 for item in files))
+            self.assertFalse(any(thread.name == "native-log-pump" for thread in threading.enumerate()))
+
+
+class BoundedHttpServerTest(unittest.TestCase):
+    def test_rejects_requests_beyond_worker_and_queue_capacity(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                entered.set()
+                release.wait(3)
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_):
+                return
+
+        server = BoundedThreadPoolHttpServer(("127.0.0.1", 0), Handler, 1, 0, 2)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        first = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
+        first.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        self.assertTrue(entered.wait(2))
+        second = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
+        second.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        self.assertIn(b"503 Service Unavailable", second.recv(1024))
+        second.close()
+        release.set()
+        self.assertIn(b"200 OK", first.recv(1024))
+        first.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(2)
+        server.close_pool()
+        self.assertFalse(any(item.name.startswith("sbk-http-worker") for item in threading.enumerate()))
+
+
+if __name__ == "__main__":
+    unittest.main()

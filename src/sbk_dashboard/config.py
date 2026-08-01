@@ -98,6 +98,14 @@ class DashboardConfig:
     scrape_interval_seconds: int
     retention_days: int
     sources: dict[str, str]
+    http_workers: int = 8
+    http_queue_capacity: int = 64
+    request_timeout_seconds: int = 15
+    health_response_limit_bytes: int = 4 * 1024 * 1024
+    supervisor_interval_seconds: int = 5
+    process_log_size_mb: int = 10
+    process_log_backups: int = 3
+    max_targets: int = 10_000
 
 
 @dataclass(frozen=True)
@@ -177,6 +185,14 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
     scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
+    http_workers = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_WORKERS", 8, 1, 128)
+    http_queue = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_QUEUE", 64, 0, 10_000)
+    request_timeout = _bounded_environment(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS", 15, 1, 300)
+    health_limit_mb = _bounded_environment(environment, "SBK_DASHBOARD_HEALTH_RESPONSE_MB", 4, 1, 64)
+    supervisor_interval = _bounded_environment(environment, "SBK_DASHBOARD_SUPERVISOR_SECONDS", 5, 1, 60)
+    process_log_size = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_MB", 10, 1, 1024)
+    process_log_backups = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS", 3, 0, 100)
+    max_targets = _bounded_environment(environment, "SBK_DASHBOARD_MAX_TARGETS", 10_000, 1, 1_000_000)
     dashboard = DashboardConfig(
         port, False, continue_existing, Path(data).expanduser().resolve(), _positive(scrape, "scrape interval"),
         _positive(retention, "retention"),
@@ -184,6 +200,14 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source},
+        http_workers,
+        http_queue,
+        request_timeout,
+        health_limit_mb * 1024 * 1024,
+        supervisor_interval,
+        process_log_size,
+        process_log_backups,
+        max_targets,
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")
@@ -215,6 +239,19 @@ def default_grafana_home() -> str:
     if os.name == "nt":
         return str(Path(os.environ.get("PROGRAMFILES", "C:/Program Files")) / "GrafanaLabs" / "grafana")
     return "/usr/share/grafana"
+
+
+def _bounded_environment(
+    environment: dict[str, str], name: str, default: int, minimum: int, maximum: int
+) -> int:
+    value = environment.get(name, "").strip()
+    try:
+        selected = default if not value else int(value)
+    except ValueError as error:
+        raise ValueError(f"{name} must be a number") from error
+    if not minimum <= selected <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return selected
 
 
 def _read_properties(text: str) -> dict[str, str]:

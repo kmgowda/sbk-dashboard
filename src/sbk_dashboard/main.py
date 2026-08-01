@@ -41,9 +41,10 @@ def main(arguments: list[str] | None = None) -> None:
 
 
 def run(configuration: ParsedConfiguration, monitoring_configuration: MonitoringConfig) -> None:
-    registry = TargetRegistry(configuration.dashboard.data_directory)
-    monitoring = ManagedMonitoringStack(configuration.dashboard, monitoring_configuration, registry.list())
+    registry = TargetRegistry(configuration.dashboard.data_directory, configuration.dashboard.max_targets)
+    monitoring = ManagedMonitoringStack(configuration.dashboard, monitoring_configuration)
     try:
+        monitoring.start(registry.list())
         server = DashboardHttpServer(configuration.dashboard.port, registry, monitoring)
     except BaseException:
         monitoring.close()
@@ -71,10 +72,20 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
         print_effective(configuration, monitoring_configuration)
         stopped.wait()
     finally:
-        server.close()
-        monitoring.close()
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+        shutdown_errors: list[str] = []
+        try:
+            server.close()
+        except (OSError, RuntimeError) as error:
+            shutdown_errors.append(f"HTTP server: {error}")
+        try:
+            monitoring.close()
+        except (OSError, RuntimeError) as error:
+            shutdown_errors.append(f"monitoring stack: {error}")
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+        if shutdown_errors:
+            raise OSError("Incomplete shutdown: " + "; ".join(shutdown_errors))
 
 
 def print_runtime(arguments: list[str]) -> None:
@@ -106,6 +117,19 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
     print(f"  monitoring-properties={configuration.downloads.source} [{properties_source}]")
     print(f"  monitoring-download-directory={configuration.downloads.download_directory} [properties file]")
     print(f"  monitoring-install-directory={configuration.downloads.install_directory} [properties file]")
+    operational = {
+        "http-workers": (dashboard.http_workers, "SBK_DASHBOARD_HTTP_WORKERS"),
+        "http-queue-capacity": (dashboard.http_queue_capacity, "SBK_DASHBOARD_HTTP_QUEUE"),
+        "request-timeout-seconds": (dashboard.request_timeout_seconds, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
+        "health-response-limit-bytes": (dashboard.health_response_limit_bytes, "SBK_DASHBOARD_HEALTH_RESPONSE_MB"),
+        "supervisor-seconds": (dashboard.supervisor_interval_seconds, "SBK_DASHBOARD_SUPERVISOR_SECONDS"),
+        "process-log-size-mb": (dashboard.process_log_size_mb, "SBK_DASHBOARD_PROCESS_LOG_MB"),
+        "process-log-backups": (dashboard.process_log_backups, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS"),
+        "max-targets": (dashboard.max_targets, "SBK_DASHBOARD_MAX_TARGETS"),
+    }
+    for name, (value, environment) in operational.items():
+        source = f"environment {environment}" if os.environ.get(environment) else "default"
+        print(f"  {name}={value} [{source}]")
 
 
 def dashboard_links(port: int) -> list[str]:

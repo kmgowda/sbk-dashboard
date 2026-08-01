@@ -9,14 +9,16 @@ from pathlib import Path
 
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig
 from sbk_dashboard.models import TargetStatus
-from sbk_dashboard.monitoring import ManagedMonitoringStack, PortProcessManager
+from sbk_dashboard.monitoring import ManagedMonitoringStack
+from sbk_dashboard.processes import LifecycleState, PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
 from sbk_dashboard.web import DashboardHttpServer
 
 
 class FakeMonitoring:
-    def __init__(self):
+    def __init__(self, data):
         self.targets = []
+        self.dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
 
     def healthy(self):
         return True
@@ -35,7 +37,7 @@ class WebTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.registry = TargetRegistry(Path(self.temporary.name))
-        self.monitoring = FakeMonitoring()
+        self.monitoring = FakeMonitoring(Path(self.temporary.name))
         self.server = DashboardHttpServer(0, self.registry, self.monitoring)
         self.server.start()
         self.base = f"http://127.0.0.1:{self.server._server.server_port}"
@@ -90,14 +92,17 @@ class MonitoringContinueTest(unittest.TestCase):
         dashboard = DashboardConfig(9721, False, True, data, 5, 7, {})
         monitoring = MonitoringConfig(Path("unused"), data / "unused", self.prometheus.server_port,
                                       self.grafana.server_port, f"http://localhost:{self.grafana.server_port}", {})
-        stack = ManagedMonitoringStack(dashboard, monitoring, [])
+        stack = ManagedMonitoringStack(dashboard, monitoring)
         try:
+            stack.start([])
             self.assertTrue(stack.healthy())
+            self.assertEqual(LifecycleState.RUNNING, stack.state)
             self.assertIn("retention", "retention")
             config = (data / "monitoring/prometheus/prometheus.yml").read_text()
             self.assertIn("fallback_scrape_protocol: PrometheusText0.0.4", config)
         finally:
             stack.close()
+        self.assertEqual(LifecycleState.STOPPED, stack.state)
         self.assertFalse(PortProcessManager.available(self.prometheus.server_port))
         self.assertFalse(PortProcessManager.available(self.grafana.server_port))
 

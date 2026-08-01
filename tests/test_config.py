@@ -13,6 +13,9 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(9090, config.monitoring.prometheus_port)
         self.assertEqual(3000, config.monitoring.grafana_port)
         self.assertFalse(config.dashboard.continue_existing)
+        self.assertEqual(8, config.dashboard.http_workers)
+        self.assertEqual(64, config.dashboard.http_queue_capacity)
+        self.assertEqual(10, config.dashboard.process_log_size_mb)
 
     def test_command_line_overrides_environment(self):
         config = parse_configuration(
@@ -36,6 +39,24 @@ class ConfigurationTest(unittest.TestCase):
             self.assertEqual(11, config.dashboard.retention_days)
             self.assertEqual(9, config.dashboard.scrape_interval_seconds)
             self.assertEqual("https://grafana.example/base", config.monitoring.grafana_public_url)
+
+    def test_production_limits_are_configurable_and_bounded(self):
+        config = parse_configuration([], {
+            "SBK_DASHBOARD_HTTP_WORKERS": "12",
+            "SBK_DASHBOARD_HTTP_QUEUE": "96",
+            "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS": "20",
+            "SBK_DASHBOARD_PROCESS_LOG_MB": "25",
+            "SBK_DASHBOARD_PROCESS_LOG_BACKUPS": "4",
+            "SBK_DASHBOARD_MAX_TARGETS": "500",
+        })
+        self.assertEqual(12, config.dashboard.http_workers)
+        self.assertEqual(96, config.dashboard.http_queue_capacity)
+        self.assertEqual(20, config.dashboard.request_timeout_seconds)
+        self.assertEqual(25, config.dashboard.process_log_size_mb)
+        self.assertEqual(4, config.dashboard.process_log_backups)
+        self.assertEqual(500, config.dashboard.max_targets)
+        with self.assertRaisesRegex(ValueError, "SBK_DASHBOARD_HTTP_WORKERS"):
+            parse_configuration([], {"SBK_DASHBOARD_HTTP_WORKERS": "129"})
 
     def test_rejects_authentication(self):
         with self.assertRaisesRegex(ValueError, "future release"):

@@ -15,10 +15,11 @@ python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
 sbk-dashboard -h
 ```
 
-The standard-library suite is also runnable without pytest:
+The standard-library suite is also runnable without pytest. Promoting `ResourceWarning` to an error checks leaked
+files, sockets, subprocess streams, and threads:
 
 ```bash
-PYTHONPATH=src python -m unittest discover -s tests -v
+PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 ```
 
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
@@ -58,6 +59,10 @@ curl -fsS 'http://127.0.0.1:19090/api/v1/query?query=up%7Bjob%3D%22sbk-dashboard
 
 Open the returned Grafana URL and confirm all 53 panels load. Register the same host with another exporter port and
 confirm it receives a different URL and shows only its endpoint-labelled series.
+
+Kill the managed Prometheus PID without stopping sbk-dashboard. Within the supervisor interval, confirm a new PID is
+recorded, `/-/ready` recovers, and the existing TSDB still returns the endpoint's historical series. Repeat for
+Grafana and verify the dedicated URL recovers. Attached `-continue true` processes must not be killed or restarted.
 
 Stop with `Ctrl+C`, restart with the same data directory, and confirm registrations, mappings, dashboard files, and
 Prometheus history remain. Prometheus and Grafana child PIDs started by that invocation must no longer be alive.

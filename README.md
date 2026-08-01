@@ -18,6 +18,9 @@ health, and shutdown.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
 - Safe `-continue false` process replacement and `-continue true` attachment.
+- Explicit state-machine lifecycle with automatic restart and bounded exponential backoff for owned native services.
+- Fixed HTTP worker pool, bounded admission queue, request timeouts, response-size limits, and endpoint-count limits.
+- Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
 
@@ -161,6 +164,14 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_GRAFANA_PORT` | Fallback for `-grafana-port` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
+| `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
+| `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |
+| `SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS` | Per-client socket timeout; default 15 |
+| `SBK_DASHBOARD_HEALTH_RESPONSE_MB` | Maximum Prometheus target-health response; default 4 MiB |
+| `SBK_DASHBOARD_SUPERVISOR_SECONDS` | Native health and restart interval; default 5 |
+| `SBK_DASHBOARD_PROCESS_LOG_MB` | Maximum bytes per native console log generation; default 10 MiB |
+| `SBK_DASHBOARD_PROCESS_LOG_BACKUPS` | Rotated native console log generations; default 3 |
+| `SBK_DASHBOARD_MAX_TARGETS` | Persisted endpoint limit; default 10,000 |
 
 `SBK_JAVA_HOME`, `JAVA_HOME`, `SBK_DASHBOARD_RETENTION_SAMPLES`, and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used by
 the Python implementation. Prometheus time-based retention is the only sample-retention mechanism.
@@ -208,6 +219,31 @@ sbk-dashboard -continue true
 
 Attached services are not stopped at dashboard shutdown. They must already use configuration compatible with this
 data directory's Prometheus discovery and Grafana provisioning paths.
+
+Owned services are supervised every five seconds. An exited child is restarted immediately; a running service that
+fails three consecutive health probes is replaced. Repeated launch failures use exponential backoff capped at 60
+seconds, preventing a crash loop from consuming CPU or filling logs. Attached `-continue true` services are observed
+but never restarted or terminated because sbk-dashboard does not own them.
+
+## Production resource and lifecycle controls
+
+- The management server has eight workers and a queue of 64 by default. Excess requests receive HTTP 503 instead of
+  allocating more threads or unbounded queued futures.
+- Client sockets time out, JSON requests are limited to 64 KiB, and Prometheus health responses default to 4 MiB.
+- Registrations and status maps cannot exceed `SBK_DASHBOARD_MAX_TARGETS`.
+- Prometheus and Grafana console output is continuously drained in 64 KiB chunks and rotated at 10 MiB with three
+  backups by default. No subprocess output pipe is allowed to accumulate in memory.
+- Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
+  and `failed` states. Shutdown is idempotent and reports incomplete child termination.
+- Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
+  descendants; Windows uses a new process group plus recursive process-tree termination.
+- A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
+  joined at shutdown; subprocess log-pump threads exit at EOF and are joined.
+
+For unattended 24/7 use, run `sbk-dashboard` under the host service manager—such as systemd, launchd, or Windows
+Service Control Manager—with automatic restart enabled for failure of the Python control process itself. The internal
+supervisor covers Prometheus and Grafana failures; the host service manager covers VM events and control-plane
+failure.
 
 ## Run SBK and register it
 
@@ -261,8 +297,8 @@ curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
     │   ├── provisioning/
     │   └── dashboards/            # sbk-<endpoint-id>.json
     └── logs/
-        ├── prometheus.log
-        └── grafana.log
+        ├── prometheus.log[.1-.3]
+        └── grafana-console.log[.1-.3]
 ```
 
 Existing Java-created `targets.json`, monitoring data, and dashboard mappings remain compatible, so the same data
@@ -279,7 +315,8 @@ coverage report
 python -m build
 ```
 
-Tests cover configuration precedence, all six native platform definitions, safe TAR.GZ and ZIP extraction,
+Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,
+log rotation, configuration precedence, all six native platform definitions, safe TAR.GZ and ZIP extraction,
 endpoint persistence and compatibility, dashboard cloning and complete PromQL scoping, discovery generation,
 management APIs, health attachment, process ownership, and package resources. Native Linux validation is described
 in [testing documentation](docs/TESTING.md).

@@ -18,8 +18,9 @@ HOST_PATTERN = re.compile(r"[A-Za-z0-9._:%-]+")
 class TargetRegistry:
     """Thread-safe, atomically persisted unique host-and-port registrations."""
 
-    def __init__(self, data_directory: Path) -> None:
+    def __init__(self, data_directory: Path, max_targets: int = 10_000) -> None:
         self._path = data_directory / "targets.json"
+        self._max_targets = max_targets
         self._lock = threading.RLock()
         data_directory.mkdir(parents=True, exist_ok=True)
         if not self._path.exists():
@@ -34,6 +35,8 @@ class TargetRegistry:
             if target.id in self._targets:
                 raise OSError(f"Duplicate target identifier in {self._path}: {target.id}")
             self._targets[target.id] = target
+        if len(self._targets) > self._max_targets:
+            raise OSError(f"Endpoint registry exceeds configured maximum of {self._max_targets}")
 
     def list(self) -> list[BenchmarkTarget]:
         with self._lock:
@@ -54,6 +57,8 @@ class TargetRegistry:
         with self._lock:
             if target_id in self._targets:
                 raise ValueError(f"The endpoint {normalized_host}:{normalized_port} is already registered")
+            if len(self._targets) >= self._max_targets:
+                raise ValueError(f"Endpoint limit of {self._max_targets} has been reached")
             target = BenchmarkTarget(
                 target_id, normalized_name, normalized_host, normalized_port, normalized_path, "SBK",
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

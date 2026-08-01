@@ -56,6 +56,12 @@ class TargetRegistryTest(unittest.TestCase):
             with self.subTest(value=(host, port, path)), self.assertRaises(ValueError):
                 registry.register("Bad", host, port, path)
 
+    def test_enforces_configured_endpoint_limit(self):
+        registry = TargetRegistry(self.directory, max_targets=1)
+        registry.register("One", "host", 9718, "/metrics")
+        with self.assertRaisesRegex(ValueError, "Endpoint limit"):
+            registry.register("Two", "host", 9719, "/metrics")
+
 
 if __name__ == "__main__":
     unittest.main()
