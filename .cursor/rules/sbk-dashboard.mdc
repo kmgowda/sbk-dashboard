@@ -1,0 +1,14 @@
+---
+description: Canonical architecture, safety, testing, and workflow rules for sbk-dashboard
+alwaysApply: true
+---
+
+# SBK Dashboard Project Rule
+
+Read and follow `/AGENTS.md` and `/docs/AGENT_GUIDE.md` completely before non-trivial work. Treat them as the
+canonical source; this file only enables tool discovery.
+
+Keep the Python control plane and native Prometheus/Grafana boundary, fixed/bounded resource model, explicit process
+ownership, persistent Prometheus retention, endpoint-scoped dashboards, public/request-host links, CLI compatibility,
+and Linux/macOS/Windows support. Validate changes using the commands and completion checklist in `AGENTS.md`.
+

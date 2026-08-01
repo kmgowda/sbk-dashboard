@@ -313,6 +313,11 @@ directory can be reused after upgrading.
 
 ## Build and test
 
+Software agents and automated coding tools should begin with [`AGENTS.md`](AGENTS.md). The detailed code map,
+runtime flows, change recipes, debugging guidance, validation layers, and review priorities are in
+[`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). Tool-specific discovery files delegate to those canonical documents so
+Codex, Devin, Windsurf, Cursor, Copilot, Claude, Gemini, and other agents follow the same engineering contract.
+
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests
