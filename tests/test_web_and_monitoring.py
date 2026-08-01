@@ -29,8 +29,10 @@ class FakeMonitoring:
     def status(self, target_id):
         return TargetStatus("up", "2026-01-01T00:00:00Z", "Prometheus target up")
 
-    def dashboard_url(self, target_id):
-        return f"http://grafana:3000/d/sbk-{target_id}/"
+    def dashboard_url(self, target_id, browser_host=None):
+        host = browser_host or "grafana"
+        formatted = f"[{host}]" if ":" in host else host
+        return f"http://{formatted}:3000/d/sbk-{target_id}/"
 
 
 class WebTest(unittest.TestCase):
@@ -60,6 +62,15 @@ class WebTest(unittest.TestCase):
             self.assertIn("dashboardUrl", created)
         with urllib.request.urlopen(self.base + "/api/targets") as response:
             self.assertEqual(1, len(json.load(response)))
+        for host, expected in (
+            ("203.0.113.25:9721", "http://203.0.113.25:3000/"),
+            ("dashboard.example:9721", "http://dashboard.example:3000/"),
+            ("[2001:db8::25]:9721", "http://[2001:db8::25]:3000/"),
+        ):
+            with self.subTest(host=host):
+                public_request = urllib.request.Request(self.base + "/api/targets", headers={"Host": host})
+                with urllib.request.urlopen(public_request) as response:
+                    self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith(expected))
         with urllib.request.urlopen(self.base + f"/api/targets/{created['id']}/dashboard") as response:
             self.assertIn(created["id"], json.load(response)["dashboardUrl"])
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
@@ -105,6 +116,25 @@ class MonitoringContinueTest(unittest.TestCase):
         self.assertEqual(LifecycleState.STOPPED, stack.state)
         self.assertFalse(PortProcessManager.available(self.prometheus.server_port))
         self.assertFalse(PortProcessManager.available(self.grafana.server_port))
+
+    def test_default_grafana_url_follows_browser_host_but_explicit_url_is_authoritative(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        default = MonitoringConfig(
+            Path("unused"), data / "unused", 19090, 3000, "http://localhost:3000", {"grafana-url": "default"}
+        )
+        explicit = MonitoringConfig(
+            Path("unused"), data / "unused", 19090, 3000, "https://grafana.example/base",
+            {"grafana-url": "command line"},
+        )
+        self.assertEqual(
+            "http://198.51.100.7:3000/d/sbk-target/",
+            ManagedMonitoringStack(dashboard, default).dashboard_url("target", "198.51.100.7"),
+        )
+        self.assertEqual(
+            "https://grafana.example/base/d/sbk-target/",
+            ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
+        )
 
     @staticmethod
     def _service(routes):

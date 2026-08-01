@@ -10,7 +10,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urlparse, urlsplit
 
 from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
@@ -109,7 +109,7 @@ class DashboardHttpServer:
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
         if request.command == "GET":
-            self._json(request, 200, [self._view(target) for target in self.registry.list()])
+            self._json(request, 200, [self._view(request, target) for target in self.registry.list()])
             return
         self._require(request, "POST")
         body = self._read_json(request)
@@ -120,7 +120,7 @@ class DashboardHttpServer:
             self.registry.remove(target.id)
             self.monitoring.reconcile(self.registry.list())
             raise
-        self._json(request, 201, self._view(target))
+        self._json(request, 201, self._view(request, target))
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
@@ -130,7 +130,7 @@ class DashboardHttpServer:
             return
         if separator and action == "dashboard":
             self._require(request, "GET")
-            self._json(request, 200, {"dashboardUrl": self.monitoring.dashboard_url(target_id)})
+            self._json(request, 200, {"dashboardUrl": self._dashboard_url(request, target_id)})
             return
         if separator:
             self._json(request, 404, {"error": "Not found"})
@@ -166,13 +166,32 @@ class DashboardHttpServer:
         request.end_headers()
         request.wfile.write(body)
 
-    def _view(self, target: BenchmarkTarget) -> dict[str, Any]:
+    def _view(self, request: BaseHTTPRequestHandler, target: BenchmarkTarget) -> dict[str, Any]:
         return {
             "id": target.id, "name": target.name, "host": target.host, "port": target.port,
             "metricsPath": target.metrics_path, "createdAt": target.created_at,
             "status": self.monitoring.status(target.id).api(),
-            "dashboardUrl": self.monitoring.dashboard_url(target.id),
+            "dashboardUrl": self._dashboard_url(request, target.id),
         }
+
+    def _dashboard_url(self, request: BaseHTTPRequestHandler, target_id: str) -> str:
+        return self.monitoring.dashboard_url(target_id, self._request_hostname(request))
+
+    @staticmethod
+    def _request_hostname(request: BaseHTTPRequestHandler) -> str | None:
+        """Extract a hostname without reflecting a malformed Host header into links."""
+        value = request.headers.get("Host", "").strip()
+        if not value or any(character in value for character in "\r\n/\\"):
+            return None
+        try:
+            parsed = urlsplit(f"//{value}")
+            hostname = parsed.hostname
+            _ = parsed.port  # Validate an optional port before using the hostname.
+        except ValueError:
+            return None
+        if not hostname or any(character.isspace() for character in hostname):
+            return None
+        return hostname
 
     @staticmethod
     def _read_json(request: BaseHTTPRequestHandler) -> dict[str, Any]:

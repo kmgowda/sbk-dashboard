@@ -48,6 +48,12 @@ class ProvisioningTest(unittest.TestCase):
         self.assertTrue((self.directory / "dashboards/sbk-first.json").is_file())
         self.assertTrue((self.directory / "dashboards/sbk-second.json").is_file())
         self.assertEqual("http://grafana:3000/d/sbk-first/", self.provisioner.dashboard_url("first"))
+        self.assertEqual(
+            "http://203.0.113.8:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "203.0.113.8")
+        )
+        self.assertEqual(
+            "http://[2001:db8::8]:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "2001:db8::8")
+        )
         self.provisioner.reconcile([second])
         self.assertFalse((self.directory / "dashboards/sbk-first.json").exists())
 
