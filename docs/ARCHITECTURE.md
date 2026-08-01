@@ -1,84 +1,101 @@
 # Architecture
 
+## Runtime boundary
+
+`sbk-dashboard` is a Python control plane around two official native servers. Prometheus and Grafana are not Python
+modules and are never embedded in the Python interpreter.
+
 ```text
-                                       one Collector per host:port
- Remote SBK/SBM /metrics  <── HTTP ──  virtual scrape thread
-                                              │
-                                              v
-                                  Prometheus text parser (Java)
-                                              │
-                                              v
-                       endpoint-partitioned primitive ring-buffer series
-                            │         │                 │
-                            v         v                 v
-                   append-only    dashboard JSON API   status/inventory API
-                 segment journal          │                 │
-                            │              └────────┬────────┘
-                            │                       v
-                            └── startup replay ─> dedicated browser dashboard
+                    +---------------- Python process ----------------+
+ Browser ---------->| ThreadingHTTPServer                             |
+                    |   |                                             |
+                    |   +-- TargetRegistry ---- targets.json          |
+                    |   +-- PrometheusTargetDiscovery                 |
+                    |   +-- GrafanaDashboardProvisioner               |
+                    |   +-- lifecycle and health monitor              |
+                    +---|---------------------|-----------------------+
+                        | child process       | child process
+                        v                     v
+                  Prometheus              Grafana
+                  scrape + TSDB           PromQL + dashboards
+                        |
+                        v
+               remote SBK/SBM /metrics endpoints
 ```
 
-The complete runtime is one JVM. No operating-system child processes or external monitoring servers participate.
+There is one Prometheus process and one Grafana process per `sbk-dashboard` instance. There is not one native process
+per endpoint. This is significantly less expensive and lets Prometheus query data across endpoints when required.
 
-The dashboard renderer loads the unchanged `grafana/dashboards/sbk-dashboard.json` definition bundled with the
-application. Its nested panel titles and Prometheus expressions provide the authoritative metric ordering and chart
-labels. The Java collector supplies the corresponding endpoint-partitioned series directly; no Grafana server is
-required to interpret queries or host the UI.
+## Endpoint isolation
 
-## Registration lifecycle
+1. The user submits a host, port, optional display name, and metrics path.
+2. Input is normalized and SHA-256 of lowercase `host:port` supplies a stable 16-hex-character endpoint ID.
+3. `targets.json` is atomically replaced.
+4. Prometheus file discovery receives the address, metrics path, and `sbk_endpoint_id` label.
+5. The canonical dashboard is deep-copied without changing its panels or visualization settings.
+6. Every `SBK_*` PromQL selector receives the endpoint label.
+7. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
+8. `dashboard-mappings.json` records the deterministic relationship.
 
-1. Validate and normalize hostname, port, and metrics path.
-2. Hash normalized `host:port` to produce the stable endpoint identifier.
-3. Atomically persist the endpoint registry.
-4. Create an independent scheduled collector and run its first scrape immediately.
-5. Store each unique metric-name/label combination in that endpoint's repository partition.
-6. Append the complete scrape as a checksummed binary frame in the endpoint's active segment.
-7. Return `/dashboard.html?id=<id>` as the dedicated dashboard URL.
+The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct
+endpoint and dashboard.
 
-Deletion cancels the endpoint schedule, releases its retained series, closes its writer, and deletes only its exact
-persisted endpoint partition.
+## Persistence and retention
+
+The Python control plane persists registrations and generated configuration using temporary files, `fsync`, and
+atomic replacement. It does not store samples itself.
+
+Prometheus stores all samples under `monitoring/prometheus/data`. The `-retention` value is passed as
+`--storage.tsdb.retention.time=<days>d`; Prometheus performs block cleanup in the background. Its default is seven
+days. A remote endpoint being down does not erase previously ingested samples.
+
+Grafana stores its SQLite database and state under `monitoring/grafana/data`. Generated dashboards are declarative
+files, so they are restored deterministically from endpoint registrations.
+
+Corrupt or missing historical TSDB data is handled by Prometheus's own startup and recovery behavior. A target
+scrape error becomes a non-fatal `down` state and does not prevent the management server or other dashboards from
+operating. Failure of Prometheus itself to start is fatal because the dashboard would have no metrics engine.
 
 ## Concurrency
 
-- The management HTTP server uses a virtual thread per request.
-- Scrape requests use virtual threads and a shared JDK `HttpClient`.
-- Each endpoint has a separate fixed-delay schedule.
-- An endpoint-local atomic flag prevents scrape overlap.
-- The registry exposes immutable snapshots to readers.
-- Endpoint and metric maps are concurrent.
-- Each primitive time-series ring synchronizes only its own append/snapshot operations.
+- `ThreadingHTTPServer` creates an independent thread for each HTTP request.
+- Registry mutations, status snapshots, discovery writes, and provisioning reconciliations are protected by locks.
+- One daemon health thread reads Prometheus target state every five seconds.
+- Prometheus independently schedules and executes endpoint scrapes.
+- Grafana independently handles browser sessions and queries.
 
-A slow or unavailable endpoint therefore cannot block collection from another endpoint.
+Python's interpreter lock is not a capacity bottleneck here: the control plane is mostly short filesystem and HTTP
+operations, while ingestion, storage, querying, and rendering execute in the native servers.
 
-## Persistence and recovery
+## Native lifecycle safety
 
-Every endpoint has independent append-only segment files. A segment starts with a format magic and version. Each
-scrape frame contains its encoded timestamp, metrics, labels and values, preceded by its length and CRC32. Writes are
-forced to the filesystem before durability is reported.
+The bootstrap chooses one of six OS/CPU definitions and requires HTTPS plus a pinned SHA-256. It downloads to a
+partial file, displays progress, flushes it, atomically promotes it, validates safe archive entries, and installs to
+a temporary directory before promotion.
 
-At startup, segments are ordered by their timestamp-based names and replayed into the same bounded primitive rings
-used for live data. Recovery stops at an invalid length, checksum mismatch, incomplete frame, or corrupt tail while
-retaining every earlier valid frame. New writes always begin in a new segment, so recovery never mutates historical
-files.
+With `-continue false`, listener discovery uses `psutil`. Both requested ports are inspected and all owners are
+validated before any process is stopped. Persisted PID, creation time, executable, and port provide a safe fallback
+where listener ownership is unavailable. With `-continue true`, health endpoints are checked and compatible
+services are attached rather than owned.
 
-Segments roll at a configurable size or after one hour, whichever occurs first, and expire by last-modified time.
-Retention is configured in whole days, defaults to seven days, and is applied independently to every endpoint
-partition. A dedicated hourly maintenance task scans every partition independently of scrape activity. It closes an
-inactive writer when its segment has expired and then deletes that segment, allowing retention to work even while a
-remote endpoint is offline. The next successful scrape opens a new segment.
+Only processes launched by the current invocation are terminated during normal shutdown.
 
-## Capacity control
+## Cross-platform strategy
 
-Every time series owns fixed `long[]` and `double[]` arrays. Once full, it overwrites its oldest sample. This avoids
-per-sample objects and makes the memory ceiling a configuration decision rather than an unbounded consequence of
-uptime. Dashboard queries downsample to 10–1,000 points per series.
+All control-plane code is common across Linux, macOS, and Windows. Platform differences are limited to:
 
-## Failure states
+- normalized OS/CPU archive selection;
+- TAR.GZ versus ZIP extraction;
+- `.exe` executable discovery;
+- native process and socket information supplied by `psutil`;
+- the platform's venv activation command.
 
-- `pending`: registered but no scrape has completed.
-- `up`: the last HTTP request returned 2xx and contained at least one valid sample.
-- `down`: connection failure, timeout, non-2xx response, empty exposition, or a response over 16 MiB.
+The installed `sbk-dashboard` console entry point is generated by Python packaging on every platform. The same
+wheel can be installed in a venv or Conda environment; Prometheus and Grafana archives remain platform-specific.
 
-Previously collected data remains visible when an endpoint goes down, while the status and failure detail change.
-Persistent-history initialization and recovery failures are warnings rather than startup failures. The service
-continues with live in-memory collection when history is unavailable or partially damaged.
+## Authentication and containers
+
+Authentication is deliberately disabled. `-auth true` is rejected and reserved for future development. The server
+must therefore be protected by network controls or a reverse proxy when exposed outside a trusted environment.
+
+No Docker, Podman, Kubernetes, or Compose runtime is used in this phase.
