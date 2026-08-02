@@ -281,7 +281,7 @@ class PortProcessManager:
                         return False
                     probe.setsockopt(socket.SOL_SOCKET, exclusive, 1)
                 else:
-                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind((bind_address, port))
             return True
         except OSError:

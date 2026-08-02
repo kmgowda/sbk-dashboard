@@ -110,6 +110,18 @@ class WebTest(unittest.TestCase):
         self.assertIn(b"400 Bad Request", response)
         self.assertEqual([], self.registry.list())
 
+    def test_boolean_port_is_rejected_at_http_boundary(self):
+        request = urllib.request.Request(
+            self.base + "/api/targets",
+            method="POST",
+            data=json.dumps({"host": "127.0.0.1", "port": True}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(400, caught.exception.code)
+        self.assertEqual([], self.registry.list())
+
     def test_registration_is_rolled_back_for_runtime_reconciliation_failure(self):
         self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
         request = urllib.request.Request(

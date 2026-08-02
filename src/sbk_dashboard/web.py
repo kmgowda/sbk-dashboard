@@ -118,7 +118,7 @@ class DashboardHttpServer:
         self._require(request, "POST")
         body = self._read_json(request)
         port = body.get("port")
-        if not isinstance(port, int):
+        if isinstance(port, bool) or not isinstance(port, int):
             raise ValueError("Port must be between 1 and 65535")
         with self._mutation_lock:
             target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))

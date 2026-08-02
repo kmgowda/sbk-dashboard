@@ -98,7 +98,11 @@ class NativeToolBootstrap:
         request = urllib.request.Request(url, headers={"User-Agent": "sbk-dashboard/1.0"})
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
-                total = int(response.headers.get("Content-Length", "0"))
+                raw_total = response.headers.get("Content-Length", "0")
+                try:
+                    total = int(raw_total)
+                except (TypeError, ValueError) as error:
+                    raise OSError(f"{name} download returned an invalid Content-Length") from error
                 if total < 0:
                     raise OSError(f"{name} download returned an invalid negative Content-Length")
                 downloaded = 0
