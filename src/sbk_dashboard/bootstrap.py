@@ -99,6 +99,8 @@ class NativeToolBootstrap:
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
                 total = int(response.headers.get("Content-Length", "0"))
+                if total < 0:
+                    raise OSError(f"{name} download returned an invalid negative Content-Length")
                 downloaded = 0
                 last_update = 0.0
                 while True:

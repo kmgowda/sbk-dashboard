@@ -37,10 +37,13 @@ class BenchmarkTarget:
     @classmethod
     def from_persisted(cls, value: dict[str, object]) -> BenchmarkTarget:
         raw_port = value["port"]
-        if not isinstance(raw_port, (str, int, float)):
+        if isinstance(raw_port, bool) or not isinstance(raw_port, (str, int)):
             raise TypeError("Persisted endpoint port must be numeric")
+        port = int(raw_port)
+        if not 1 <= port <= 65535:
+            raise ValueError("Persisted endpoint port must be between 1 and 65535")
         return cls(
-            str(value["id"]), str(value["name"]), str(value["host"]), int(raw_port),
+            str(value["id"]), str(value["name"]), str(value["host"]), port,
             str(value.get("metricsPath", "/metrics")), str(value.get("kind", "SBK")), str(value["createdAt"]),
         )
 

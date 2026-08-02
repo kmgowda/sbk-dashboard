@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import os
 import signal
@@ -124,8 +125,6 @@ class ManagedProcessRegistry:
         if not self.path.is_file():
             return {}
         try:
-            import json
-
             return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return {}

@@ -28,6 +28,8 @@ those operating systems because native executables cannot be meaningfully launch
 
 Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
 wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
+It also sends a live oversized request with a negative `Content-Length`, rejects negative native-download lengths,
+and verifies that corrupted persisted boolean or out-of-range endpoint ports cannot be loaded.
 
 ## Manual Linux end-to-end test
 

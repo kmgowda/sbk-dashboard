@@ -99,6 +99,18 @@ class BootstrapTest(unittest.TestCase):
         self.assertFalse(destination.exists())
         self.assertFalse(destination.with_name(destination.name + ".part").exists())
 
+    def test_download_rejects_negative_content_length_and_removes_partial_file(self):
+        destination = self.directory / "tool.tar.gz"
+        response = io.BytesIO(b"downloaded archive")
+        response.headers = {"Content-Length": "-1"}
+        with (
+            patch("sbk_dashboard.bootstrap.urllib.request.urlopen", return_value=response),
+            self.assertRaisesRegex(OSError, "negative Content-Length"),
+        ):
+            NativeToolBootstrap._download("Tool", "https://example.test/tool.tar.gz", destination)
+        self.assertFalse(destination.exists())
+        self.assertFalse(destination.with_name(destination.name + ".part").exists())
+
     def test_invalid_cached_archive_is_downloaded_again(self):
         downloads = self.directory / "downloads"
         installs = self.directory / "tools"

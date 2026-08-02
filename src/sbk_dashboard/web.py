@@ -231,6 +231,8 @@ class DashboardHttpServer:
             length = int(request.headers.get("Content-Length", "0"))
         except ValueError as error:
             raise ValueError("Invalid Content-Length") from error
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
         if length > MAX_REQUEST_BYTES:
             raise ValueError("Request body exceeds 64 KiB")
         value = json.loads(request.rfile.read(length))
@@ -290,7 +292,9 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         super().server_bind()
 
     def process_request(
-        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int] | tuple[str, int, int, int],
     ) -> None:
         if not isinstance(request, socket.socket):
             raise TypeError("SBK Dashboard requires a stream socket")
@@ -308,7 +312,9 @@ class BoundedThreadPoolHttpServer(HTTPServer):
     def close_pool(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)
 
-    def _process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def _process_request(
+        self, request: socket.socket, client_address: tuple[str, int] | tuple[str, int, int, int]
+    ) -> None:
         request.settimeout(self._request_timeout)
         try:
             self.finish_request(request, client_address)

@@ -79,6 +79,18 @@ class TargetRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Endpoint limit"):
             registry.register("Two", "host", 9719, "/metrics")
 
+    def test_rejects_boolean_and_out_of_range_persisted_ports(self):
+        path = self.directory / "targets.json"
+        registry = TargetRegistry(self.directory)
+        registry.register("One", "host", 9718, "/metrics")
+        original = json.loads(path.read_text(encoding="utf-8"))
+        for invalid in (True, False, 0, 65536, 1.5):
+            with self.subTest(port=invalid):
+                corrupted = [dict(original[0], port=invalid)]
+                path.write_text(json.dumps(corrupted), encoding="utf-8")
+                with self.assertRaisesRegex(OSError, "Unable to load endpoint registry"):
+                    TargetRegistry(self.directory)
+
 
 if __name__ == "__main__":
     unittest.main()

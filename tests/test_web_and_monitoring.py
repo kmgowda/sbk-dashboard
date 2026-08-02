@@ -1,4 +1,5 @@
 import json
+import socket
 import tempfile
 import threading
 import unittest
@@ -12,7 +13,7 @@ from sbk_dashboard.models import TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import LifecycleState, PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
-from sbk_dashboard.web import DashboardHttpServer
+from sbk_dashboard.web import MAX_REQUEST_BYTES, DashboardHttpServer
 
 
 class FakeMonitoring:
@@ -91,6 +92,23 @@ class WebTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request)
             self.assertEqual(status, caught.exception.code)
+
+    def test_negative_content_length_cannot_bypass_request_limit(self):
+        body = json.dumps({"host": "127.0.0.1", "port": 9718}).encode()
+        body += b" " * (MAX_REQUEST_BYTES + 1 - len(body))
+        request = (
+            b"POST /api/targets HTTP/1.0\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: -1\r\n\r\n"
+            + body
+        )
+        with socket.create_connection(("127.0.0.1", self.server._server.server_port), timeout=2) as connection:
+            connection.sendall(request)
+            connection.shutdown(socket.SHUT_WR)
+            response = connection.recv(4096)
+        self.assertIn(b"400 Bad Request", response)
+        self.assertEqual([], self.registry.list())
 
     def test_registration_is_rolled_back_for_runtime_reconciliation_failure(self):
         self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
