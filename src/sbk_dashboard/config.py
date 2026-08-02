@@ -12,6 +12,8 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlparse
 
+from sbk_dashboard.network import normalize_host
+
 DEFAULT_PORT = 9721
 DEFAULT_PROMETHEUS_PORT = 9090
 DEFAULT_GRAFANA_PORT = 3000
@@ -106,6 +108,11 @@ class DashboardConfig:
     process_log_size_mb: int = 10
     process_log_backups: int = 3
     max_targets: int = 10_000
+    bind_address: str = "0.0.0.0"
+    log_level: str = "INFO"
+    target_health_timeout_seconds: int = 4
+    prometheus_startup_timeout_seconds: int = 45
+    grafana_startup_timeout_seconds: int = 120
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,8 @@ class MonitoringConfig:
     grafana_port: int
     grafana_public_url: str
     sources: dict[str, str]
+    prometheus_bind_address: str = "127.0.0.1"
+    grafana_bind_address: str = "0.0.0.0"
 
     def with_tools(self, prometheus_binary: Path, grafana_home: Path) -> MonitoringConfig:
         return replace(self, prometheus_binary=prometheus_binary, grafana_home=grafana_home)
@@ -156,6 +165,7 @@ def parser() -> argparse.ArgumentParser:
         epilog="Prometheus and Grafana run as child processes; Docker is not required.",
     )
     result.add_argument("-port", default=str(DEFAULT_PORT), metavar="port", help="dashboard HTTP port (default: 9721)")
+    result.add_argument("-bind", metavar="address", help="management bind address (default: 0.0.0.0)")
     result.add_argument("-auth", default="false", metavar="true|false", help="false only; reserved for future use")
     result.add_argument("-continue", dest="continue_existing", default="false", metavar="true|false",
                         help="reuse healthy existing Prometheus/Grafana processes (default: false)")
@@ -164,9 +174,12 @@ def parser() -> argparse.ArgumentParser:
                         help="Prometheus retention days (default: 7)")
     result.add_argument("-prometheus-bin", metavar="path", help="Prometheus executable")
     result.add_argument("-prometheus-port", metavar="port", help="managed Prometheus port (default: 9090)")
+    result.add_argument("-prometheus-bind", metavar="address", help="Prometheus bind address (default: 127.0.0.1)")
     result.add_argument("-grafana-home", metavar="directory", help="Grafana installation home")
     result.add_argument("-grafana-port", metavar="port", help="managed Grafana port (default: 3000)")
+    result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
+    result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")
     result.add_argument("-monitoring-properties", metavar="file", help="native download properties file")
     return result
 
@@ -180,6 +193,11 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     if authentication:
         raise ValueError("Authentication is reserved for a future release; use -auth false")
     continue_existing = _boolean(namespace.continue_existing, "continue")
+    bind, bind_source = _select(namespace.bind, environment, "SBK_DASHBOARD_BIND", "0.0.0.0")
+    log_level, log_level_source = _select(namespace.log_level, environment, "SBK_DASHBOARD_LOG_LEVEL", "INFO")
+    selected_log_level = log_level.upper()
+    if selected_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ValueError("log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
     data, data_source = _select(namespace.data, environment, "SBK_DASHBOARD_DATA_DIR",
                                 str(Path.home() / ".sbk-dashboard"))
     retention, retention_source = _select(namespace.retention, environment,
@@ -193,13 +211,23 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     process_log_size = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_MB", 10, 1, 1024)
     process_log_backups = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS", 3, 0, 100)
     max_targets = _bounded_environment(environment, "SBK_DASHBOARD_MAX_TARGETS", 10_000, 1, 1_000_000)
+    target_health_timeout = _bounded_environment(
+        environment, "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS", 4, 1, 300
+    )
+    prometheus_startup_timeout = _bounded_environment(
+        environment, "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS", 45, 1, 900
+    )
+    grafana_startup_timeout = _bounded_environment(
+        environment, "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS", 120, 1, 900
+    )
     dashboard = DashboardConfig(
         port, False, continue_existing, Path(data).expanduser().resolve(), _positive(scrape, "scrape interval"),
         _positive(retention, "retention"),
         {"port": "command line" if "-port" in arguments else "default",
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
-         "retention-days": retention_source, "scrape-seconds": scrape_source},
+         "retention-days": retention_source, "scrape-seconds": scrape_source,
+         "bind": bind_source, "log-level": log_level_source},
         http_workers,
         http_queue,
         request_timeout,
@@ -208,6 +236,11 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         process_log_size,
         process_log_backups,
         max_targets,
+        _bind_address(bind, "management bind address"),
+        selected_log_level,
+        target_health_timeout,
+        prometheus_startup_timeout,
+        grafana_startup_timeout,
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")
@@ -217,6 +250,12 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
                                                        "SBK_DASHBOARD_PROMETHEUS_PORT", "9090")
     grafana_port, grafana_port_source = _select(namespace.grafana_port, environment,
                                                 "SBK_DASHBOARD_GRAFANA_PORT", "3000")
+    prometheus_bind, prometheus_bind_source = _select(
+        namespace.prometheus_bind, environment, "SBK_DASHBOARD_PROMETHEUS_BIND", "127.0.0.1"
+    )
+    grafana_bind, grafana_bind_source = _select(
+        namespace.grafana_bind, environment, "SBK_DASHBOARD_GRAFANA_BIND", "0.0.0.0"
+    )
     selected_grafana_port = _port(grafana_port, "grafana port")
     public_url, url_source = _select(namespace.grafana_url, environment, "SBK_DASHBOARD_GRAFANA_URL",
                                      f"http://localhost:{selected_grafana_port}")
@@ -228,7 +267,10 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         selected_grafana_port, public_url.rstrip("/"),
         {"prometheus-bin": prometheus_source, "grafana-home": grafana_source,
          "prometheus-port": prometheus_port_source, "grafana-port": grafana_port_source,
-         "grafana-url": url_source},
+         "grafana-url": url_source, "prometheus-bind": prometheus_bind_source,
+         "grafana-bind": grafana_bind_source},
+        _bind_address(prometheus_bind, "Prometheus bind address"),
+        _bind_address(grafana_bind, "Grafana bind address"),
     )
     downloads = load_download_config(namespace.monitoring_properties, dashboard.data_directory, environment,
                                      runtime_platform)
@@ -252,6 +294,11 @@ def _bounded_environment(
     if not minimum <= selected <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return selected
+
+
+def _bind_address(value: str, name: str) -> str:
+    """Accept IP literals and conservative DNS names without performing network I/O."""
+    return normalize_host(value, name, allow_unspecified=True)
 
 
 def _read_properties(text: str) -> dict[str, str]:

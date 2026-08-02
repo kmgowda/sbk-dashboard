@@ -20,6 +20,7 @@ def atomic_write(path: Path, data: bytes) -> None:
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
+        _fsync_directory(path.parent)
     except BaseException:
         with suppress(FileNotFoundError):
             os.unlink(temporary)
@@ -28,3 +29,15 @@ def atomic_write(path: Path, data: bytes) -> None:
 
 def atomic_json(path: Path, value: Any) -> None:
     atomic_write(path, (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode())
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Persist a POSIX directory entry after atomic replacement."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(directory, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

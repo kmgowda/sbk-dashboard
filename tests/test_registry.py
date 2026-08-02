@@ -48,19 +48,48 @@ class TargetRegistryTest(unittest.TestCase):
         self.assertFalse(registry.remove(target.id))
         self.assertEqual([], TargetRegistry(self.directory).list())
 
+    def test_restore_is_persistent_and_preserves_target_identity(self):
+        registry = TargetRegistry(self.directory)
+        target = registry.register("One", "host.example", 9718, "/metrics")
+        registry.remove(target.id)
+        registry.restore(target)
+        self.assertEqual(target, TargetRegistry(self.directory).find(target.id))
+
     def test_rejects_malformed_input(self):
         registry = TargetRegistry(self.directory)
-        values = [("http://host", 9718, "/metrics"), ("host", 0, "/metrics"),
-                  ("host", 9718, "metrics"), ("host", 9718, "/metrics?q=1")]
+        values = [
+            ("http://host", 9718, "/metrics"), ("host", 0, "/metrics"),
+            ("host", 9718, "metrics"), ("host", 9718, "/metrics?q=1"),
+            ("0.0.0.0.0", 9718, "/metrics"), ("127.000.000.001", 9718, "/metrics"),
+            ("::::", 9718, "/metrics"), ("host:80", 9718, "/metrics"),
+        ]
         for host, port, path in values:
             with self.subTest(value=(host, port, path)), self.assertRaises(ValueError):
                 registry.register("Bad", host, port, path)
+
+    def test_normalizes_valid_ip_and_dns_hosts(self):
+        registry = TargetRegistry(self.directory)
+        self.assertEqual("host.example", registry.register("DNS", "HOST.Example.", 9718, None).host)
+        self.assertEqual("127.0.0.1", registry.register("IPv4", "127.0.0.1", 9719, None).host)
+        self.assertEqual("2001:db8::1", registry.register("IPv6", "[2001:0db8::1]", 9720, None).host)
 
     def test_enforces_configured_endpoint_limit(self):
         registry = TargetRegistry(self.directory, max_targets=1)
         registry.register("One", "host", 9718, "/metrics")
         with self.assertRaisesRegex(ValueError, "Endpoint limit"):
             registry.register("Two", "host", 9719, "/metrics")
+
+    def test_rejects_boolean_and_out_of_range_persisted_ports(self):
+        path = self.directory / "targets.json"
+        registry = TargetRegistry(self.directory)
+        registry.register("One", "host", 9718, "/metrics")
+        original = json.loads(path.read_text(encoding="utf-8"))
+        for invalid in (True, False, 0, 65536, 1.5):
+            with self.subTest(port=invalid):
+                corrupted = [dict(original[0], port=invalid)]
+                path.write_text(json.dumps(corrupted), encoding="utf-8")
+                with self.assertRaisesRegex(OSError, "Unable to load endpoint registry"):
+                    TargetRegistry(self.directory)
 
 
 if __name__ == "__main__":

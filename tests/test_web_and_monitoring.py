@@ -1,4 +1,5 @@
 import json
+import socket
 import tempfile
 import threading
 import unittest
@@ -12,18 +13,21 @@ from sbk_dashboard.models import TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import LifecycleState, PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
-from sbk_dashboard.web import DashboardHttpServer
+from sbk_dashboard.web import MAX_REQUEST_BYTES, DashboardHttpServer
 
 
 class FakeMonitoring:
     def __init__(self, data):
         self.targets = []
+        self.reconcile_error = None
         self.dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
 
     def healthy(self):
         return True
 
     def reconcile(self, targets):
+        if self.reconcile_error is not None:
+            raise self.reconcile_error
         self.targets = list(targets)
 
     def status(self, target_id):
@@ -71,6 +75,11 @@ class WebTest(unittest.TestCase):
                 public_request = urllib.request.Request(self.base + "/api/targets", headers={"Host": host})
                 with urllib.request.urlopen(public_request) as response:
                     self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith(expected))
+        malformed_request = urllib.request.Request(
+            self.base + "/api/targets", headers={"Host": "127.000.000.001:9721"}
+        )
+        with urllib.request.urlopen(malformed_request) as response:
+            self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith("http://grafana:3000/"))
         with urllib.request.urlopen(self.base + f"/api/targets/{created['id']}/dashboard") as response:
             self.assertIn(created["id"], json.load(response)["dashboardUrl"])
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
@@ -83,6 +92,76 @@ class WebTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request)
             self.assertEqual(status, caught.exception.code)
+
+    def test_negative_content_length_cannot_bypass_request_limit(self):
+        body = json.dumps({"host": "127.0.0.1", "port": 9718}).encode()
+        body += b" " * (MAX_REQUEST_BYTES + 1 - len(body))
+        request = (
+            b"POST /api/targets HTTP/1.0\r\n"
+            b"Host: 127.0.0.1\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: -1\r\n\r\n"
+            + body
+        )
+        with socket.create_connection(("127.0.0.1", self.server._server.server_port), timeout=2) as connection:
+            connection.sendall(request)
+            connection.shutdown(socket.SHUT_WR)
+            response = connection.recv(4096)
+        self.assertIn(b"400 Bad Request", response)
+        self.assertEqual([], self.registry.list())
+
+    def test_non_string_fields_are_rejected_as_bad_request(self):
+        for payload in (
+            {"name": 123, "host": "127.0.0.1", "port": 9718, "metricsPath": "/metrics"},
+            {"name": "x", "host": 123, "port": 9718, "metricsPath": "/metrics"},
+            {"name": "x", "host": "127.0.0.1", "port": 9718, "metricsPath": 123},
+        ):
+            request = urllib.request.Request(
+                self.base + "/api/targets",
+                method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.subTest(payload=payload), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(400, caught.exception.code)
+            self.assertEqual([], self.registry.list())
+
+    def test_boolean_port_is_rejected_at_http_boundary(self):
+        request = urllib.request.Request(
+            self.base + "/api/targets",
+            method="POST",
+            data=json.dumps({"host": "127.0.0.1", "port": True}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(400, caught.exception.code)
+        self.assertEqual([], self.registry.list())
+
+    def test_registration_is_rolled_back_for_runtime_reconciliation_failure(self):
+        self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
+        request = urllib.request.Request(
+            self.base + "/api/targets",
+            method="POST",
+            data=json.dumps({"host": "127.0.0.1", "port": 9718}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(500, caught.exception.code)
+        self.assertEqual([], self.registry.list())
+        self.assertEqual([], TargetRegistry(Path(self.temporary.name)).list())
+
+    def test_deletion_is_rolled_back_for_runtime_reconciliation_failure(self):
+        target = self.registry.register("Run", "127.0.0.1", 9718, "/metrics")
+        self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
+        request = urllib.request.Request(self.base + f"/api/targets/{target.id}", method="DELETE")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(500, caught.exception.code)
+        self.assertEqual(target, self.registry.find(target.id))
+        self.assertEqual(target, TargetRegistry(Path(self.temporary.name)).find(target.id))
 
 
 class MonitoringContinueTest(unittest.TestCase):
@@ -108,14 +187,16 @@ class MonitoringContinueTest(unittest.TestCase):
             stack.start([])
             self.assertTrue(stack.healthy())
             self.assertEqual(LifecycleState.RUNNING, stack.state)
-            self.assertIn("retention", "retention")
             config = (data / "monitoring/prometheus/prometheus.yml").read_text()
             self.assertIn("fallback_scrape_protocol: PrometheusText0.0.4", config)
+            self.assertIn("http_addr = 0.0.0.0", (data / "monitoring/grafana/grafana.ini").read_text())
+            self.assertEqual(45, stack._services[0].spec.startup_timeout_seconds)
+            self.assertEqual(120, stack._services[1].spec.startup_timeout_seconds)
         finally:
             stack.close()
         self.assertEqual(LifecycleState.STOPPED, stack.state)
-        self.assertFalse(PortProcessManager.available(self.prometheus.server_port))
-        self.assertFalse(PortProcessManager.available(self.grafana.server_port))
+        self.assertFalse(PortProcessManager.available(self.prometheus.server_port, "127.0.0.1"))
+        self.assertFalse(PortProcessManager.available(self.grafana.server_port, "127.0.0.1"))
 
     def test_default_grafana_url_follows_browser_host_but_explicit_url_is_authoritative(self):
         data = Path(self.temporary.name)
@@ -135,6 +216,16 @@ class MonitoringContinueTest(unittest.TestCase):
             "https://grafana.example/base/d/sbk-target/",
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
+
+    def test_default_prometheus_command_binds_only_to_loopback(self):
+        data = Path(self.temporary.name)
+        binary = data / "prometheus"
+        binary.write_text("binary", encoding="utf-8")
+        binary.chmod(0o755)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(binary, data / "unused", 19090, 3000, "http://localhost:3000", {})
+        command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
+        self.assertIn("--web.listen-address=127.0.0.1:19090", command)
 
     @staticmethod
     def _service(routes):

@@ -106,6 +106,7 @@ runtime data as source material.
 |---|---|
 | `src/sbk_dashboard/main.py` | Composition root, bootstrap, signals, startup output, shutdown |
 | `src/sbk_dashboard/config.py` | CLI/environment/default precedence, validation, platform/download definitions |
+| `src/sbk_dashboard/network.py` | Shared canonical IP literal and conservative DNS-name validation |
 | `src/sbk_dashboard/web.py` | Bounded HTTP server, REST API, assets, request-host URL resolution |
 | `src/sbk_dashboard/registry.py` | Endpoint validation, identity, limits, atomic registration persistence |
 | `src/sbk_dashboard/monitoring.py` | Monitoring facade, configuration, reconciliation, supervision, target status |
@@ -137,6 +138,7 @@ Run the fast required checks after every code change:
 
 ```bash
 ruff check src tests
+mypy src
 PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -q
 git diff --check
 ```
@@ -209,4 +211,3 @@ Before declaring work complete:
 - User and agent documentation reflects the resulting behavior.
 - The branch is based on the requested base, the working tree is clean, and commit/PR details accurately report what
   was actually tested.
-

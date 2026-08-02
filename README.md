@@ -20,6 +20,9 @@ health, and shutdown.
 - Safe `-continue false` process replacement and `-continue true` attachment.
 - Explicit state-machine lifecycle with automatic restart and bounded exponential backoff for owned native services.
 - Fixed HTTP worker pool, bounded admission queue, request timeouts, response-size limits, and endpoint-count limits.
+- Least-privilege service binding: Prometheus is loopback-only by default, with independent management and Grafana
+  bind controls.
+- Timestamped, leveled control-plane logging suitable for journald, launchd, and Windows service wrappers.
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
@@ -32,7 +35,7 @@ Browser
    +--> Python sbk-dashboard :9721  (registration UI and API)
            |
            +--> targets.json + dashboard-mappings.json
-           +--> native Prometheus :9090 ---> remote-host:9718/metrics
+           +--> native Prometheus 127.0.0.1:9090 ---> remote-host:9718/metrics
            |         |
            |         +--> persistent TSDB and background retention
            |
@@ -106,8 +109,10 @@ sbk-dashboard
 Defaults:
 
 - Management UI: `http://localhost:9721/`
-- Prometheus: `http://localhost:9090/`
+- Management bind: `0.0.0.0` (all IPv4 interfaces)
+- Prometheus: `http://127.0.0.1:9090/` (loopback only)
 - Grafana: `http://localhost:3000/`
+- Grafana bind: `0.0.0.0` (all IPv4 interfaces)
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
 - Prometheus retention: 7 days
@@ -115,20 +120,27 @@ Defaults:
 - Existing-process continuation: disabled
 
 Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
-all effective options and their sources, and dashboard links for `localhost`, `127.0.0.1`, and discovered network
-addresses.
+all effective options and their sources, and dashboard links reachable through the configured address family. An
+IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
+discovered IPv6 addresses.
+
+Host inputs are canonical IP literals or DNS names. Malformed numeric IPv4 attempts, invalid IPv6, embedded ports,
+zone identifiers, and unspecified remote targets are rejected before they can reach Prometheus configuration.
 
 ### Production example
 
 ```bash
 sbk-dashboard \
   -port 9721 \
+  -bind 0.0.0.0 \
   -data /var/lib/sbk-dashboard \
   -retention 14 \
   -prometheus-bin /opt/prometheus/prometheus \
   -prometheus-port 9090 \
+  -prometheus-bind 127.0.0.1 \
   -grafana-home /opt/grafana \
   -grafana-port 3000 \
+  -grafana-bind 0.0.0.0 \
   -grafana-url http://dashboard.example.com:3000
 ```
 
@@ -146,15 +158,19 @@ from Grafana's local listen address.
 ```text
 -h, --help                    Show help and exit
 -port <port>                  Management HTTP port (default 9721)
+-bind <address>               Management bind address (default 0.0.0.0)
 -auth <true|false>            Must be false in this release
 -continue <true|false>        Reuse healthy existing services (default false)
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus retention days (default 7)
 -prometheus-bin <path>        Prometheus executable (PATH, then download)
 -prometheus-port <port>       Prometheus port (default 9090)
+-prometheus-bind <address>    Prometheus bind address (default 127.0.0.1)
 -grafana-home <path>          Grafana home (system path, then download)
 -grafana-port <port>          Grafana port (default 3000)
+-grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
+-log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
 -monitoring-properties <file> Download URLs, checksums, and install directories
 ```
 
@@ -163,13 +179,17 @@ Command-line values override environment variables, which override built-in defa
 | Environment variable | Purpose |
 |---|---|
 | `SBK_DASHBOARD_DATA_DIR` | Fallback for `-data` |
+| `SBK_DASHBOARD_BIND` | Fallback for `-bind`; default `0.0.0.0` |
 | `SBK_DASHBOARD_DISK_RETENTION_DAYS` | Fallback for `-retention` |
 | `SBK_DASHBOARD_SCRAPE_SECONDS` | Prometheus scrape interval; default 5 |
 | `SBK_DASHBOARD_PROMETHEUS_BIN` | Fallback for `-prometheus-bin` |
 | `SBK_DASHBOARD_PROMETHEUS_PORT` | Fallback for `-prometheus-port` |
+| `SBK_DASHBOARD_PROMETHEUS_BIND` | Fallback for `-prometheus-bind`; default `127.0.0.1` |
 | `SBK_DASHBOARD_GRAFANA_HOME` | Fallback for `-grafana-home` |
 | `SBK_DASHBOARD_GRAFANA_PORT` | Fallback for `-grafana-port` |
+| `SBK_DASHBOARD_GRAFANA_BIND` | Fallback for `-grafana-bind`; default `0.0.0.0` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
+| `SBK_DASHBOARD_LOG_LEVEL` | Fallback for `-log-level`; default `INFO` |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
 | `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
 | `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |
@@ -179,6 +199,13 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_PROCESS_LOG_MB` | Maximum bytes per native console log generation; default 10 MiB |
 | `SBK_DASHBOARD_PROCESS_LOG_BACKUPS` | Rotated native console log generations; default 3 |
 | `SBK_DASHBOARD_MAX_TARGETS` | Persisted endpoint limit; default 10,000 |
+| `SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS` | Prometheus target-status request timeout; default 4 |
+| `SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS` | Prometheus readiness deadline; default 45 |
+| `SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS` | Grafana readiness deadline; default 120 |
+
+Bind values accept IP literals (including IPv6) or conservative DNS names. Keep Prometheus on its loopback default
+unless direct remote Prometheus access is an explicit requirement. Authentication is disabled, so expose management
+and Grafana only on trusted networks or through a secured reverse proxy.
 
 `SBK_JAVA_HOME`, `JAVA_HOME`, `SBK_DASHBOARD_RETENTION_SAMPLES`, and `SBK_DASHBOARD_SEGMENT_SIZE_MB` are not used by
 the Python implementation. Prometheus time-based retention is the only sample-retention mechanism.
@@ -232,12 +259,17 @@ fails three consecutive health probes is replaced. Repeated launch failures use 
 seconds, preventing a crash loop from consuming CPU or filling logs. Attached `-continue true` services are observed
 but never restarted or terminated because sbk-dashboard does not own them.
 
+Prometheus has a 45-second startup deadline and Grafana has a 120-second deadline by default. The separate values
+avoid spurious Grafana failures on slower hosts while keeping Prometheus failure detection prompt.
+
 ## Production resource and lifecycle controls
 
 - The management server has eight workers and a queue of 64 by default. Excess requests receive HTTP 503 instead of
   allocating more threads or unbounded queued futures.
 - Client sockets time out, JSON requests are limited to 64 KiB, and Prometheus health responses default to 4 MiB.
 - Registrations and status maps cannot exceed `SBK_DASHBOARD_MAX_TARGETS`.
+- Registration/configuration replacements synchronize both file contents and their parent directory on POSIX so an
+  atomic rename is durable across a crash. Windows retains atomic replacement with native filesystem semantics.
 - Prometheus and Grafana console output is continuously drained in 64 KiB chunks and rotated at 10 MiB with three
   backups by default. No subprocess output pipe is allowed to accumulate in memory.
 - Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
@@ -321,10 +353,11 @@ Codex, Devin, Windsurf, Cursor, Copilot, Claude, Gemini, and other agents follow
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests
+mypy src
 python -m pytest
 coverage run -m pytest
 coverage report
-python -m build
+python -m build --no-isolation
 ```
 
 Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,

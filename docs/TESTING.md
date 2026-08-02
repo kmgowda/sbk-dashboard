@@ -7,10 +7,11 @@ Create either supported development environment and execute:
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests
+mypy src
 python -m pytest
 coverage run -m pytest
 coverage report
-python -m build
+python -m build --no-isolation
 python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
 sbk-dashboard -h
 ```
@@ -25,6 +26,16 @@ PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
 those operating systems because native executables cannot be meaningfully launched through Linux simulation.
 
+Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
+wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
+It also sends a live oversized request with a negative `Content-Length`, rejects negative native-download lengths,
+rejects non-numeric download lengths as I/O failures, rejects boolean API ports, verifies POSIX probes enable address
+reuse for `TIME_WAIT` while requiring a successful `listen()`, and ensures corrupted persisted boolean or out-of-range
+endpoint ports cannot be loaded.
+An active TCP listener is rejected by a bounded connect preflight before platform-specific reusable bind semantics.
+Native lifecycle regressions also verify that an unavailable log destination still drains output beyond pipe capacity
+and that captured descendants are force-cleaned when their parent disappears during external-process termination.
+
 ## Manual Linux end-to-end test
 
 Use a temporary data directory and non-default ports when another monitoring stack is running:
@@ -33,6 +44,7 @@ Use a temporary data directory and non-default ports when another monitoring sta
 sbk-dashboard \
   -data /tmp/sbk-dashboard-e2e \
   -port 19721 \
+  -bind 127.0.0.1 \
   -prometheus-port 19090 \
   -grafana-port 13000 \
   -grafana-url http://localhost:13000
@@ -45,6 +57,10 @@ curl -fsS http://127.0.0.1:19721/api/health
 curl -fsS http://127.0.0.1:19090/-/ready
 curl -fsS http://127.0.0.1:13000/api/health
 ```
+
+Confirm Prometheus is not publicly listening. On Linux, `ss -ltnp` should show `127.0.0.1:19090`, while management
+and Grafana reflect their configured bind addresses. Repeat once with default public management/Grafana binds when
+validating non-loopback dashboard links.
 
 Start SBK using the command in the README, register its exporter, and verify:
 
@@ -70,6 +86,10 @@ Grafana and verify the dedicated URL recovers. Attached `-continue true` process
 
 Stop with `Ctrl+C`, restart with the same data directory, and confirm registrations, mappings, dashboard files, and
 Prometheus history remain. Prometheus and Grafana child PIDs started by that invocation must no longer be alive.
+
+Startup logs must include a timestamp and level, and must report effective bind addresses, startup deadlines,
+target-health timeout, and the source of every CLI-backed setting. Run once with `-log-level DEBUG` and once with
+`SBK_DASHBOARD_LOG_LEVEL=WARNING` to verify precedence and filtering.
 
 ## venv and Conda checks
 

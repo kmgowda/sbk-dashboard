@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -14,10 +15,12 @@ from urllib.parse import unquote, urlparse, urlsplit
 
 from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
+from sbk_dashboard.network import normalize_host
 from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardHttpServer:
@@ -26,6 +29,7 @@ class DashboardHttpServer:
         self.monitoring = monitoring
         self.lifecycle = LifecycleController()
         self._close_lock = threading.Lock()
+        self._mutation_lock = threading.Lock()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -49,7 +53,7 @@ class DashboardHttpServer:
 
         config = monitoring.dashboard
         self._server = BoundedThreadPoolHttpServer(
-            ("", port),
+            (config.bind_address, port),
             Handler,
             workers=config.http_workers,
             queue_capacity=config.http_queue_capacity,
@@ -101,10 +105,10 @@ class DashboardHttpServer:
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
             self._json(request, 400, {"error": str(error) or "Request body is not valid JSON"})
         except OSError as error:
-            print(f"Request failed: {error}")
+            LOGGER.error("Request failed: %s", error)
             self._json(request, 500, {"error": "Unable to update dashboard state"})
         except Exception as error:  # defensive HTTP boundary
-            print(f"Request failed: {error}")
+            LOGGER.exception("Unexpected request failure: %s", error)
             self._json(request, 500, {"error": "Unexpected server error"})
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
@@ -113,19 +117,28 @@ class DashboardHttpServer:
             return
         self._require(request, "POST")
         body = self._read_json(request)
-        target = self.registry.register(body.get("name"), body.get("host"), body.get("port"), body.get("metricsPath"))
-        try:
-            self.monitoring.reconcile(self.registry.list())
-        except OSError:
-            self.registry.remove(target.id)
-            self.monitoring.reconcile(self.registry.list())
-            raise
+        port = body.get("port")
+        if isinstance(port, bool) or not isinstance(port, int):
+            raise ValueError("Port must be between 1 and 65535")
+        with self._mutation_lock:
+            target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))
+            try:
+                self.monitoring.reconcile(self.registry.list())
+            except Exception:
+                try:
+                    if not self.registry.remove(target.id):
+                        raise OSError("Registered target disappeared before rollback")
+                except Exception as rollback_error:
+                    raise OSError("Unable to roll back failed target registration") from rollback_error
+                self._best_effort_reconcile("registration rollback")
+                raise
         self._json(request, 201, self._view(request, target))
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
         target_id = unquote(identifier)
-        if "/" in target_id or self.registry.find(target_id) is None:
+        target = self.registry.find(target_id)
+        if "/" in target_id or target is None:
             self._json(request, 404, {"error": "Target not found"})
             return
         if separator and action == "dashboard":
@@ -136,12 +149,28 @@ class DashboardHttpServer:
             self._json(request, 404, {"error": "Not found"})
             return
         self._require(request, "DELETE")
-        if not self.registry.remove(target_id):
-            self._json(request, 404, {"error": "Target not found"})
-            return
-        self.monitoring.reconcile(self.registry.list())
+        with self._mutation_lock:
+            target = self.registry.find(target_id)
+            if target is None or not self.registry.remove(target_id):
+                self._json(request, 404, {"error": "Target not found"})
+                return
+            try:
+                self.monitoring.reconcile(self.registry.list())
+            except Exception:
+                try:
+                    self.registry.restore(target)
+                except Exception as rollback_error:
+                    raise OSError("Unable to roll back failed target deletion") from rollback_error
+                self._best_effort_reconcile("deletion rollback")
+                raise
         request.send_response(HTTPStatus.NO_CONTENT)
         request.end_headers()
+
+    def _best_effort_reconcile(self, operation: str) -> None:
+        try:
+            self.monitoring.reconcile(self.registry.list())
+        except Exception as error:
+            LOGGER.warning("Monitoring %s could not be reconciled: %s", operation, error)
 
     def _asset(self, request: BaseHTTPRequestHandler, path: str) -> None:
         self._require(request, "GET")
@@ -191,7 +220,10 @@ class DashboardHttpServer:
             return None
         if not hostname or any(character.isspace() for character in hostname):
             return None
-        return hostname
+        try:
+            return normalize_host(hostname, "Host header", allow_unspecified=True)
+        except ValueError:
+            return None
 
     @staticmethod
     def _read_json(request: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -199,6 +231,8 @@ class DashboardHttpServer:
             length = int(request.headers.get("Content-Length", "0"))
         except ValueError as error:
             raise ValueError("Invalid Content-Length") from error
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
         if length > MAX_REQUEST_BYTES:
             raise ValueError("Request body exceeds 64 KiB")
         value = json.loads(request.rfile.read(length))
@@ -245,12 +279,25 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         request_timeout: int,
     ) -> None:
         self.request_queue_size = min(max(workers + queue_capacity, 5), 256)
+        if ":" in server_address[0]:
+            self.address_family = socket.AF_INET6
         super().__init__(server_address, handler)
         self._request_timeout = request_timeout
         self._capacity = threading.BoundedSemaphore(workers + queue_capacity)
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="sbk-http-worker")
 
-    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def server_bind(self) -> None:
+        if self.address_family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
+
+    def process_request(
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int] | tuple[str, int, int, int],
+    ) -> None:
+        if not isinstance(request, socket.socket):
+            raise TypeError("SBK Dashboard requires a stream socket")
         if not self._capacity.acquire(blocking=False):
             self._reject_overload(request)
             return
@@ -265,7 +312,9 @@ class BoundedThreadPoolHttpServer(HTTPServer):
     def close_pool(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=True)
 
-    def _process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def _process_request(
+        self, request: socket.socket, client_address: tuple[str, int] | tuple[str, int, int, int]
+    ) -> None:
         request.settimeout(self._request_timeout)
         try:
             self.finish_request(request, client_address)

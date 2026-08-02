@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import urllib.error
 import urllib.request
@@ -27,6 +28,8 @@ from sbk_dashboard.provisioning import (
     PrometheusTargetDiscovery,
     write_dashboard_mappings,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ManagedMonitoringStack:
@@ -68,7 +71,11 @@ class ManagedMonitoringStack:
             self.reconcile(initial_targets)
             if not self.dashboard.continue_existing:
                 PortProcessManager.terminate_existing(
-                    self.monitoring.prometheus_port, self.monitoring.grafana_port, self.process_registry
+                    self.monitoring.prometheus_port,
+                    self.monitoring.grafana_port,
+                    self.process_registry,
+                    self.monitoring.prometheus_bind_address,
+                    self.monitoring.grafana_bind_address,
                 )
             self._services = self._native_services()
             for service in self._services:
@@ -142,7 +149,7 @@ class ManagedMonitoringStack:
             if supervisor and supervisor is not threading.current_thread():
                 supervisor.join(timeout=3)
                 if supervisor.is_alive():
-                    print("WARNING: Native supervisor did not stop within 3 seconds")
+                    LOGGER.warning("Native supervisor did not stop within 3 seconds")
             shutdown_error: OSError | None = None
             try:
                 self._stop_services(strict=True)
@@ -155,8 +162,8 @@ class ManagedMonitoringStack:
     def refresh_statuses(self) -> None:
         """Publish an immutable replacement status map from one bounded Prometheus response."""
         try:
-            url = f"http://127.0.0.1:{self.monitoring.prometheus_port}/api/v1/targets?state=active"
-            with urllib.request.urlopen(url, timeout=4) as response:
+            url = f"http://{self._prometheus_host()}:{self.monitoring.prometheus_port}/api/v1/targets?state=active"
+            with urllib.request.urlopen(url, timeout=self.dashboard.target_health_timeout_seconds) as response:
                 if response.status != 200:
                     raise OSError(f"Prometheus returned HTTP {response.status}")
                 content_length = int(response.headers.get("Content-Length", "0"))
@@ -189,12 +196,12 @@ class ManagedMonitoringStack:
                         )
                 self._statuses = next_statuses
             if self._last_status_warning is not None:
-                print("Prometheus target health refresh recovered")
+                LOGGER.info("Prometheus target health refresh recovered")
                 self._last_status_warning = None
         except (OSError, ValueError, TypeError, urllib.error.URLError) as error:
             message = str(error)
             if message != self._last_status_warning:
-                print(f"WARNING: Unable to refresh Prometheus target health: {message}")
+                LOGGER.warning("Unable to refresh Prometheus target health: %s", message)
                 self._last_status_warning = message
 
     def _supervise(self) -> None:
@@ -203,7 +210,7 @@ class ManagedMonitoringStack:
                 try:
                     service.supervise()
                 except Exception as error:  # keep the sole supervisor alive across platform-specific failures
-                    print(f"WARNING: {service.spec.name} supervision failed: {error}")
+                    LOGGER.warning("%s supervision failed: %s", service.spec.name, error)
             if self._services and self._services[0].healthy():
                 self.refresh_statuses()
 
@@ -219,6 +226,8 @@ class ManagedMonitoringStack:
                 self.runtime_directory / "logs/prometheus.log",
                 log_size,
                 self.dashboard.process_log_backups,
+                self.dashboard.prometheus_startup_timeout_seconds,
+                self.monitoring.prometheus_bind_address,
             ),
             self.process_registry,
             self._shutdown_event,
@@ -233,6 +242,8 @@ class ManagedMonitoringStack:
                 self.runtime_directory / "logs/grafana-console.log",
                 log_size,
                 self.dashboard.process_log_backups,
+                self.dashboard.grafana_startup_timeout_seconds,
+                self.monitoring.grafana_bind_address,
             ),
             self.process_registry,
             self._shutdown_event,
@@ -245,7 +256,7 @@ class ManagedMonitoringStack:
             try:
                 service.stop()
             except (OSError, RuntimeError) as error:
-                print(f"WARNING: Unable to stop managed {service.spec.name}: {error}")
+                LOGGER.warning("Unable to stop managed %s: %s", service.spec.name, error)
                 failures.append(f"{service.spec.name}: {error}")
         if strict and failures:
             raise OSError("Native service shutdown was incomplete: " + "; ".join(failures))
@@ -282,7 +293,8 @@ class ManagedMonitoringStack:
                 f"[paths]\ndata = {_portable(grafana / 'data')}\nlogs = {_portable(grafana / 'logs')}\n"
                 f"plugins = {_portable(grafana / 'data/plugins')}\n"
                 f"provisioning = {_portable(grafana / 'provisioning')}\n\n"
-                f"[server]\nhttp_addr = 0.0.0.0\nhttp_port = {self.monitoring.grafana_port}\n\n"
+                f"[server]\nhttp_addr = {self.monitoring.grafana_bind_address}\n"
+                f"http_port = {self.monitoring.grafana_port}\n\n"
                 "[auth]\ndisable_login_form = true\n\n[auth.anonymous]\nenabled = true\n"
                 "org_name = Main Org.\norg_role = Viewer\n\n[users]\ndefault_theme = dark\n\n"
                 "[dashboards]\nmin_refresh_interval = 1s\n\n[log]\nmode = console\nlevel = info\n"
@@ -293,7 +305,7 @@ class ManagedMonitoringStack:
             (
                 "apiVersion: 1\ndatasources:\n  - name: Prometheus\n"
                 f"    uid: {DATASOURCE_UID}\n    type: prometheus\n    access: proxy\n"
-                f"    url: http://127.0.0.1:{self.monitoring.prometheus_port}\n"
+                f"    url: http://{self._prometheus_host()}:{self.monitoring.prometheus_port}\n"
                 "    isDefault: true\n    editable: false\n"
             ).encode(),
         )
@@ -317,7 +329,8 @@ class ManagedMonitoringStack:
             f"--config.file={directory / 'prometheus.yml'}",
             f"--storage.tsdb.path={directory / 'data'}",
             f"--storage.tsdb.retention.time={self.dashboard.retention_days}d",
-            f"--web.listen-address=0.0.0.0:{self.monitoring.prometheus_port}",
+            "--web.listen-address="
+            + _listen_address(self.monitoring.prometheus_bind_address, self.monitoring.prometheus_port),
         ]
 
     def _grafana_command(self) -> list[str]:
@@ -344,10 +357,14 @@ class ManagedMonitoringStack:
         raise OSError(f"Grafana executable not found under {self.monitoring.grafana_home.resolve() / 'bin'}")
 
     def _prometheus_health(self) -> str:
-        return f"http://127.0.0.1:{self.monitoring.prometheus_port}/-/ready"
+        return f"http://{self._prometheus_host()}:{self.monitoring.prometheus_port}/-/ready"
 
     def _grafana_health(self) -> str:
-        return f"http://127.0.0.1:{self.monitoring.grafana_port}/api/health"
+        host = _consumer_host(self.monitoring.grafana_bind_address)
+        return f"http://{host}:{self.monitoring.grafana_port}/api/health"
+
+    def _prometheus_host(self) -> str:
+        return _consumer_host(self.monitoring.prometheus_bind_address)
 
 
 def _base_name(path: Path) -> str:
@@ -356,6 +373,19 @@ def _base_name(path: Path) -> str:
 
 def _portable(path: Path) -> str:
     return str(path.resolve()).replace("\\", "/")
+
+
+def _consumer_host(bind_address: str) -> str:
+    if bind_address == "0.0.0.0":
+        return "127.0.0.1"
+    if bind_address == "::":
+        return "[::1]"
+    return f"[{bind_address}]" if ":" in bind_address else bind_address
+
+
+def _listen_address(bind_address: str, port: int) -> str:
+    host = f"[{bind_address}]" if ":" in bind_address else bind_address
+    return f"{host}:{port}"
 
 
 def _now() -> str:

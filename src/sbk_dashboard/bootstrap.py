@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import stat
@@ -23,6 +24,8 @@ from sbk_dashboard.config import (
     resolve_on_path,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 class NativeToolBootstrap:
     """Resolve installed tools or download pinned official archives."""
@@ -30,39 +33,41 @@ class NativeToolBootstrap:
     def resolve(self, monitoring: MonitoringConfig, downloads: DownloadConfig) -> MonitoringConfig:
         prometheus = resolve_on_path(monitoring.prometheus_binary, downloads.platform)
         if prometheus is None:
-            print(f"Prometheus is not installed at {monitoring.prometheus_binary}; bootstrapping from properties")
+            LOGGER.info(
+                "Prometheus is not installed at %s; bootstrapping from properties", monitoring.prometheus_binary
+            )
             prometheus_home = self._install("Prometheus", downloads.prometheus, downloads)
             prometheus = prometheus_home / downloads.prometheus.executable
         else:
-            print(f"Prometheus found at {prometheus}")
+            LOGGER.info("Prometheus found at %s", prometheus)
         grafana_executable = self._grafana_executable(monitoring.grafana_home, downloads.platform)
         grafana_home = monitoring.grafana_home.expanduser().resolve()
         if grafana_executable is None:
-            print(f"Grafana is not installed under {monitoring.grafana_home}; bootstrapping from properties")
+            LOGGER.info("Grafana is not installed under %s; bootstrapping from properties", monitoring.grafana_home)
             grafana_home = self._install("Grafana", downloads.grafana, downloads)
             if self._grafana_executable(grafana_home, downloads.platform) is None:
                 raise OSError(f"Grafana archive does not contain an executable under {grafana_home / 'bin'}")
         else:
-            print(f"Grafana found at {grafana_home}")
+            LOGGER.info("Grafana found at %s", grafana_home)
         return monitoring.with_tools(prometheus.resolve(), grafana_home.resolve())
 
     def _install(self, name: str, archive: ToolArchive, config: DownloadConfig) -> Path:
         destination = config.install_directory / archive.archive_directory
         expected_executable = destination / archive.executable
         if executable(expected_executable, config.platform):
-            print(f"{name} installed at {destination}")
+            LOGGER.info("%s installed at %s", name, destination)
             return destination
         config.download_directory.mkdir(parents=True, exist_ok=True)
         config.install_directory.mkdir(parents=True, exist_ok=True)
         downloaded = config.download_directory / archive.file_name
         if downloaded.is_file() and self._checksum(downloaded) != archive.sha256:
-            print(f"WARNING: Cached {name} archive checksum is invalid; downloading it again")
+            LOGGER.warning("Cached %s archive checksum is invalid; downloading it again", name)
             downloaded.unlink()
         if not downloaded.is_file():
             self._download(name, archive.url, downloaded)
         if self._checksum(downloaded) != archive.sha256:
             raise OSError(f"{name} download SHA-256 verification failed: {downloaded}")
-        print(f"{name} download verified successfully")
+        LOGGER.info("%s download verified successfully", name)
         temporary = Path(tempfile.mkdtemp(prefix=f".{name.lower()}-", dir=config.install_directory))
         try:
             try:
@@ -82,18 +87,24 @@ class NativeToolBootstrap:
             os.replace(extracted, destination)
         finally:
             shutil.rmtree(temporary, ignore_errors=True)
-        print(f"{name} installed at {destination}")
+        LOGGER.info("%s installed at %s", name, destination)
         return destination
 
     @staticmethod
     def _download(name: str, url: str, destination: Path) -> None:
-        print(f"Downloading {name} from {url}")
-        print(f"Download destination: {destination}")
+        LOGGER.info("Downloading %s from %s", name, url)
+        LOGGER.info("Download destination: %s", destination)
         temporary = destination.with_name(destination.name + ".part")
         request = urllib.request.Request(url, headers={"User-Agent": "sbk-dashboard/1.0"})
         try:
             with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
-                total = int(response.headers.get("Content-Length", "0"))
+                raw_total = response.headers.get("Content-Length", "0")
+                try:
+                    total = int(raw_total)
+                except (TypeError, ValueError) as error:
+                    raise OSError(f"{name} download returned an invalid Content-Length") from error
+                if total < 0:
+                    raise OSError(f"{name} download returned an invalid negative Content-Length")
                 downloaded = 0
                 last_update = 0.0
                 while True:
@@ -120,7 +131,7 @@ class NativeToolBootstrap:
             message = f"{min(100.0, downloaded * 100 / total):.1f}% ({_bytes(downloaded)} / {_bytes(total)})"
         else:
             message = f"{_bytes(downloaded)} downloaded"
-        print(f"\r{name} download progress: {message}", end="\n" if complete else "", flush=True)
+        LOGGER.info("%s download progress: %s%s", name, message, " (complete)" if complete else "")
 
     @staticmethod
     def _extract(archive: Path, destination: Path, archive_format: str) -> None:
@@ -136,10 +147,10 @@ class NativeToolBootstrap:
                     source.extractall(destination)
         elif archive_format == "zip":
             with zipfile.ZipFile(archive) as source:
-                for member in source.infolist():
-                    _safe_member(member.filename)
-                    if (member.external_attr >> 16) & 0o170000 == 0o120000:
-                        raise OSError(f"Archive links are not allowed: {member.filename}")
+                for zip_member in source.infolist():
+                    _safe_member(zip_member.filename)
+                    if (zip_member.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise OSError(f"Archive links are not allowed: {zip_member.filename}")
                 source.extractall(destination)
         else:
             raise ValueError(f"Unsupported archive format: {archive_format}")
@@ -165,8 +176,15 @@ class NativeToolBootstrap:
 
 
 def _safe_member(name: str) -> None:
-    path = PurePosixPath(name.replace("\\", "/"))
-    if path.is_absolute() or ".." in path.parts:
+    normalized = name.replace("\\", "/")
+    if not normalized:
+        raise OSError(f"Archive entry escapes extraction directory: {name}")
+    path = PurePosixPath(normalized)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(len(part) >= 2 and part[1] == ":" and part[0].isalpha() for part in path.parts)
+    ):
         raise OSError(f"Archive entry escapes extraction directory: {name}")
 
 

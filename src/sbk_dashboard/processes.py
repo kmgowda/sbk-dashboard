@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ipaddress
+import json
+import logging
 import os
 import signal
 import socket
@@ -22,7 +25,7 @@ import psutil
 from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
-STARTUP_TIMEOUT_SECONDS = 45
+LOGGER = logging.getLogger(__name__)
 
 
 class LifecycleState(Enum):
@@ -107,6 +110,8 @@ class NativeServiceSpec:
     log_path: Path
     log_size_bytes: int
     log_backups: int
+    startup_timeout_seconds: int = 45
+    bind_address: str = "0.0.0.0"
 
 
 class ManagedProcessRegistry:
@@ -120,8 +125,6 @@ class ManagedProcessRegistry:
         if not self.path.is_file():
             return {}
         try:
-            import json
-
             return json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return {}
@@ -144,8 +147,12 @@ class ManagedProcessRegistry:
         if not entry or entry.get("port") != port:
             return None
         try:
-            process = psutil.Process(int(entry["pid"]))
-            if abs(process.create_time() - float(entry["started"])) > 0.01:
+            raw_pid = entry["pid"]
+            raw_started = entry["started"]
+            if not isinstance(raw_pid, (str, int)) or not isinstance(raw_started, (str, int, float)):
+                return None
+            process = psutil.Process(int(raw_pid))
+            if abs(process.create_time() - float(raw_started)) > 0.01:
                 return None
             if process.exe() != entry.get("command"):
                 return None
@@ -165,23 +172,36 @@ class PortProcessManager:
     """Validate all listener owners before safely replacing any native service."""
 
     @classmethod
-    def terminate_existing(cls, prometheus_port: int, grafana_port: int, registry: ManagedProcessRegistry) -> None:
-        candidates: list[tuple[str, int, list[psutil.Process]]] = []
-        cls._inspect("Prometheus", "prometheus", prometheus_port, {"prometheus"}, registry, candidates)
-        cls._inspect("Grafana", "grafana", grafana_port, {"grafana", "grafana-server"}, registry, candidates)
+    def terminate_existing(
+        cls,
+        prometheus_port: int,
+        grafana_port: int,
+        registry: ManagedProcessRegistry,
+        prometheus_bind_address: str = "0.0.0.0",
+        grafana_bind_address: str = "0.0.0.0",
+    ) -> None:
+        candidates: list[tuple[str, int, str, list[psutil.Process]]] = []
+        cls._inspect(
+            "Prometheus", "prometheus", prometheus_port, prometheus_bind_address,
+            {"prometheus"}, registry, candidates,
+        )
+        cls._inspect(
+            "Grafana", "grafana", grafana_port, grafana_bind_address,
+            {"grafana", "grafana-server"}, registry, candidates,
+        )
         stopped: set[int] = set()
-        for name, port, processes in candidates:
+        for name, port, _bind_address, processes in candidates:
             for process in processes:
                 if process.pid in stopped:
                     continue
                 stopped.add(process.pid)
-                print(f"Stopping existing {name} process on port {port} (pid {process.pid})")
+                LOGGER.info("Stopping existing %s process on port %s (pid %s)", name, port, process.pid)
                 _terminate_psutil_tree(process, name)
-        for name, port, _ in candidates:
+        for name, port, bind_address, _ in candidates:
             deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-            while time.monotonic() < deadline and not cls.available(port):
+            while time.monotonic() < deadline and not cls.available(port, bind_address):
                 time.sleep(0.1)
-            if not cls.available(port):
+            if not cls.available(port, bind_address):
                 raise OSError(f"{name} port {port} remains occupied after stopping its existing process")
 
     @classmethod
@@ -190,18 +210,19 @@ class PortProcessManager:
         name: str,
         component: str,
         port: int,
+        bind_address: str,
         valid_names: set[str],
         registry: ManagedProcessRegistry,
-        candidates: list[tuple[str, int, list[psutil.Process]]],
+        candidates: list[tuple[str, int, str, list[psutil.Process]]],
     ) -> None:
         try:
             connections = [
                 connection
                 for connection in psutil.net_connections(kind="tcp")
-                if connection.status == psutil.CONN_LISTEN and connection.laddr.port == port
+                if connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
             ]
         except (psutil.Error, OSError) as error:
-            if cls.available(port):
+            if cls.available(port, bind_address):
                 return
             owned = registry.find(component, port)
             if owned is None:
@@ -228,22 +249,45 @@ class PortProcessManager:
         for process in processes:
             try:
                 command = process.exe()
-            except (psutil.AccessDenied, psutil.ZombieProcess):
-                command = process.name()
+            except psutil.Error:
+                try:
+                    command = process.name()
+                except psutil.Error:
+                    command = ""
             base = Path(command).name.lower().removesuffix(".exe")
             if base not in valid_names:
                 description = command or "unknown command"
                 raise OSError(
                     f"Port {port} is owned by unrelated process {process.pid} ({description}); no process was stopped"
                 )
-        candidates.append((name, port, processes))
+        candidates.append((name, port, bind_address, processes))
 
     @staticmethod
-    def available(port: int) -> bool:
+    def available(port: int, bind_address: str = "0.0.0.0") -> bool:
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-                probe.bind(("0.0.0.0", port))
+            try:
+                family = socket.AF_INET6 if ipaddress.ip_address(bind_address).version == 6 else socket.AF_INET
+            except ValueError:
+                family = socket.AF_INET6 if ":" in bind_address else socket.AF_INET
+            connect_address = (
+                "::1" if bind_address == "::"
+                else "127.0.0.1" if bind_address == "0.0.0.0"
+                else bind_address
+            )
+            with socket.socket(family, socket.SOCK_STREAM) as connection:
+                connection.settimeout(0.2)
+                if connection.connect_ex((connect_address, port)) == 0:
+                    return False
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                if os.name == "nt":
+                    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+                    if exclusive is None:
+                        return False
+                    probe.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+                else:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                probe.bind((bind_address, port))
+                probe.listen(1)
             return True
         except OSError:
             return False
@@ -273,29 +317,50 @@ class RotatingProcessLog:
         source = self._process.stdout
         if source is None:
             return
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        output = self._path.open("ab", buffering=0)
+        output = None
+        size = 0
         try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            output = self._path.open("ab", buffering=0)
             size = self._path.stat().st_size
+        except (OSError, ValueError) as error:
+            if output is not None:
+                with suppress(OSError, ValueError):
+                    output.close()
+            output = None
+            LOGGER.warning("Native process logging disabled for %s; discarding output: %s", self._path, error)
+        try:
             while True:
                 chunk = source.read(64 * 1024)
                 if not chunk:
                     return
+                if output is None:
+                    continue
                 offset = 0
-                while offset < len(chunk):
-                    if size >= self._size_bytes:
+                try:
+                    while offset < len(chunk):
+                        if size >= self._size_bytes:
+                            output.close()
+                            self._rotate()
+                            output = self._path.open("ab", buffering=0)
+                            size = 0
+                        count = min(self._size_bytes - size, len(chunk) - offset)
+                        output.write(chunk[offset : offset + count])
+                        size += count
+                        offset += count
+                except (OSError, ValueError) as error:
+                    with suppress(OSError, ValueError):
                         output.close()
-                        self._rotate()
-                        output = self._path.open("ab", buffering=0)
-                        size = 0
-                    count = min(self._size_bytes - size, len(chunk) - offset)
-                    output.write(chunk[offset : offset + count])
-                    size += count
-                    offset += count
+                    output = None
+                    LOGGER.warning(
+                        "Native process logging failed for %s; discarding remaining output: %s", self._path, error
+                    )
         except (OSError, ValueError) as error:
-            print(f"WARNING: Native process log pump failed for {self._path}: {error}")
+            LOGGER.warning("Native process output drain failed for %s: %s", self._path, error)
         finally:
-            output.close()
+            if output is not None:
+                with suppress(OSError, ValueError):
+                    output.close()
 
     def _rotate(self) -> None:
         if self._backups < 1:
@@ -354,9 +419,11 @@ class ManagedNativeService:
                     with self._state_lock:
                         self._attached = True
                         self._last_healthy = True
-                    print(f"Continuing existing {self.spec.name} on port {self.spec.port}")
+                    LOGGER.info("Continuing existing %s on port %s", self.spec.name, self.spec.port)
                 else:
-                    if continue_existing and not PortProcessManager.available(self.spec.port):
+                    if continue_existing and not PortProcessManager.available(
+                        self.spec.port, self.spec.bind_address
+                    ):
                         raise OSError(
                             f"Port {self.spec.port} is occupied but does not expose a healthy {self.spec.name} "
                             "service; -continue true cannot attach to it"
@@ -433,7 +500,7 @@ class ManagedNativeService:
         try:
             if self.shutdown_event.is_set():
                 return False
-            print(f"WARNING: Restarting unhealthy managed {self.spec.name}")
+            LOGGER.warning("Restarting unhealthy managed %s", self.spec.name)
             state = self.lifecycle.state
             if state in {LifecycleState.RUNNING, LifecycleState.FAILED}:
                 self.lifecycle.transition(LifecycleState.STARTING)
@@ -454,7 +521,9 @@ class ManagedNativeService:
                 )
                 self._next_restart = time.monotonic() + backoff
                 self.lifecycle.transition(LifecycleState.FAILED)
-                print(f"WARNING: Unable to restart {self.spec.name}; retrying in {backoff:g}s: {error}")
+                LOGGER.warning(
+                    "Unable to restart %s; retrying in %gs: %s", self.spec.name, backoff, error
+                )
                 return False
         finally:
             self._operation_lock.release()
@@ -462,23 +531,30 @@ class ManagedNativeService:
     def _launch(self) -> None:
         command = self.spec.command()
         self.spec.log_path.parent.mkdir(parents=True, exist_ok=True)
-        options: dict[str, object] = {
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.STDOUT,
-            "stdin": subprocess.DEVNULL,
-            "bufsize": 0,
-        }
         if os.name == "nt":
-            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
         else:
-            options["start_new_session"] = True
-        process = subprocess.Popen(command, **options)  # type: ignore[arg-type]
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+                start_new_session=True,
+            )
         pump = RotatingProcessLog(process, self.spec.log_path, self.spec.log_size_bytes, self.spec.log_backups)
         pump.start()
         with self._state_lock:
             self._process = process
             self._log_pump = pump
-        print(f"Started managed process {command[0]} (pid {process.pid})")
+        LOGGER.info("Started managed process %s (pid %s)", command[0], process.pid)
         try:
             self.registry.record(self.spec.component, process, self.spec.port)
             self._await_ready(process)
@@ -487,7 +563,7 @@ class ManagedNativeService:
             raise
 
     def _await_ready(self, process: subprocess.Popen[bytes]) -> None:
-        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+        deadline = time.monotonic() + self.spec.startup_timeout_seconds
         while time.monotonic() < deadline:
             if self.shutdown_event.is_set():
                 raise OSError(f"{self.spec.name} startup cancelled during shutdown")
@@ -504,10 +580,12 @@ class ManagedNativeService:
                     raise OSError(f"{self.spec.name} exited during startup with code {process.returncode}")
                 with self._state_lock:
                     self._last_healthy = True
-                print(f"{self.spec.name} ready on port {self.spec.port}")
+                LOGGER.info("%s ready on port %s", self.spec.name, self.spec.port)
                 return
             self.shutdown_event.wait(0.25)
-        raise OSError(f"{self.spec.name} did not become ready within {STARTUP_TIMEOUT_SECONDS} seconds")
+        raise OSError(
+            f"{self.spec.name} did not become ready within {self.spec.startup_timeout_seconds} seconds"
+        )
 
     def _stop_process(self) -> None:
         with self._state_lock:
@@ -528,7 +606,7 @@ class ManagedNativeService:
             try:
                 self.registry.remove(self.spec.component, process.pid)
             except OSError as error:
-                print(f"WARNING: Unable to update managed process ownership: {error}")
+                LOGGER.warning("Unable to update managed process ownership: %s", error)
         if termination_error:
             raise termination_error
 
@@ -548,7 +626,9 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
     try:
         process.wait(STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
-        print(f"WARNING: {name} pid {process.pid} did not stop gracefully; forcing process-group termination")
+        LOGGER.warning(
+            "%s pid %s did not stop gracefully; forcing process-group termination", name, process.pid
+        )
         if os.name != "nt":
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
@@ -564,19 +644,27 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
 def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
     try:
         descendants = process.children(recursive=True)
-        for child in reversed(descendants):
-            child.terminate()
-        process.terminate()
-        _, alive = psutil.wait_procs([*descendants, process], timeout=STOP_TIMEOUT_SECONDS)
-        if alive:
-            print(f"WARNING: {name} pid {process.pid} did not stop gracefully; forcing termination")
-            for item in alive:
-                item.kill()
-            _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)
-        if alive:
-            raise OSError(f"Unable to stop existing {name} process {process.pid}")
     except psutil.NoSuchProcess:
         return
+    for child in reversed(descendants):
+        with suppress(psutil.NoSuchProcess):
+            child.terminate()
+    candidates = [*descendants, process]
+    try:
+        process.terminate()
+    except psutil.NoSuchProcess:
+        candidates = descendants
+    if not candidates:
+        return
+    _, alive = psutil.wait_procs(candidates, timeout=STOP_TIMEOUT_SECONDS)
+    if alive:
+        LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
+        for item in alive:
+            with suppress(psutil.NoSuchProcess):
+                item.kill()
+        _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)
+    if alive:
+        raise OSError(f"Unable to stop existing {name} process {process.pid}")
 
 
 def _finish_descendants(descendants: list[psutil.Process]) -> None:

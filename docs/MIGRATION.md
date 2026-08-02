@@ -23,3 +23,20 @@ Prometheus and Grafana processes safely, but an orderly migration avoids an unne
 
 `SBK_JAVA_HOME` and `JAVA_HOME` no longer affect the dashboard. No data migration is required when the same
 `SBK_DASHBOARD_DATA_DIR` is selected.
+
+## Network and logging changes in the production-hardening release
+
+Prometheus now binds to `127.0.0.1` by default instead of every interface. This is compatible with the managed
+Grafana datasource and health checks. Deployments that intentionally query Prometheus remotely must explicitly set
+`-prometheus-bind` or `SBK_DASHBOARD_PROMETHEUS_BIND` and provide their own network controls.
+
+Management and Grafana continue to bind publicly by default. They can now be restricted independently with `-bind`
+and `-grafana-bind`. Listener addresses do not change generated public URLs; continue using `-grafana-url` for proxy,
+TLS, or external DNS routing.
+
+Control-plane messages now use timestamped standard Python logging on stderr. Service definitions that previously
+redirected stdout should capture stderr as well, or rely on the host service manager's combined journal. Native
+Prometheus and Grafana console logs remain in bounded rotating files under the monitoring data directory.
+
+Grafana's default startup deadline is now 120 seconds; Prometheus remains 45 seconds. Persistent JSON remains
+backward compatible and needs no data migration.
