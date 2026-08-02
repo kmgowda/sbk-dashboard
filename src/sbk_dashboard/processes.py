@@ -269,6 +269,15 @@ class PortProcessManager:
                 family = socket.AF_INET6 if ipaddress.ip_address(bind_address).version == 6 else socket.AF_INET
             except ValueError:
                 family = socket.AF_INET6 if ":" in bind_address else socket.AF_INET
+            connect_address = (
+                "::1" if bind_address == "::"
+                else "127.0.0.1" if bind_address == "0.0.0.0"
+                else bind_address
+            )
+            with socket.socket(family, socket.SOCK_STREAM) as connection:
+                connection.settimeout(0.2)
+                if connection.connect_ex((connect_address, port)) == 0:
+                    return False
             with socket.socket(family, socket.SOCK_STREAM) as probe:
                 if os.name == "nt":
                     exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)

@@ -32,6 +32,7 @@ It also sends a live oversized request with a negative `Content-Length`, rejects
 rejects non-numeric download lengths as I/O failures, rejects boolean API ports, verifies POSIX probes enable address
 reuse for `TIME_WAIT` while requiring a successful `listen()`, and ensures corrupted persisted boolean or out-of-range
 endpoint ports cannot be loaded.
+An active TCP listener is rejected by a bounded connect preflight before platform-specific reusable bind semantics.
 Native lifecycle regressions also verify that an unavailable log destination still drains output beyond pipe capacity
 and that captured descendants are force-cleaned when their parent disappears during external-process termination.
 

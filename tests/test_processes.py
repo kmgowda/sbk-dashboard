@@ -9,7 +9,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import psutil
 
@@ -120,6 +120,15 @@ class LifecycleTest(unittest.TestCase):
         probe.bind.assert_called_once_with(("0.0.0.0", 19090))
         probe.listen.assert_called_once_with(1)
 
+    def test_port_is_unavailable_when_tcp_listener_accepts_connections(self):
+        with patch("sbk_dashboard.processes.socket.socket") as socket_type:
+            connection = socket_type.return_value.__enter__.return_value
+            connection.connect_ex.return_value = 0
+            self.assertFalse(PortProcessManager.available(19090, "127.0.0.1"))
+        connection.settimeout.assert_called_once_with(0.2)
+        connection.connect_ex.assert_called_once_with(("127.0.0.1", 19090))
+        connection.bind.assert_not_called()
+
     def test_windows_port_probe_requests_exclusive_address_use(self):
         with (
             patch("sbk_dashboard.processes.psutil.net_connections", return_value=[]),
@@ -150,7 +159,10 @@ class LifecycleTest(unittest.TestCase):
             patch("sbk_dashboard.processes.socket.socket") as socket_type,
         ):
             self.assertTrue(PortProcessManager.available(19090, "::1"))
-        socket_type.assert_called_once_with(socket.AF_INET6, socket.SOCK_STREAM)
+        self.assertEqual(
+            [call(socket.AF_INET6, socket.SOCK_STREAM), call(socket.AF_INET6, socket.SOCK_STREAM)],
+            socket_type.call_args_list,
+        )
         probe = socket_type.return_value.__enter__.return_value
         probe.bind.assert_called_once_with(("::1", 19090))
         probe.listen.assert_called_once_with(1)
