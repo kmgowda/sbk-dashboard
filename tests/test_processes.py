@@ -183,6 +183,22 @@ class LifecycleTest(unittest.TestCase):
             self.assertFalse(pump._thread.is_alive())
 
 
+class TerminationTest(unittest.TestCase):
+    def test_terminate_psutil_tree_continues_when_a_child_disappears(self):
+        from sbk_dashboard.processes import _terminate_psutil_tree
+
+        parent = MagicMock()
+        child = MagicMock()
+        child.terminate.side_effect = psutil.NoSuchProcess(2)
+        parent.children.return_value = [child]
+        with patch("sbk_dashboard.processes.psutil.wait_procs") as wait_procs:
+            wait_procs.side_effect = [([], [parent]), ([], [])]
+            _terminate_psutil_tree(parent, "Test")
+        parent.terminate.assert_called_once()
+        child.terminate.assert_called_once()
+        parent.kill.assert_called_once()
+
+
 class BoundedHttpServerTest(unittest.TestCase):
     def test_rejects_requests_beyond_worker_and_queue_capacity(self):
         entered = threading.Event()

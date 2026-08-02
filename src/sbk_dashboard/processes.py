@@ -624,19 +624,24 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
 def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
     try:
         descendants = process.children(recursive=True)
-        for child in reversed(descendants):
-            child.terminate()
-        process.terminate()
-        _, alive = psutil.wait_procs([*descendants, process], timeout=STOP_TIMEOUT_SECONDS)
-        if alive:
-            LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
-            for item in alive:
-                item.kill()
-            _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)
-        if alive:
-            raise OSError(f"Unable to stop existing {name} process {process.pid}")
     except psutil.NoSuchProcess:
         return
+    for child in reversed(descendants):
+        with suppress(psutil.NoSuchProcess):
+            child.terminate()
+    try:
+        process.terminate()
+    except psutil.NoSuchProcess:
+        return
+    _, alive = psutil.wait_procs([*descendants, process], timeout=STOP_TIMEOUT_SECONDS)
+    if alive:
+        LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
+        for item in alive:
+            with suppress(psutil.NoSuchProcess):
+                item.kill()
+        _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)
+    if alive:
+        raise OSError(f"Unable to stop existing {name} process {process.pid}")
 
 
 def _finish_descendants(descendants: list[psutil.Process]) -> None:
