@@ -114,8 +114,12 @@ class ManagedMonitoringStack:
         with self._data_lock:
             return self._statuses.get(target_id, TargetStatus())
 
-    def dashboard_url(self, target_id: str) -> str:
-        return self.dashboard_provisioner.dashboard_url(target_id)
+    def dashboard_url(self, target_id: str, browser_host: str | None = None) -> str:
+        # An explicitly configured public URL is authoritative. With the default URL,
+        # follow the host/IP used to reach the management UI so remote users never
+        # receive a localhost-only Grafana link.
+        dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
+        return self.dashboard_provisioner.dashboard_url(target_id, dynamic_host)
 
     def healthy(self) -> bool:
         return self.lifecycle.state == LifecycleState.RUNNING and bool(self._services) and all(

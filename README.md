@@ -132,7 +132,14 @@ sbk-dashboard \
   -grafana-url http://dashboard.example.com:3000
 ```
 
-`-grafana-url` is the address reachable by users' browsers; it may differ from Grafana's local listen address.
+When `-grafana-url` is not supplied, every generated dashboard link follows the hostname or IP address used to open
+the main dashboard. For example, opening `http://203.0.113.25:9721/` produces Grafana links beginning with
+`http://203.0.113.25:3000/`; `localhost`, `127.0.0.1`, DNS names, and IPv6 addresses behave the same way. This keeps
+the main page and its generated dashboard links reachable from the same client machine.
+
+`-grafana-url` remains an explicit override for reverse proxies, TLS termination, DNS aliases, or a Grafana address
+whose hostname cannot be derived from the main dashboard request. An explicit value is authoritative and may differ
+from Grafana's local listen address.
 
 ## Command options
 
@@ -305,6 +312,11 @@ Existing Java-created `targets.json`, monitoring data, and dashboard mappings re
 directory can be reused after upgrading.
 
 ## Build and test
+
+Software agents and automated coding tools should begin with [`AGENTS.md`](AGENTS.md). The detailed code map,
+runtime flows, change recipes, debugging guidance, validation layers, and review priorities are in
+[`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). Tool-specific discovery files delegate to those canonical documents so
+Codex, Devin, Windsurf, Cursor, Copilot, Claude, Gemini, and other agents follow the same engineering contract.
 
 ```bash
 python -m pip install -e ".[dev]"

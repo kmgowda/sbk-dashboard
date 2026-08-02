@@ -60,6 +60,10 @@ curl -fsS 'http://127.0.0.1:19090/api/v1/query?query=up%7Bjob%3D%22sbk-dashboard
 Open the returned Grafana URL and confirm all 53 panels load. Register the same host with another exporter port and
 confirm it receives a different URL and shows only its endpoint-labelled series.
 
+Open the management page through a non-loopback address such as `http://<server-public-ip>:19721/`. The generated
+dashboard link must use `<server-public-ip>:13000`, not `localhost` or `127.0.0.1`. Repeat through loopback and, when
+available, a DNS name or IPv6 literal; the Grafana hostname must follow the hostname used for the management page.
+
 Kill the managed Prometheus PID without stopping sbk-dashboard. Within the supervisor interval, confirm a new PID is
 recorded, `/-/ready` recovers, and the existing TSDB still returns the endpoint's historical series. Repeat for
 Grafana and verify the dedicated URL recovers. Attached `-continue true` processes must not be killed or restarted.

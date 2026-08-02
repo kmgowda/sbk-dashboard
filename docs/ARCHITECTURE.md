@@ -42,6 +42,11 @@ per endpoint. This is significantly less expensive and lets Prometheus query dat
 The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct
 endpoint and dashboard.
 
+Dashboard URLs are resolved at API response time. With the default Grafana URL, the server takes the validated
+hostname or IP address from the direct HTTP `Host` header and combines it with the Grafana scheme, port, and dashboard
+UID. Consequently a main page opened through a public IP, loopback address, DNS name, or IPv6 literal links to Grafana
+through that same address. `-grafana-url` is an authoritative static override for reverse-proxy and TLS deployments.
+
 ## Persistence and retention
 
 The Python control plane persists registrations and generated configuration using temporary files, `fsync`, and

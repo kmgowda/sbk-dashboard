@@ -8,6 +8,7 @@ import re
 import threading
 from importlib.resources import files
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.models import BenchmarkTarget
@@ -46,8 +47,15 @@ class GrafanaDashboardProvisioner:
     def dashboard_uid(target_id: str) -> str:
         return f"sbk-{target_id}"
 
-    def dashboard_url(self, target_id: str) -> str:
-        return f"{self.grafana_public_url}/d/{self.dashboard_uid(target_id)}/"
+    def dashboard_url(self, target_id: str, browser_host: str | None = None) -> str:
+        """Build a dashboard URL, optionally using the host through which the UI was reached."""
+        base_url = self.grafana_public_url
+        if browser_host:
+            parsed = urlsplit(base_url)
+            formatted_host = f"[{browser_host}]" if ":" in browser_host else browser_host
+            netloc = formatted_host if parsed.port is None else f"{formatted_host}:{parsed.port}"
+            base_url = urlunsplit((parsed.scheme, netloc, parsed.path, "", "")).rstrip("/")
+        return f"{base_url}/d/{self.dashboard_uid(target_id)}/"
 
     def generated_dashboard(self, target: BenchmarkTarget) -> dict[str, object]:
         dashboard = copy.deepcopy(self._canonical)
