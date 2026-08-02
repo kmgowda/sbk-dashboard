@@ -8,6 +8,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import psutil
 
@@ -17,6 +19,7 @@ from sbk_dashboard.processes import (
     ManagedNativeService,
     ManagedProcessRegistry,
     NativeServiceSpec,
+    PortProcessManager,
     RotatingProcessLog,
 )
 from sbk_dashboard.web import BoundedThreadPoolHttpServer
@@ -108,6 +111,26 @@ class LifecycleTest(unittest.TestCase):
             self.assertTrue(files)
             self.assertTrue(all(item.stat().st_size <= 1024 for item in files))
             self.assertFalse(any(thread.name == "native-log-pump" for thread in threading.enumerate()))
+
+    def test_port_is_unavailable_when_listener_is_discovered(self):
+        listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090))
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+        ):
+            self.assertFalse(PortProcessManager.available(19090))
+        socket_type.assert_not_called()
+
+    def test_windows_port_probe_requests_exclusive_address_use(self):
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[]),
+            patch("sbk_dashboard.processes.os.name", "nt"),
+            patch.object(socket, "SO_EXCLUSIVEADDRUSE", 123, create=True),
+            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+        ):
+            self.assertTrue(PortProcessManager.available(19090))
+        probe = socket_type.return_value.__enter__.return_value
+        probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 123, 1)
 
 
 class BoundedHttpServerTest(unittest.TestCase):

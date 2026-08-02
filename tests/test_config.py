@@ -23,19 +23,22 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(120, config.dashboard.grafana_startup_timeout_seconds)
 
     def test_command_line_overrides_environment(self):
-        config = parse_configuration(
-            ["-data", "/cli", "-retention", "30", "-prometheus-port", "9191", "-continue", "true",
-             "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug"],
-            {"SBK_DASHBOARD_DATA_DIR": "/environment", "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14",
-             "SBK_DASHBOARD_BIND": "0.0.0.0"},
-        )
-        self.assertEqual(Path("/cli"), config.dashboard.data_directory)
-        self.assertEqual(30, config.dashboard.retention_days)
-        self.assertEqual(9191, config.monitoring.prometheus_port)
-        self.assertTrue(config.dashboard.continue_existing)
-        self.assertEqual("127.0.0.1", config.dashboard.bind_address)
-        self.assertEqual("::1", config.monitoring.prometheus_bind_address)
-        self.assertEqual("DEBUG", config.dashboard.log_level)
+        with tempfile.TemporaryDirectory() as temporary:
+            cli_directory = Path(temporary) / "cli"
+            environment_directory = Path(temporary) / "environment"
+            config = parse_configuration(
+                ["-data", str(cli_directory), "-retention", "30", "-prometheus-port", "9191", "-continue", "true",
+                 "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug"],
+                {"SBK_DASHBOARD_DATA_DIR": str(environment_directory),
+                 "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14", "SBK_DASHBOARD_BIND": "0.0.0.0"},
+            )
+            self.assertEqual(cli_directory.resolve(), config.dashboard.data_directory)
+            self.assertEqual(30, config.dashboard.retention_days)
+            self.assertEqual(9191, config.monitoring.prometheus_port)
+            self.assertTrue(config.dashboard.continue_existing)
+            self.assertEqual("127.0.0.1", config.dashboard.bind_address)
+            self.assertEqual("::1", config.monitoring.prometheus_bind_address)
+            self.assertEqual("DEBUG", config.dashboard.log_level)
 
     def test_environment_overrides_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -45,7 +48,7 @@ class ConfigurationTest(unittest.TestCase):
                 "SBK_DASHBOARD_SCRAPE_SECONDS": "9",
                 "SBK_DASHBOARD_GRAFANA_URL": "https://grafana.example/base",
             })
-            self.assertEqual(Path(temporary), config.dashboard.data_directory)
+            self.assertEqual(Path(temporary).resolve(), config.dashboard.data_directory)
             self.assertEqual(11, config.dashboard.retention_days)
             self.assertEqual(9, config.dashboard.scrape_interval_seconds)
             self.assertEqual("https://grafana.example/base", config.monitoring.grafana_public_url)

@@ -247,8 +247,22 @@ class PortProcessManager:
     @staticmethod
     def available(port: int) -> bool:
         try:
+            if any(
+                connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
+                for connection in psutil.net_connections(kind="tcp")
+            ):
+                return False
+        except (psutil.Error, OSError):
+            pass
+        try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+                if os.name == "nt":
+                    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+                    if exclusive is None:
+                        return False
+                    probe.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+                else:
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
                 probe.bind(("0.0.0.0", port))
             return True
         except OSError:
