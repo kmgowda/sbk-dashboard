@@ -110,6 +110,23 @@ class WebTest(unittest.TestCase):
         self.assertIn(b"400 Bad Request", response)
         self.assertEqual([], self.registry.list())
 
+    def test_non_string_fields_are_rejected_as_bad_request(self):
+        for payload in (
+            {"name": 123, "host": "127.0.0.1", "port": 9718, "metricsPath": "/metrics"},
+            {"name": "x", "host": 123, "port": 9718, "metricsPath": "/metrics"},
+            {"name": "x", "host": "127.0.0.1", "port": 9718, "metricsPath": 123},
+        ):
+            request = urllib.request.Request(
+                self.base + "/api/targets",
+                method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.subTest(payload=payload), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(400, caught.exception.code)
+            self.assertEqual([], self.registry.list())
+
     def test_boolean_port_is_rejected_at_http_boundary(self):
         request = urllib.request.Request(
             self.base + "/api/targets",
@@ -170,7 +187,6 @@ class MonitoringContinueTest(unittest.TestCase):
             stack.start([])
             self.assertTrue(stack.healthy())
             self.assertEqual(LifecycleState.RUNNING, stack.state)
-            self.assertIn("retention", "retention")
             config = (data / "monitoring/prometheus/prometheus.yml").read_text()
             self.assertIn("fallback_scrape_protocol: PrometheusText0.0.4", config)
             self.assertIn("http_addr = 0.0.0.0", (data / "monitoring/grafana/grafana.ini").read_text())

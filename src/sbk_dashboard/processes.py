@@ -249,8 +249,11 @@ class PortProcessManager:
         for process in processes:
             try:
                 command = process.exe()
-            except (psutil.AccessDenied, psutil.ZombieProcess):
-                command = process.name()
+            except psutil.Error:
+                try:
+                    command = process.name()
+                except psutil.Error:
+                    command = ""
             base = Path(command).name.lower().removesuffix(".exe")
             if base not in valid_names:
                 description = command or "unknown command"
@@ -313,8 +316,9 @@ class RotatingProcessLog:
         if source is None:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        output = self._path.open("ab", buffering=0)
+        output = None
         try:
+            output = self._path.open("ab", buffering=0)
             size = self._path.stat().st_size
             while True:
                 chunk = source.read(64 * 1024)
@@ -334,7 +338,9 @@ class RotatingProcessLog:
         except (OSError, ValueError) as error:
             LOGGER.warning("Native process log pump failed for %s: %s", self._path, error)
         finally:
-            output.close()
+            if output is not None:
+                with suppress(OSError, ValueError):
+                    output.close()
 
     def _rotate(self) -> None:
         if self._backups < 1:

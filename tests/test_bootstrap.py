@@ -53,6 +53,26 @@ class BootstrapTest(unittest.TestCase):
         with self.assertRaisesRegex(OSError, "escapes"):
             NativeToolBootstrap._extract(invalid, destination, "zip")
 
+    def test_extracts_reject_windows_drive_absolute_paths(self):
+        destination = self.directory / "win"
+        destination.mkdir()
+        for name, archive_format in (
+            ("C:/windows/system32/calc.exe", "zip"),
+            ("D:\\windows\\system32\\calc.exe", "zip"),
+            ("C:system32/calc.exe", "tar.gz"),
+        ):
+            archive = self.directory / f"invalid-{archive_format}.archive"
+            if archive_format == "zip":
+                with zipfile.ZipFile(archive, "w") as output:
+                    output.writestr(name, b"x")
+            else:
+                with tarfile.open(archive, "w:gz") as output:
+                    info = tarfile.TarInfo(name)
+                    info.size = 1
+                    output.addfile(info, io.BytesIO(b"x"))
+            with self.subTest(name=name), self.assertRaisesRegex(OSError, "escapes"):
+                NativeToolBootstrap._extract(archive, destination, archive_format)
+
     def test_installs_cached_verified_archive(self):
         downloads = self.directory / "downloads"
         installs = self.directory / "tools"

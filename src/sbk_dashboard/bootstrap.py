@@ -176,8 +176,15 @@ class NativeToolBootstrap:
 
 
 def _safe_member(name: str) -> None:
-    path = PurePosixPath(name.replace("\\", "/"))
-    if path.is_absolute() or ".." in path.parts:
+    normalized = name.replace("\\", "/")
+    if not normalized:
+        raise OSError(f"Archive entry escapes extraction directory: {name}")
+    path = PurePosixPath(normalized)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(len(part) >= 2 and part[1] == ":" and part[0].isalpha() for part in path.parts)
+    ):
         raise OSError(f"Archive entry escapes extraction directory: {name}")
 
 

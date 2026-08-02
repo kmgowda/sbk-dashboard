@@ -45,6 +45,8 @@ class TargetRegistry:
             return self._targets.get(target_id)
 
     def register(self, name: str | None, host: str | None, port: int, metrics_path: str | None) -> BenchmarkTarget:
+        if name is not None and not isinstance(name, str):
+            raise ValueError("Name must be a string")
         normalized_host = self._validate_host(host)
         normalized_port = self._validate_port(port)
         normalized_path = self._validate_path(metrics_path)
@@ -94,6 +96,8 @@ class TargetRegistry:
 
     @staticmethod
     def _validate_host(host: str | None) -> str:
+        if not isinstance(host, str):
+            raise ValueError("Host must be a DNS name, IPv4 address, or IPv6 address")
         try:
             return normalize_host(host, "Host", allow_unspecified=False)
         except ValueError:
@@ -107,6 +111,8 @@ class TargetRegistry:
 
     @staticmethod
     def _validate_path(metrics_path: str | None) -> str:
+        if metrics_path is not None and not isinstance(metrics_path, str):
+            raise ValueError("Metrics path must be an absolute HTTP path")
         value = metrics_path.strip() if metrics_path and metrics_path.strip() else "/metrics"
         if not value.startswith("/") or any(character in value for character in "?# "):
             raise ValueError("Metrics path must be an absolute HTTP path")

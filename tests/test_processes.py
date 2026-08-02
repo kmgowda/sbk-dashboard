@@ -9,7 +9,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import psutil
 
@@ -152,6 +152,35 @@ class LifecycleTest(unittest.TestCase):
         socket_type.assert_called_once_with(socket.AF_INET6, socket.SOCK_STREAM)
         probe = socket_type.return_value.__enter__.return_value
         probe.bind.assert_called_once_with(("::1", 19090))
+
+    def test_inspect_survives_process_disappearing_between_pid_and_exe(self):
+        listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090), pid=1)
+        process = MagicMock()
+        process.exe.side_effect = psutil.NoSuchProcess(1)
+        process.name.side_effect = psutil.NoSuchProcess(1)
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.psutil.Process", return_value=process),
+            self.assertRaisesRegex(OSError, "unrelated process"),
+        ):
+            PortProcessManager._inspect(
+                "Prometheus", "prometheus", 19090, "127.0.0.1", {"prometheus"}, MagicMock(), []
+            )
+
+    def test_log_pump_does_not_crash_when_log_path_is_unopenable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "log_dir"
+            path.mkdir()
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1000)"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            pump = RotatingProcessLog(process, path, 1024, 1)
+            pump.start()
+            process.wait(3)
+            pump.close()
+            self.assertFalse(pump._thread.is_alive())
 
 
 class BoundedHttpServerTest(unittest.TestCase):
