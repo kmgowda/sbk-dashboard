@@ -120,8 +120,12 @@ Defaults:
 - Existing-process continuation: disabled
 
 Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
-all effective options and their sources, and dashboard links for `localhost`, `127.0.0.1`, and discovered network
-addresses.
+all effective options and their sources, and dashboard links reachable through the configured address family. An
+IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
+discovered IPv6 addresses.
+
+Host inputs are canonical IP literals or DNS names. Malformed numeric IPv4 attempts, invalid IPv6, embedded ports,
+zone identifiers, and unspecified remote targets are rejected before they can reach Prometheus configuration.
 
 ### Production example
 

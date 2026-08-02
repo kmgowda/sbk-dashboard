@@ -121,7 +121,9 @@ Only processes launched by the current invocation are owned during normal shutdo
 
 Prometheus binds to `127.0.0.1` by default because its only application consumer is Grafana. Management and Grafana
 default to `0.0.0.0` to preserve remote dashboard access. Each address is independently configurable; bind addresses
-control listeners, while `-grafana-url` and validated request hosts control browser-visible URLs.
+control listeners, while `-grafana-url` and validated request hosts control browser-visible URLs. Shared canonical
+host parsing applies the same IP/DNS rules to configuration and registration boundaries. Port ownership fallback
+probes use the configured listener address and address family.
 
 ## Object-oriented design
 
@@ -135,6 +137,8 @@ The implementation uses patterns where they enforce runtime invariants:
   independently testable.
 - **Supervisor:** one bounded control loop observes services, applies thresholds/backoff, and reconciles status.
 - **Repository:** `TargetRegistry` and `ManagedProcessRegistry` own validation and atomic persistence.
+- **Compensating transaction:** target mutations are serialized across persistence and monitoring reconciliation;
+  any reconciliation exception restores the prior registration snapshot before the API reports failure.
 - **Active Object / Bulkhead:** the HTTP executor isolates request concurrency with fixed workers and backpressure.
 - **RAII-style context ownership:** every response, archive, file, socket, process pipe, thread pool, and child process
   has an explicit close/join path.

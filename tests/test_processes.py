@@ -132,6 +132,16 @@ class LifecycleTest(unittest.TestCase):
         probe = socket_type.return_value.__enter__.return_value
         probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 123, 1)
 
+    def test_port_probe_uses_configured_ipv6_family_and_address(self):
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", side_effect=psutil.Error()),
+            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+        ):
+            self.assertTrue(PortProcessManager.available(19090, "::1"))
+        socket_type.assert_called_once_with(socket.AF_INET6, socket.SOCK_STREAM)
+        probe = socket_type.return_value.__enter__.return_value
+        probe.bind.assert_called_once_with(("::1", 19090))
+
 
 class BoundedHttpServerTest(unittest.TestCase):
     def test_rejects_requests_beyond_worker_and_queue_capacity(self):

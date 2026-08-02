@@ -88,6 +88,11 @@ class ConfigurationTest(unittest.TestCase):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 parse_configuration(list(arguments), {})
 
+    def test_rejects_malformed_ipv4_like_bind_addresses(self):
+        for address in ("0.0.0.0.0", "127.000.000.001", "::::", "host:80"):
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                parse_configuration(["-bind", address], {})
+
     def test_platform_normalization(self):
         values = {
             ("Linux", "amd64"): "linux-x86_64", ("Darwin", "arm64"): "macos-arm64",

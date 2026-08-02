@@ -12,6 +12,8 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlparse
 
+from sbk_dashboard.network import normalize_host
+
 DEFAULT_PORT = 9721
 DEFAULT_PROMETHEUS_PORT = 9090
 DEFAULT_GRAFANA_PORT = 3000
@@ -296,24 +298,7 @@ def _bounded_environment(
 
 def _bind_address(value: str, name: str) -> str:
     """Accept IP literals and conservative DNS names without performing network I/O."""
-    selected = value.strip()
-    if not selected or len(selected) > 253 or any(character.isspace() for character in selected):
-        raise ValueError(f"{name} is invalid")
-    if selected.startswith("[") and selected.endswith("]"):
-        selected = selected[1:-1]
-    if any(character in selected for character in "/\\"):
-        raise ValueError(f"{name} is invalid")
-    try:
-        import ipaddress
-
-        return str(ipaddress.ip_address(selected))
-    except ValueError:
-        labels = selected.rstrip(".").split(".")
-        if not labels or any(
-            not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in labels
-        ):
-            raise ValueError(f"{name} is invalid") from None
-        return selected.lower()
+    return normalize_host(value, name, allow_unspecified=True)
 
 
 def _read_properties(text: str) -> dict[str, str]:

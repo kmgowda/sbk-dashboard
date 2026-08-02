@@ -71,7 +71,11 @@ class ManagedMonitoringStack:
             self.reconcile(initial_targets)
             if not self.dashboard.continue_existing:
                 PortProcessManager.terminate_existing(
-                    self.monitoring.prometheus_port, self.monitoring.grafana_port, self.process_registry
+                    self.monitoring.prometheus_port,
+                    self.monitoring.grafana_port,
+                    self.process_registry,
+                    self.monitoring.prometheus_bind_address,
+                    self.monitoring.grafana_bind_address,
                 )
             self._services = self._native_services()
             for service in self._services:
@@ -223,6 +227,7 @@ class ManagedMonitoringStack:
                 log_size,
                 self.dashboard.process_log_backups,
                 self.dashboard.prometheus_startup_timeout_seconds,
+                self.monitoring.prometheus_bind_address,
             ),
             self.process_registry,
             self._shutdown_event,
@@ -238,6 +243,7 @@ class ManagedMonitoringStack:
                 log_size,
                 self.dashboard.process_log_backups,
                 self.dashboard.grafana_startup_timeout_seconds,
+                self.monitoring.grafana_bind_address,
             ),
             self.process_registry,
             self._shutdown_event,

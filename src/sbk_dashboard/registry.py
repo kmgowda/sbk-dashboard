@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.models import BenchmarkTarget
-
-HOST_PATTERN = re.compile(r"[A-Za-z0-9._:%-]+")
+from sbk_dashboard.network import normalize_host
 
 
 class TargetRegistry:
@@ -79,19 +77,27 @@ class TargetRegistry:
             self._targets = next_targets
             return True
 
+    def restore(self, target: BenchmarkTarget) -> None:
+        """Atomically restore a trusted target during a failed reconciliation rollback."""
+        with self._lock:
+            if target.id in self._targets:
+                raise ValueError(f"The endpoint {target.host}:{target.port} is already registered")
+            if len(self._targets) >= self._max_targets:
+                raise ValueError(f"Endpoint limit of {self._max_targets} has been reached")
+            next_targets = dict(self._targets)
+            next_targets[target.id] = target
+            self._persist(next_targets)
+            self._targets = next_targets
+
     def _persist(self, targets: dict[str, BenchmarkTarget]) -> None:
         atomic_json(self._path, [target.persisted() for target in targets.values()])
 
     @staticmethod
     def _validate_host(host: str | None) -> str:
-        if host is None or not host.strip():
-            raise ValueError("Host is required")
-        value = host.strip()
-        if value.startswith("[") and value.endswith("]"):
-            value = value[1:-1]
-        if len(value) > 253 or HOST_PATTERN.fullmatch(value) is None or ".." in value:
-            raise ValueError("Host must be a DNS name, IPv4 address, or IPv6 address")
-        return value.lower()
+        try:
+            return normalize_host(host, "Host", allow_unspecified=False)
+        except ValueError:
+            raise ValueError("Host must be a DNS name, IPv4 address, or IPv6 address") from None
 
     @staticmethod
     def _validate_port(port: int) -> int:

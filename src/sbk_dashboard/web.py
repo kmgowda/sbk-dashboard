@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlparse, urlsplit
 
 from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
+from sbk_dashboard.network import normalize_host
 from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
@@ -28,6 +29,7 @@ class DashboardHttpServer:
         self.monitoring = monitoring
         self.lifecycle = LifecycleController()
         self._close_lock = threading.Lock()
+        self._mutation_lock = threading.Lock()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -118,19 +120,25 @@ class DashboardHttpServer:
         port = body.get("port")
         if not isinstance(port, int):
             raise ValueError("Port must be between 1 and 65535")
-        target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))
-        try:
-            self.monitoring.reconcile(self.registry.list())
-        except OSError:
-            self.registry.remove(target.id)
-            self.monitoring.reconcile(self.registry.list())
-            raise
+        with self._mutation_lock:
+            target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))
+            try:
+                self.monitoring.reconcile(self.registry.list())
+            except Exception:
+                try:
+                    if not self.registry.remove(target.id):
+                        raise OSError("Registered target disappeared before rollback")
+                except Exception as rollback_error:
+                    raise OSError("Unable to roll back failed target registration") from rollback_error
+                self._best_effort_reconcile("registration rollback")
+                raise
         self._json(request, 201, self._view(request, target))
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
         target_id = unquote(identifier)
-        if "/" in target_id or self.registry.find(target_id) is None:
+        target = self.registry.find(target_id)
+        if "/" in target_id or target is None:
             self._json(request, 404, {"error": "Target not found"})
             return
         if separator and action == "dashboard":
@@ -141,12 +149,28 @@ class DashboardHttpServer:
             self._json(request, 404, {"error": "Not found"})
             return
         self._require(request, "DELETE")
-        if not self.registry.remove(target_id):
-            self._json(request, 404, {"error": "Target not found"})
-            return
-        self.monitoring.reconcile(self.registry.list())
+        with self._mutation_lock:
+            target = self.registry.find(target_id)
+            if target is None or not self.registry.remove(target_id):
+                self._json(request, 404, {"error": "Target not found"})
+                return
+            try:
+                self.monitoring.reconcile(self.registry.list())
+            except Exception:
+                try:
+                    self.registry.restore(target)
+                except Exception as rollback_error:
+                    raise OSError("Unable to roll back failed target deletion") from rollback_error
+                self._best_effort_reconcile("deletion rollback")
+                raise
         request.send_response(HTTPStatus.NO_CONTENT)
         request.end_headers()
+
+    def _best_effort_reconcile(self, operation: str) -> None:
+        try:
+            self.monitoring.reconcile(self.registry.list())
+        except Exception as error:
+            LOGGER.warning("Monitoring %s could not be reconciled: %s", operation, error)
 
     def _asset(self, request: BaseHTTPRequestHandler, path: str) -> None:
         self._require(request, "GET")
@@ -196,7 +220,10 @@ class DashboardHttpServer:
             return None
         if not hostname or any(character.isspace() for character in hostname):
             return None
-        return hostname
+        try:
+            return normalize_host(hostname, "Host header", allow_unspecified=True)
+        except ValueError:
+            return None
 
     @staticmethod
     def _read_json(request: BaseHTTPRequestHandler) -> dict[str, Any]:
@@ -256,6 +283,11 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         self._request_timeout = request_timeout
         self._capacity = threading.BoundedSemaphore(workers + queue_capacity)
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="sbk-http-worker")
+
+    def server_bind(self) -> None:
+        if self.address_family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        super().server_bind()
 
     def process_request(
         self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]

@@ -1,6 +1,8 @@
 import contextlib
 import io
+import socket
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sbk_dashboard.config import parse_configuration
@@ -44,6 +46,23 @@ class MainTest(unittest.TestCase):
         self.assertEqual("http://127.0.0.1:9721/", links[1])
         self.assertEqual(["http://198.51.100.8:9721/"], dashboard_links(9721, "198.51.100.8"))
         self.assertEqual(["http://[::1]:9721/"], dashboard_links(9721, "::1"))
+
+    @patch("sbk_dashboard.main.psutil.net_if_addrs")
+    def test_wildcard_dashboard_links_match_bound_address_family(self, addresses):
+        addresses.return_value = {
+            "test": [
+                SimpleNamespace(family=socket.AF_INET, address="198.51.100.8"),
+                SimpleNamespace(family=socket.AF_INET6, address="2001:db8::8"),
+            ]
+        }
+        self.assertEqual(
+            ["http://localhost:9721/", "http://127.0.0.1:9721/", "http://198.51.100.8:9721/"],
+            dashboard_links(9721, "0.0.0.0"),
+        )
+        self.assertEqual(
+            ["http://[::1]:9721/", "http://[2001:db8::8]:9721/"],
+            dashboard_links(9721, "::"),
+        )
 
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")

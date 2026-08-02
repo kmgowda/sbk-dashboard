@@ -173,14 +173,17 @@ def dashboard_links(port: int, bind_address: str = "0.0.0.0") -> list[str]:
             return [f"http://localhost:{port}/", f"http://127.0.0.1:{port}/"]
         host = f"[{bind_address}]" if ":" in bind_address else bind_address
         return [f"http://{host}:{port}/"]
-    links = [f"http://localhost:{port}/", f"http://127.0.0.1:{port}/"]
-    if bind_address == "::":
-        links.append(f"http://[::1]:{port}/")
+    family = socket.AF_INET6 if bind_address == "::" else socket.AF_INET
+    links = (
+        [f"http://[::1]:{port}/"]
+        if family == socket.AF_INET6
+        else [f"http://localhost:{port}/", f"http://127.0.0.1:{port}/"]
+    )
     addresses: set[str] = set()
     try:
         for values in psutil.net_if_addrs().values():
             for value in values:
-                if value.family not in {socket.AF_INET, socket.AF_INET6}:
+                if value.family != family:
                     continue
                 raw = value.address.split("%", 1)[0]
                 address = ipaddress.ip_address(raw)

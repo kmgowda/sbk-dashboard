@@ -18,12 +18,15 @@ from sbk_dashboard.web import DashboardHttpServer
 class FakeMonitoring:
     def __init__(self, data):
         self.targets = []
+        self.reconcile_error = None
         self.dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
 
     def healthy(self):
         return True
 
     def reconcile(self, targets):
+        if self.reconcile_error is not None:
+            raise self.reconcile_error
         self.targets = list(targets)
 
     def status(self, target_id):
@@ -71,6 +74,11 @@ class WebTest(unittest.TestCase):
                 public_request = urllib.request.Request(self.base + "/api/targets", headers={"Host": host})
                 with urllib.request.urlopen(public_request) as response:
                     self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith(expected))
+        malformed_request = urllib.request.Request(
+            self.base + "/api/targets", headers={"Host": "127.000.000.001:9721"}
+        )
+        with urllib.request.urlopen(malformed_request) as response:
+            self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith("http://grafana:3000/"))
         with urllib.request.urlopen(self.base + f"/api/targets/{created['id']}/dashboard") as response:
             self.assertIn(created["id"], json.load(response)["dashboardUrl"])
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
@@ -83,6 +91,30 @@ class WebTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request)
             self.assertEqual(status, caught.exception.code)
+
+    def test_registration_is_rolled_back_for_runtime_reconciliation_failure(self):
+        self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
+        request = urllib.request.Request(
+            self.base + "/api/targets",
+            method="POST",
+            data=json.dumps({"host": "127.0.0.1", "port": 9718}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(500, caught.exception.code)
+        self.assertEqual([], self.registry.list())
+        self.assertEqual([], TargetRegistry(Path(self.temporary.name)).list())
+
+    def test_deletion_is_rolled_back_for_runtime_reconciliation_failure(self):
+        target = self.registry.register("Run", "127.0.0.1", 9718, "/metrics")
+        self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
+        request = urllib.request.Request(self.base + f"/api/targets/{target.id}", method="DELETE")
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(request)
+        self.assertEqual(500, caught.exception.code)
+        self.assertEqual(target, self.registry.find(target.id))
+        self.assertEqual(target, TargetRegistry(Path(self.temporary.name)).find(target.id))
 
 
 class MonitoringContinueTest(unittest.TestCase):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import signal
@@ -109,6 +110,7 @@ class NativeServiceSpec:
     log_size_bytes: int
     log_backups: int
     startup_timeout_seconds: int = 45
+    bind_address: str = "0.0.0.0"
 
 
 class ManagedProcessRegistry:
@@ -171,23 +173,36 @@ class PortProcessManager:
     """Validate all listener owners before safely replacing any native service."""
 
     @classmethod
-    def terminate_existing(cls, prometheus_port: int, grafana_port: int, registry: ManagedProcessRegistry) -> None:
-        candidates: list[tuple[str, int, list[psutil.Process]]] = []
-        cls._inspect("Prometheus", "prometheus", prometheus_port, {"prometheus"}, registry, candidates)
-        cls._inspect("Grafana", "grafana", grafana_port, {"grafana", "grafana-server"}, registry, candidates)
+    def terminate_existing(
+        cls,
+        prometheus_port: int,
+        grafana_port: int,
+        registry: ManagedProcessRegistry,
+        prometheus_bind_address: str = "0.0.0.0",
+        grafana_bind_address: str = "0.0.0.0",
+    ) -> None:
+        candidates: list[tuple[str, int, str, list[psutil.Process]]] = []
+        cls._inspect(
+            "Prometheus", "prometheus", prometheus_port, prometheus_bind_address,
+            {"prometheus"}, registry, candidates,
+        )
+        cls._inspect(
+            "Grafana", "grafana", grafana_port, grafana_bind_address,
+            {"grafana", "grafana-server"}, registry, candidates,
+        )
         stopped: set[int] = set()
-        for name, port, processes in candidates:
+        for name, port, _bind_address, processes in candidates:
             for process in processes:
                 if process.pid in stopped:
                     continue
                 stopped.add(process.pid)
                 LOGGER.info("Stopping existing %s process on port %s (pid %s)", name, port, process.pid)
                 _terminate_psutil_tree(process, name)
-        for name, port, _ in candidates:
+        for name, port, bind_address, _ in candidates:
             deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-            while time.monotonic() < deadline and not cls.available(port):
+            while time.monotonic() < deadline and not cls.available(port, bind_address):
                 time.sleep(0.1)
-            if not cls.available(port):
+            if not cls.available(port, bind_address):
                 raise OSError(f"{name} port {port} remains occupied after stopping its existing process")
 
     @classmethod
@@ -196,9 +211,10 @@ class PortProcessManager:
         name: str,
         component: str,
         port: int,
+        bind_address: str,
         valid_names: set[str],
         registry: ManagedProcessRegistry,
-        candidates: list[tuple[str, int, list[psutil.Process]]],
+        candidates: list[tuple[str, int, str, list[psutil.Process]]],
     ) -> None:
         try:
             connections = [
@@ -207,7 +223,7 @@ class PortProcessManager:
                 if connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
             ]
         except (psutil.Error, OSError) as error:
-            if cls.available(port):
+            if cls.available(port, bind_address):
                 return
             owned = registry.find(component, port)
             if owned is None:
@@ -242,10 +258,10 @@ class PortProcessManager:
                 raise OSError(
                     f"Port {port} is owned by unrelated process {process.pid} ({description}); no process was stopped"
                 )
-        candidates.append((name, port, processes))
+        candidates.append((name, port, bind_address, processes))
 
     @staticmethod
-    def available(port: int) -> bool:
+    def available(port: int, bind_address: str = "0.0.0.0") -> bool:
         try:
             if any(
                 connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
@@ -255,7 +271,11 @@ class PortProcessManager:
         except (psutil.Error, OSError):
             pass
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                family = socket.AF_INET6 if ipaddress.ip_address(bind_address).version == 6 else socket.AF_INET
+            except ValueError:
+                family = socket.AF_INET6 if ":" in bind_address else socket.AF_INET
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
                 if os.name == "nt":
                     exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
                     if exclusive is None:
@@ -263,7 +283,7 @@ class PortProcessManager:
                     probe.setsockopt(socket.SOL_SOCKET, exclusive, 1)
                 else:
                     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-                probe.bind(("0.0.0.0", port))
+                probe.bind((bind_address, port))
             return True
         except OSError:
             return False
@@ -376,7 +396,9 @@ class ManagedNativeService:
                         self._last_healthy = True
                     LOGGER.info("Continuing existing %s on port %s", self.spec.name, self.spec.port)
                 else:
-                    if continue_existing and not PortProcessManager.available(self.spec.port):
+                    if continue_existing and not PortProcessManager.available(
+                        self.spec.port, self.spec.bind_address
+                    ):
                         raise OSError(
                             f"Port {self.spec.port} is occupied but does not expose a healthy {self.spec.name} "
                             "service; -continue true cannot attach to it"

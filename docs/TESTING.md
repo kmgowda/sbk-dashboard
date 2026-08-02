@@ -26,6 +26,9 @@ PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
 those operating systems because native executables cannot be meaningfully launched through Linux simulation.
 
+Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
+wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
+
 ## Manual Linux end-to-end test
 
 Use a temporary data directory and non-default ports when another monitoring stack is running:

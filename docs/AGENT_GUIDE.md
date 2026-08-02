@@ -139,6 +139,8 @@ See `README.md` and `config.py` for the complete environment-variable table and 
 
 Bind settings are independent: do not make Prometheus public merely because the management UI or Grafana is public.
 Listener binding and browser-visible Grafana URL resolution are separate contracts.
+Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
+registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
 
 ### Change endpoint registration or identity
 
