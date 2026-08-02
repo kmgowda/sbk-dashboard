@@ -265,14 +265,6 @@ class PortProcessManager:
     @staticmethod
     def available(port: int, bind_address: str = "0.0.0.0") -> bool:
         try:
-            if any(
-                connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
-                for connection in psutil.net_connections(kind="tcp")
-            ):
-                return False
-        except (psutil.Error, OSError):
-            pass
-        try:
             try:
                 family = socket.AF_INET6 if ipaddress.ip_address(bind_address).version == 6 else socket.AF_INET
             except ValueError:
@@ -286,6 +278,7 @@ class PortProcessManager:
                 else:
                     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind((bind_address, port))
+                probe.listen(1)
             return True
         except OSError:
             return False

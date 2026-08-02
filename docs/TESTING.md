@@ -30,7 +30,8 @@ Regression coverage includes malformed IP-like target and bind values, configure
 wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
 It also sends a live oversized request with a negative `Content-Length`, rejects negative native-download lengths,
 rejects non-numeric download lengths as I/O failures, rejects boolean API ports, verifies POSIX probes enable address
-reuse for `TIME_WAIT`, and ensures corrupted persisted boolean or out-of-range endpoint ports cannot be loaded.
+reuse for `TIME_WAIT` while requiring a successful `listen()`, and ensures corrupted persisted boolean or out-of-range
+endpoint ports cannot be loaded.
 Native lifecycle regressions also verify that an unavailable log destination still drains output beyond pipe capacity
 and that captured descendants are force-cleaned when their parent disappears during external-process termination.
 

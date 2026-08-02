@@ -112,14 +112,13 @@ class LifecycleTest(unittest.TestCase):
             self.assertTrue(all(item.stat().st_size <= 1024 for item in files))
             self.assertFalse(any(thread.name == "native-log-pump" for thread in threading.enumerate()))
 
-    def test_port_is_unavailable_when_listener_is_discovered(self):
-        listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090))
-        with (
-            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
-            patch("sbk_dashboard.processes.socket.socket") as socket_type,
-        ):
+    def test_port_is_unavailable_when_probe_cannot_listen(self):
+        with patch("sbk_dashboard.processes.socket.socket") as socket_type:
+            probe = socket_type.return_value.__enter__.return_value
+            probe.listen.side_effect = OSError("address in use")
             self.assertFalse(PortProcessManager.available(19090))
-        socket_type.assert_not_called()
+        probe.bind.assert_called_once_with(("0.0.0.0", 19090))
+        probe.listen.assert_called_once_with(1)
 
     def test_windows_port_probe_requests_exclusive_address_use(self):
         with (
@@ -131,6 +130,7 @@ class LifecycleTest(unittest.TestCase):
             self.assertTrue(PortProcessManager.available(19090))
         probe = socket_type.return_value.__enter__.return_value
         probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 123, 1)
+        probe.listen.assert_called_once_with(1)
 
     def test_posix_port_probe_reuses_time_wait_addresses(self):
         with (
@@ -142,6 +142,7 @@ class LifecycleTest(unittest.TestCase):
         probe = socket_type.return_value.__enter__.return_value
         probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind.assert_called_once_with(("127.0.0.1", 19090))
+        probe.listen.assert_called_once_with(1)
 
     def test_port_probe_uses_configured_ipv6_family_and_address(self):
         with (
@@ -152,6 +153,7 @@ class LifecycleTest(unittest.TestCase):
         socket_type.assert_called_once_with(socket.AF_INET6, socket.SOCK_STREAM)
         probe = socket_type.return_value.__enter__.return_value
         probe.bind.assert_called_once_with(("::1", 19090))
+        probe.listen.assert_called_once_with(1)
 
     def test_inspect_survives_process_disappearing_between_pid_and_exe(self):
         listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090), pid=1)
