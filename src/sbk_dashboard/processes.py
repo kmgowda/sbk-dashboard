@@ -315,28 +315,46 @@ class RotatingProcessLog:
         source = self._process.stdout
         if source is None:
             return
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         output = None
+        size = 0
         try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             output = self._path.open("ab", buffering=0)
             size = self._path.stat().st_size
+        except (OSError, ValueError) as error:
+            if output is not None:
+                with suppress(OSError, ValueError):
+                    output.close()
+            output = None
+            LOGGER.warning("Native process logging disabled for %s; discarding output: %s", self._path, error)
+        try:
             while True:
                 chunk = source.read(64 * 1024)
                 if not chunk:
                     return
+                if output is None:
+                    continue
                 offset = 0
-                while offset < len(chunk):
-                    if size >= self._size_bytes:
+                try:
+                    while offset < len(chunk):
+                        if size >= self._size_bytes:
+                            output.close()
+                            self._rotate()
+                            output = self._path.open("ab", buffering=0)
+                            size = 0
+                        count = min(self._size_bytes - size, len(chunk) - offset)
+                        output.write(chunk[offset : offset + count])
+                        size += count
+                        offset += count
+                except (OSError, ValueError) as error:
+                    with suppress(OSError, ValueError):
                         output.close()
-                        self._rotate()
-                        output = self._path.open("ab", buffering=0)
-                        size = 0
-                    count = min(self._size_bytes - size, len(chunk) - offset)
-                    output.write(chunk[offset : offset + count])
-                    size += count
-                    offset += count
+                    output = None
+                    LOGGER.warning(
+                        "Native process logging failed for %s; discarding remaining output: %s", self._path, error
+                    )
         except (OSError, ValueError) as error:
-            LOGGER.warning("Native process log pump failed for %s: %s", self._path, error)
+            LOGGER.warning("Native process output drain failed for %s: %s", self._path, error)
         finally:
             if output is not None:
                 with suppress(OSError, ValueError):
@@ -629,11 +647,14 @@ def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
     for child in reversed(descendants):
         with suppress(psutil.NoSuchProcess):
             child.terminate()
+    candidates = [*descendants, process]
     try:
         process.terminate()
     except psutil.NoSuchProcess:
+        candidates = descendants
+    if not candidates:
         return
-    _, alive = psutil.wait_procs([*descendants, process], timeout=STOP_TIMEOUT_SECONDS)
+    _, alive = psutil.wait_procs(candidates, timeout=STOP_TIMEOUT_SECONDS)
     if alive:
         LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
         for item in alive:

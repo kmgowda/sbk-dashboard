@@ -172,7 +172,7 @@ class LifecycleTest(unittest.TestCase):
             path = Path(temporary) / "log_dir"
             path.mkdir()
             process = subprocess.Popen(
-                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1000)"],
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * (16 * 1024 * 1024))"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
@@ -180,6 +180,7 @@ class LifecycleTest(unittest.TestCase):
             pump.start()
             process.wait(3)
             pump.close()
+            self.assertEqual(0, process.returncode)
             self.assertFalse(pump._thread.is_alive())
 
 
@@ -197,6 +198,21 @@ class TerminationTest(unittest.TestCase):
         parent.terminate.assert_called_once()
         child.terminate.assert_called_once()
         parent.kill.assert_called_once()
+
+    def test_terminate_psutil_tree_cleans_children_after_parent_disappears(self):
+        from sbk_dashboard.processes import _terminate_psutil_tree
+
+        parent = MagicMock()
+        parent.pid = 10
+        parent.terminate.side_effect = psutil.NoSuchProcess(10)
+        child = MagicMock()
+        parent.children.return_value = [child]
+        with patch("sbk_dashboard.processes.psutil.wait_procs") as wait_procs:
+            wait_procs.side_effect = [([], [child]), ([], [])]
+            _terminate_psutil_tree(parent, "Test")
+        child.terminate.assert_called_once()
+        child.kill.assert_called_once()
+        self.assertEqual([child], wait_procs.call_args_list[0].args[0])
 
 
 class BoundedHttpServerTest(unittest.TestCase):
