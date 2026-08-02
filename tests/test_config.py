@@ -16,16 +16,26 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(8, config.dashboard.http_workers)
         self.assertEqual(64, config.dashboard.http_queue_capacity)
         self.assertEqual(10, config.dashboard.process_log_size_mb)
+        self.assertEqual("0.0.0.0", config.dashboard.bind_address)
+        self.assertEqual("127.0.0.1", config.monitoring.prometheus_bind_address)
+        self.assertEqual("0.0.0.0", config.monitoring.grafana_bind_address)
+        self.assertEqual(45, config.dashboard.prometheus_startup_timeout_seconds)
+        self.assertEqual(120, config.dashboard.grafana_startup_timeout_seconds)
 
     def test_command_line_overrides_environment(self):
         config = parse_configuration(
-            ["-data", "/cli", "-retention", "30", "-prometheus-port", "9191", "-continue", "true"],
-            {"SBK_DASHBOARD_DATA_DIR": "/environment", "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14"},
+            ["-data", "/cli", "-retention", "30", "-prometheus-port", "9191", "-continue", "true",
+             "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug"],
+            {"SBK_DASHBOARD_DATA_DIR": "/environment", "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14",
+             "SBK_DASHBOARD_BIND": "0.0.0.0"},
         )
         self.assertEqual(Path("/cli"), config.dashboard.data_directory)
         self.assertEqual(30, config.dashboard.retention_days)
         self.assertEqual(9191, config.monitoring.prometheus_port)
         self.assertTrue(config.dashboard.continue_existing)
+        self.assertEqual("127.0.0.1", config.dashboard.bind_address)
+        self.assertEqual("::1", config.monitoring.prometheus_bind_address)
+        self.assertEqual("DEBUG", config.dashboard.log_level)
 
     def test_environment_overrides_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -48,6 +58,9 @@ class ConfigurationTest(unittest.TestCase):
             "SBK_DASHBOARD_PROCESS_LOG_MB": "25",
             "SBK_DASHBOARD_PROCESS_LOG_BACKUPS": "4",
             "SBK_DASHBOARD_MAX_TARGETS": "500",
+            "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS": "8",
+            "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS": "60",
+            "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS": "180",
         })
         self.assertEqual(12, config.dashboard.http_workers)
         self.assertEqual(96, config.dashboard.http_queue_capacity)
@@ -55,6 +68,9 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(25, config.dashboard.process_log_size_mb)
         self.assertEqual(4, config.dashboard.process_log_backups)
         self.assertEqual(500, config.dashboard.max_targets)
+        self.assertEqual(8, config.dashboard.target_health_timeout_seconds)
+        self.assertEqual(60, config.dashboard.prometheus_startup_timeout_seconds)
+        self.assertEqual(180, config.dashboard.grafana_startup_timeout_seconds)
         with self.assertRaisesRegex(ValueError, "SBK_DASHBOARD_HTTP_WORKERS"):
             parse_configuration([], {"SBK_DASHBOARD_HTTP_WORKERS": "129"})
 
@@ -64,7 +80,8 @@ class ConfigurationTest(unittest.TestCase):
 
     def test_rejects_invalid_values(self):
         for arguments in (["-port", "0"], ["-retention", "0"], ["-continue", "maybe"],
-                          ["-grafana-url", "ftp://host"]):
+                          ["-grafana-url", "ftp://host"], ["-bind", "http://bad"],
+                          ["-prometheus-bind", "bad host"], ["-log-level", "verbose"]):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 parse_configuration(list(arguments), {})
 

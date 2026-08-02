@@ -36,8 +36,11 @@ class BenchmarkTarget:
 
     @classmethod
     def from_persisted(cls, value: dict[str, object]) -> BenchmarkTarget:
+        raw_port = value["port"]
+        if not isinstance(raw_port, (str, int, float)):
+            raise TypeError("Persisted endpoint port must be numeric")
         return cls(
-            str(value["id"]), str(value["name"]), str(value["host"]), int(value["port"]),
+            str(value["id"]), str(value["name"]), str(value["host"]), int(raw_port),
             str(value.get("metricsPath", "/metrics")), str(value.get("kind", "SBK")), str(value["createdAt"]),
         )
 

@@ -107,8 +107,11 @@ Important defaults:
 | Setting | Default |
 |---|---|
 | Management port | 9721 |
+| Management bind | 0.0.0.0 |
 | Prometheus port | 9090 |
+| Prometheus bind | 127.0.0.1 |
 | Grafana port | 3000 |
+| Grafana bind | 0.0.0.0 |
 | Authentication | false |
 | Continue existing processes | false |
 | Retention | 7 days |
@@ -117,6 +120,8 @@ Important defaults:
 | Client timeout | 15 seconds |
 | Max endpoints | 10,000 |
 | Native log generation/backups | 10 MiB / 3 |
+| Target-health timeout | 4 seconds |
+| Prometheus/Grafana startup | 45 / 120 seconds |
 
 See `README.md` and `config.py` for the complete environment-variable table and bounds.
 
@@ -131,6 +136,9 @@ See `README.md` and `config.py` for the complete environment-variable table and 
 5. Thread the value through composition; do not access global environment elsewhere.
 6. Test default, environment fallback, command-line override, invalid input, and startup display.
 7. Update README examples/options and migration notes if behavior changes.
+
+Bind settings are independent: do not make Prometheus public merely because the management UI or Grafana is public.
+Listener binding and browser-visible Grafana URL resolution are separate contracts.
 
 ### Change endpoint registration or identity
 

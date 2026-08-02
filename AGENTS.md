@@ -137,6 +137,7 @@ Run the fast required checks after every code change:
 
 ```bash
 ruff check src tests
+mypy src
 PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -q
 git diff --check
 ```
@@ -209,4 +210,3 @@ Before declaring work complete:
 - User and agent documentation reflects the resulting behavior.
 - The branch is based on the requested base, the working tree is clean, and commit/PR details accurately report what
   was actually tested.
-

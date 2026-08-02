@@ -19,6 +19,7 @@ modules and are never embedded in the Python interpreter.
                         | child process       | child process
                         v                     v
                   Prometheus              Grafana
+                  loopback default        public bind default
                   scrape + TSDB           PromQL + dashboards
                         |
                         v
@@ -50,7 +51,8 @@ through that same address. `-grafana-url` is an authoritative static override fo
 ## Persistence and retention
 
 The Python control plane persists registrations and generated configuration using temporary files, `fsync`, and
-atomic replacement. It does not store samples itself.
+atomic replacement. On POSIX it also synchronizes the parent directory after replacement so the renamed directory
+entry is crash-durable. It does not store samples itself.
 
 Prometheus stores all samples under `monitoring/prometheus/data`. The `-retention` value is passed as
 `--storage.tsdb.retention.time=<days>d`; Prometheus performs block cleanup in the background. Its default is seven
@@ -74,6 +76,8 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
   state. The map is capped by the configured endpoint limit.
 - One supervisor thread checks both native services and refreshes target state. It sleeps on a shutdown event, so
   shutdown interrupts the wait without polling delay.
+- Target refresh has a bounded configurable timeout. Prometheus and Grafana have separate bounded startup deadlines
+  because Grafana initialization can be materially slower on constrained hosts.
 - Each owned service has one 64 KiB chunked log-pump thread. Pipes are continuously drained, logs are bounded and
   rotated, and pumps are joined and descriptors closed at shutdown or restart.
 - Prometheus independently schedules and executes endpoint scrapes.
@@ -115,6 +119,10 @@ The supervisor restarts an exited owned process, or one that remains unhealthy f
 exponential backoff capped at 60 seconds. Attached processes are health-checked but never restarted or terminated.
 Only processes launched by the current invocation are owned during normal shutdown.
 
+Prometheus binds to `127.0.0.1` by default because its only application consumer is Grafana. Management and Grafana
+default to `0.0.0.0` to preserve remote dashboard access. Each address is independently configurable; bind addresses
+control listeners, while `-grafana-url` and validated request hosts control browser-visible URLs.
+
 ## Object-oriented design
 
 The implementation uses patterns where they enforce runtime invariants:
@@ -144,6 +152,9 @@ a time rather than retaining all cloned JSON trees.
 Prometheus TSDB memory/disk use and Grafana query memory remain native-service concerns. Time retention constrains
 Prometheus history, while operators must size the VM for metric cardinality and dashboard query load. A host service
 manager should supervise the Python process; its internal supervisor is responsible for its owned native children.
+
+The Python control plane uses standard logging with timestamps and severity levels. Native child output remains
+separately drained and rotated so neither Python logging nor a blocked process pipe can grow without bound.
 
 ## Cross-platform strategy
 

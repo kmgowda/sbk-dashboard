@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import socket
@@ -22,7 +23,7 @@ import psutil
 from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
-STARTUP_TIMEOUT_SECONDS = 45
+LOGGER = logging.getLogger(__name__)
 
 
 class LifecycleState(Enum):
@@ -107,6 +108,7 @@ class NativeServiceSpec:
     log_path: Path
     log_size_bytes: int
     log_backups: int
+    startup_timeout_seconds: int = 45
 
 
 class ManagedProcessRegistry:
@@ -144,8 +146,12 @@ class ManagedProcessRegistry:
         if not entry or entry.get("port") != port:
             return None
         try:
-            process = psutil.Process(int(entry["pid"]))
-            if abs(process.create_time() - float(entry["started"])) > 0.01:
+            raw_pid = entry["pid"]
+            raw_started = entry["started"]
+            if not isinstance(raw_pid, (str, int)) or not isinstance(raw_started, (str, int, float)):
+                return None
+            process = psutil.Process(int(raw_pid))
+            if abs(process.create_time() - float(raw_started)) > 0.01:
                 return None
             if process.exe() != entry.get("command"):
                 return None
@@ -175,7 +181,7 @@ class PortProcessManager:
                 if process.pid in stopped:
                     continue
                 stopped.add(process.pid)
-                print(f"Stopping existing {name} process on port {port} (pid {process.pid})")
+                LOGGER.info("Stopping existing %s process on port %s (pid %s)", name, port, process.pid)
                 _terminate_psutil_tree(process, name)
         for name, port, _ in candidates:
             deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
@@ -198,7 +204,7 @@ class PortProcessManager:
             connections = [
                 connection
                 for connection in psutil.net_connections(kind="tcp")
-                if connection.status == psutil.CONN_LISTEN and connection.laddr.port == port
+                if connection.status == psutil.CONN_LISTEN and getattr(connection.laddr, "port", None) == port
             ]
         except (psutil.Error, OSError) as error:
             if cls.available(port):
@@ -293,7 +299,7 @@ class RotatingProcessLog:
                     size += count
                     offset += count
         except (OSError, ValueError) as error:
-            print(f"WARNING: Native process log pump failed for {self._path}: {error}")
+            LOGGER.warning("Native process log pump failed for %s: %s", self._path, error)
         finally:
             output.close()
 
@@ -354,7 +360,7 @@ class ManagedNativeService:
                     with self._state_lock:
                         self._attached = True
                         self._last_healthy = True
-                    print(f"Continuing existing {self.spec.name} on port {self.spec.port}")
+                    LOGGER.info("Continuing existing %s on port %s", self.spec.name, self.spec.port)
                 else:
                     if continue_existing and not PortProcessManager.available(self.spec.port):
                         raise OSError(
@@ -433,7 +439,7 @@ class ManagedNativeService:
         try:
             if self.shutdown_event.is_set():
                 return False
-            print(f"WARNING: Restarting unhealthy managed {self.spec.name}")
+            LOGGER.warning("Restarting unhealthy managed %s", self.spec.name)
             state = self.lifecycle.state
             if state in {LifecycleState.RUNNING, LifecycleState.FAILED}:
                 self.lifecycle.transition(LifecycleState.STARTING)
@@ -454,7 +460,9 @@ class ManagedNativeService:
                 )
                 self._next_restart = time.monotonic() + backoff
                 self.lifecycle.transition(LifecycleState.FAILED)
-                print(f"WARNING: Unable to restart {self.spec.name}; retrying in {backoff:g}s: {error}")
+                LOGGER.warning(
+                    "Unable to restart %s; retrying in %gs: %s", self.spec.name, backoff, error
+                )
                 return False
         finally:
             self._operation_lock.release()
@@ -462,23 +470,30 @@ class ManagedNativeService:
     def _launch(self) -> None:
         command = self.spec.command()
         self.spec.log_path.parent.mkdir(parents=True, exist_ok=True)
-        options: dict[str, object] = {
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.STDOUT,
-            "stdin": subprocess.DEVNULL,
-            "bufsize": 0,
-        }
         if os.name == "nt":
-            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
         else:
-            options["start_new_session"] = True
-        process = subprocess.Popen(command, **options)  # type: ignore[arg-type]
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+                start_new_session=True,
+            )
         pump = RotatingProcessLog(process, self.spec.log_path, self.spec.log_size_bytes, self.spec.log_backups)
         pump.start()
         with self._state_lock:
             self._process = process
             self._log_pump = pump
-        print(f"Started managed process {command[0]} (pid {process.pid})")
+        LOGGER.info("Started managed process %s (pid %s)", command[0], process.pid)
         try:
             self.registry.record(self.spec.component, process, self.spec.port)
             self._await_ready(process)
@@ -487,7 +502,7 @@ class ManagedNativeService:
             raise
 
     def _await_ready(self, process: subprocess.Popen[bytes]) -> None:
-        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+        deadline = time.monotonic() + self.spec.startup_timeout_seconds
         while time.monotonic() < deadline:
             if self.shutdown_event.is_set():
                 raise OSError(f"{self.spec.name} startup cancelled during shutdown")
@@ -504,10 +519,12 @@ class ManagedNativeService:
                     raise OSError(f"{self.spec.name} exited during startup with code {process.returncode}")
                 with self._state_lock:
                     self._last_healthy = True
-                print(f"{self.spec.name} ready on port {self.spec.port}")
+                LOGGER.info("%s ready on port %s", self.spec.name, self.spec.port)
                 return
             self.shutdown_event.wait(0.25)
-        raise OSError(f"{self.spec.name} did not become ready within {STARTUP_TIMEOUT_SECONDS} seconds")
+        raise OSError(
+            f"{self.spec.name} did not become ready within {self.spec.startup_timeout_seconds} seconds"
+        )
 
     def _stop_process(self) -> None:
         with self._state_lock:
@@ -528,7 +545,7 @@ class ManagedNativeService:
             try:
                 self.registry.remove(self.spec.component, process.pid)
             except OSError as error:
-                print(f"WARNING: Unable to update managed process ownership: {error}")
+                LOGGER.warning("Unable to update managed process ownership: %s", error)
         if termination_error:
             raise termination_error
 
@@ -548,7 +565,9 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
     try:
         process.wait(STOP_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
-        print(f"WARNING: {name} pid {process.pid} did not stop gracefully; forcing process-group termination")
+        LOGGER.warning(
+            "%s pid %s did not stop gracefully; forcing process-group termination", name, process.pid
+        )
         if os.name != "nt":
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
@@ -569,7 +588,7 @@ def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
         process.terminate()
         _, alive = psutil.wait_procs([*descendants, process], timeout=STOP_TIMEOUT_SECONDS)
         if alive:
-            print(f"WARNING: {name} pid {process.pid} did not stop gracefully; forcing termination")
+            LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
             for item in alive:
                 item.kill()
             _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +19,7 @@ from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
+LOGGER = logging.getLogger(__name__)
 
 
 class DashboardHttpServer:
@@ -49,7 +51,7 @@ class DashboardHttpServer:
 
         config = monitoring.dashboard
         self._server = BoundedThreadPoolHttpServer(
-            ("", port),
+            (config.bind_address, port),
             Handler,
             workers=config.http_workers,
             queue_capacity=config.http_queue_capacity,
@@ -101,10 +103,10 @@ class DashboardHttpServer:
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
             self._json(request, 400, {"error": str(error) or "Request body is not valid JSON"})
         except OSError as error:
-            print(f"Request failed: {error}")
+            LOGGER.error("Request failed: %s", error)
             self._json(request, 500, {"error": "Unable to update dashboard state"})
         except Exception as error:  # defensive HTTP boundary
-            print(f"Request failed: {error}")
+            LOGGER.exception("Unexpected request failure: %s", error)
             self._json(request, 500, {"error": "Unexpected server error"})
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
@@ -113,7 +115,10 @@ class DashboardHttpServer:
             return
         self._require(request, "POST")
         body = self._read_json(request)
-        target = self.registry.register(body.get("name"), body.get("host"), body.get("port"), body.get("metricsPath"))
+        port = body.get("port")
+        if not isinstance(port, int):
+            raise ValueError("Port must be between 1 and 65535")
+        target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))
         try:
             self.monitoring.reconcile(self.registry.list())
         except OSError:
@@ -245,12 +250,18 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         request_timeout: int,
     ) -> None:
         self.request_queue_size = min(max(workers + queue_capacity, 5), 256)
+        if ":" in server_address[0]:
+            self.address_family = socket.AF_INET6
         super().__init__(server_address, handler)
         self._request_timeout = request_timeout
         self._capacity = threading.BoundedSemaphore(workers + queue_capacity)
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="sbk-http-worker")
 
-    def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: tuple[str, int]
+    ) -> None:
+        if not isinstance(request, socket.socket):
+            raise TypeError("SBK Dashboard requires a stream socket")
         if not self._capacity.acquire(blocking=False):
             self._reject_overload(request)
             return

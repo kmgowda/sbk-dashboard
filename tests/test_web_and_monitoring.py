@@ -111,6 +111,9 @@ class MonitoringContinueTest(unittest.TestCase):
             self.assertIn("retention", "retention")
             config = (data / "monitoring/prometheus/prometheus.yml").read_text()
             self.assertIn("fallback_scrape_protocol: PrometheusText0.0.4", config)
+            self.assertIn("http_addr = 0.0.0.0", (data / "monitoring/grafana/grafana.ini").read_text())
+            self.assertEqual(45, stack._services[0].spec.startup_timeout_seconds)
+            self.assertEqual(120, stack._services[1].spec.startup_timeout_seconds)
         finally:
             stack.close()
         self.assertEqual(LifecycleState.STOPPED, stack.state)
@@ -135,6 +138,16 @@ class MonitoringContinueTest(unittest.TestCase):
             "https://grafana.example/base/d/sbk-target/",
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
+
+    def test_default_prometheus_command_binds_only_to_loopback(self):
+        data = Path(self.temporary.name)
+        binary = data / "prometheus"
+        binary.write_text("binary", encoding="utf-8")
+        binary.chmod(0o755)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(binary, data / "unused", 19090, 3000, "http://localhost:3000", {})
+        command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
+        self.assertIn("--web.listen-address=127.0.0.1:19090", command)
 
     @staticmethod
     def _service(routes):
