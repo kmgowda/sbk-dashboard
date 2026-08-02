@@ -18,14 +18,25 @@ from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol, cast
 
 import psutil
 
 from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
+LOG_RETRY_INITIAL_SECONDS = 1.0
+LOG_RETRY_MAXIMUM_SECONDS = 300.0
+MAX_LOCAL_PROBE_ADDRESSES = 256
 LOGGER = logging.getLogger(__name__)
+
+SocketAddress = tuple[str, int] | tuple[str, int, int, int]
+
+
+@dataclass(frozen=True)
+class _SocketEndpoint:
+    family: int
+    address: SocketAddress
 
 
 class LifecycleState(Enum):
@@ -265,32 +276,116 @@ class PortProcessManager:
     @staticmethod
     def available(port: int, bind_address: str = "0.0.0.0") -> bool:
         try:
-            try:
-                family = socket.AF_INET6 if ipaddress.ip_address(bind_address).version == 6 else socket.AF_INET
-            except ValueError:
-                family = socket.AF_INET6 if ":" in bind_address else socket.AF_INET
-            connect_address = (
-                "::1" if bind_address == "::"
-                else "127.0.0.1" if bind_address == "0.0.0.0"
-                else bind_address
-            )
-            with socket.socket(family, socket.SOCK_STREAM) as connection:
-                connection.settimeout(0.2)
-                if connection.connect_ex((connect_address, port)) == 0:
+            endpoints = PortProcessManager._resolve_endpoints(bind_address, port)
+            for endpoint in endpoints:
+                for connect_address in PortProcessManager._connect_addresses(endpoint, bind_address):
+                    with socket.socket(endpoint.family, socket.SOCK_STREAM) as connection:
+                        connection.settimeout(0.2)
+                        if connection.connect_ex(connect_address) == 0:
+                            return False
+            for endpoint in endpoints:
+                if PortProcessManager._can_listen(endpoint):
+                    continue
+                if not (
+                    os.name == "nt"
+                    and PortProcessManager._windows_time_wait_only(port, endpoint.family)
+                    and PortProcessManager._can_listen(endpoint, reuse=True)
+                ):
                     return False
-            with socket.socket(family, socket.SOCK_STREAM) as probe:
-                if os.name == "nt":
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _resolve_endpoints(bind_address: str, port: int) -> tuple[_SocketEndpoint, ...]:
+        try:
+            address = ipaddress.ip_address(bind_address)
+        except ValueError:
+            results = socket.getaddrinfo(
+                bind_address, port, socket.AF_UNSPEC, socket.SOCK_STREAM, socket.IPPROTO_TCP
+            )
+            endpoints: list[_SocketEndpoint] = []
+            seen: set[tuple[int, SocketAddress]] = set()
+            for family, sock_type, _protocol, _canonical_name, raw_address in results:
+                if family not in {socket.AF_INET, socket.AF_INET6} or sock_type != socket.SOCK_STREAM:
+                    continue
+                endpoint_address = cast(SocketAddress, raw_address)
+                key = (family, endpoint_address)
+                if key not in seen:
+                    seen.add(key)
+                    endpoints.append(_SocketEndpoint(family, endpoint_address))
+            if not endpoints:
+                raise OSError(
+                    f"Bind address {bind_address!r} did not resolve to an IPv4 or IPv6 address"
+                ) from None
+            return tuple(endpoints)
+        family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+        literal_endpoint: SocketAddress = (
+            (bind_address, port, 0, 0) if family == socket.AF_INET6 else (bind_address, port)
+        )
+        return (_SocketEndpoint(family, literal_endpoint),)
+
+    @staticmethod
+    def _connect_addresses(endpoint: _SocketEndpoint, bind_address: str) -> tuple[SocketAddress, ...]:
+        if bind_address not in {"0.0.0.0", "::"}:
+            return (endpoint.address,)
+        loopback: SocketAddress = (
+            ("::1", endpoint.address[1], 0, 0)
+            if endpoint.family == socket.AF_INET6
+            else ("127.0.0.1", endpoint.address[1])
+        )
+        addresses = [loopback]
+        seen = {loopback[0]}
+        try:
+            interfaces = psutil.net_if_addrs()
+        except psutil.Error:
+            interfaces = {}
+        for interface_addresses in interfaces.values():
+            for address in interface_addresses:
+                if address.family != endpoint.family or address.address in seen:
+                    continue
+                seen.add(address.address)
+                socket_address: SocketAddress = (
+                    (address.address, endpoint.address[1], 0, 0)
+                    if endpoint.family == socket.AF_INET6
+                    else (address.address, endpoint.address[1])
+                )
+                addresses.append(socket_address)
+                if len(addresses) >= MAX_LOCAL_PROBE_ADDRESSES:
+                    return tuple(addresses)
+        return tuple(addresses)
+
+    @staticmethod
+    def _can_listen(endpoint: _SocketEndpoint, reuse: bool = False) -> bool:
+        try:
+            with socket.socket(endpoint.family, socket.SOCK_STREAM) as probe:
+                if os.name == "nt" and not reuse:
                     exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
                     if exclusive is None:
                         return False
                     probe.setsockopt(socket.SOL_SOCKET, exclusive, 1)
                 else:
                     probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                probe.bind((bind_address, port))
+                probe.bind(endpoint.address)
                 probe.listen(1)
             return True
         except OSError:
             return False
+
+    @staticmethod
+    def _windows_time_wait_only(port: int, family: int) -> bool:
+        try:
+            connections = psutil.net_connections(kind="tcp")
+        except psutil.Error:
+            return False
+        matches = [
+            connection
+            for connection in connections
+            if connection.family == family
+            and connection.laddr
+            and connection.laddr.port == port
+        ]
+        return bool(matches) and all(connection.status == psutil.CONN_TIME_WAIT for connection in matches)
 
 
 class RotatingProcessLog:
@@ -308,10 +403,28 @@ class RotatingProcessLog:
 
     def close(self) -> None:
         self._thread.join(timeout=2)
+        close_error: OSError | ValueError | None = None
         if self._process.stdout and not self._process.stdout.closed:
-            self._process.stdout.close()
+            try:
+                self._process.stdout.close()
+            except (OSError, ValueError) as error:
+                close_error = error
         if self._thread.is_alive():
             self._thread.join(timeout=1)
+        if self._thread.is_alive():
+            raise OSError(f"Native process log pump for {self._path} did not stop within 3 seconds") from close_error
+        if close_error:
+            raise OSError(f"Unable to close native process output pipe for {self._path}") from close_error
+
+    def _open_output(self) -> tuple[BinaryIO, int]:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        output = self._path.open("ab", buffering=0)
+        try:
+            return output, self._path.stat().st_size
+        except (OSError, ValueError):
+            with suppress(OSError, ValueError):
+                output.close()
+            raise
 
     def _run(self) -> None:
         source = self._process.stdout
@@ -319,23 +432,36 @@ class RotatingProcessLog:
             return
         output = None
         size = 0
+        retry_delay = LOG_RETRY_INITIAL_SECONDS
+        next_retry = 0.0
+        logging_failed = False
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            output = self._path.open("ab", buffering=0)
-            size = self._path.stat().st_size
+            output, size = self._open_output()
         except (OSError, ValueError) as error:
-            if output is not None:
-                with suppress(OSError, ValueError):
-                    output.close()
-            output = None
-            LOGGER.warning("Native process logging disabled for %s; discarding output: %s", self._path, error)
+            logging_failed = True
+            next_retry = time.monotonic() + retry_delay
+            retry_delay = min(LOG_RETRY_MAXIMUM_SECONDS, retry_delay * 2)
+            LOGGER.warning("Native process logging unavailable for %s; retrying with backoff: %s", self._path, error)
         try:
             while True:
                 chunk = source.read(64 * 1024)
                 if not chunk:
                     return
                 if output is None:
-                    continue
+                    now = time.monotonic()
+                    if now < next_retry:
+                        continue
+                    try:
+                        output, size = self._open_output()
+                    except (OSError, ValueError) as error:
+                        LOGGER.debug("Native process logging retry failed for %s: %s", self._path, error)
+                        next_retry = now + retry_delay
+                        retry_delay = min(LOG_RETRY_MAXIMUM_SECONDS, retry_delay * 2)
+                        continue
+                    if logging_failed:
+                        LOGGER.info("Native process logging recovered for %s", self._path)
+                    logging_failed = False
+                    retry_delay = LOG_RETRY_INITIAL_SECONDS
                 offset = 0
                 try:
                     while offset < len(chunk):
@@ -352,8 +478,11 @@ class RotatingProcessLog:
                     with suppress(OSError, ValueError):
                         output.close()
                     output = None
+                    logging_failed = True
+                    next_retry = time.monotonic() + retry_delay
+                    retry_delay = min(LOG_RETRY_MAXIMUM_SECONDS, retry_delay * 2)
                     LOGGER.warning(
-                        "Native process logging failed for %s; discarding remaining output: %s", self._path, error
+                        "Native process logging failed for %s; retrying with backoff: %s", self._path, error
                     )
         except (OSError, ValueError) as error:
             LOGGER.warning("Native process output drain failed for %s: %s", self._path, error)
@@ -596,19 +725,27 @@ class ManagedNativeService:
         if process is None:
             return
         termination_error: OSError | None = None
+        pump_error: OSError | None = None
         try:
             _terminate_owned_process(process, self.spec.name)
         except OSError as error:
             termination_error = error
         finally:
             if pump:
-                pump.close()
+                try:
+                    pump.close()
+                except OSError as error:
+                    pump_error = error
             try:
                 self.registry.remove(self.spec.component, process.pid)
             except OSError as error:
                 LOGGER.warning("Unable to update managed process ownership: %s", error)
+        if termination_error and pump_error:
+            raise OSError(f"{termination_error}; additionally, {pump_error}") from termination_error
         if termination_error:
             raise termination_error
+        if pump_error:
+            raise pump_error
 
 
 def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> None:

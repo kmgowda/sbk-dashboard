@@ -79,7 +79,10 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
 - Target refresh has a bounded configurable timeout. Prometheus and Grafana have separate bounded startup deadlines
   because Grafana initialization can be materially slower on constrained hosts.
 - Each owned service has one 64 KiB chunked log-pump thread. Pipes are continuously drained, logs are bounded and
-  rotated, and pumps are joined and descriptors closed at shutdown or restart.
+  rotated, and pumps are joined and descriptors closed at shutdown or restart. Transient log open/write/rotation
+  failures retry with exponential backoff capped at five minutes without retaining output in memory. A pump that
+  remains alive after its source pipe is closed makes lifecycle cleanup fail explicitly, preventing a replacement
+  process from racing an old worker for the same log path.
 - Prometheus independently schedules and executes endpoint scrapes.
 - Grafana independently handles browser sessions and queries.
 
@@ -123,7 +126,10 @@ Prometheus binds to `127.0.0.1` by default because its only application consumer
 default to `0.0.0.0` to preserve remote dashboard access. Each address is independently configurable; bind addresses
 control listeners, while `-grafana-url` and validated request hosts control browser-visible URLs. Shared canonical
 host parsing applies the same IP/DNS rules to configuration and registration boundaries. Port ownership fallback
-probes use the configured listener address and address family.
+probes resolve configured hostnames through `getaddrinfo`, check each resulting address family, and check a bounded
+set of local interface addresses for wildcard listeners before requiring a successful bind and listen. POSIX probes
+enable address reuse so `TIME_WAIT` does not block restart. Windows first requires exclusive ownership and permits a
+reusable fallback only when `psutil` reports exclusively `TIME_WAIT` sockets for the port and family.
 
 ## Object-oriented design
 

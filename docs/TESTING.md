@@ -32,9 +32,12 @@ It also sends a live oversized request with a negative `Content-Length`, rejects
 rejects non-numeric download lengths as I/O failures, rejects boolean API ports, verifies POSIX probes enable address
 reuse for `TIME_WAIT` while requiring a successful `listen()`, and ensures corrupted persisted boolean or out-of-range
 endpoint ports cannot be loaded.
-An active TCP listener is rejected by a bounded connect preflight before platform-specific reusable bind semantics.
-Native lifecycle regressions also verify that an unavailable log destination still drains output beyond pipe capacity
-and that captured descendants are force-cleaned when their parent disappears during external-process termination.
+An active TCP listener is rejected by bounded connect preflights over local wildcard interfaces before
+platform-specific reusable bind semantics. Port tests use distinct socket doubles for the connect and bind phases,
+cover AAAA-only DNS bind names, and permit Windows reuse only for confirmed `TIME_WAIT` sockets. Native lifecycle
+regressions also verify that an unavailable log destination still drains output beyond pipe capacity, a transient
+write failure recovers after bounded backoff, a stuck log pump is reported while ownership cleanup still executes,
+and captured descendants are force-cleaned when their parent disappears during external-process termination.
 
 ## Manual Linux end-to-end test
 

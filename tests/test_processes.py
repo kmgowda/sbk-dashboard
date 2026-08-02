@@ -31,6 +31,13 @@ class AlwaysReady:
 
 
 class LifecycleTest(unittest.TestCase):
+    @staticmethod
+    def _socket_context():
+        context = MagicMock()
+        endpoint = MagicMock()
+        context.__enter__.return_value = endpoint
+        return context, endpoint
+
     def test_state_machine_accepts_only_defined_transitions(self):
         lifecycle = LifecycleController()
         self.assertEqual(LifecycleState.NEW, lifecycle.state)
@@ -113,16 +120,21 @@ class LifecycleTest(unittest.TestCase):
             self.assertFalse(any(thread.name == "native-log-pump" for thread in threading.enumerate()))
 
     def test_port_is_unavailable_when_probe_cannot_listen(self):
-        with patch("sbk_dashboard.processes.socket.socket") as socket_type:
-            probe = socket_type.return_value.__enter__.return_value
+        connection_context, connection = self._socket_context()
+        probe_context, probe = self._socket_context()
+        connection.connect_ex.return_value = 1
+        with (
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value={}),
+            patch("sbk_dashboard.processes.socket.socket", side_effect=[connection_context, probe_context]),
+        ):
             probe.listen.side_effect = OSError("address in use")
             self.assertFalse(PortProcessManager.available(19090))
         probe.bind.assert_called_once_with(("0.0.0.0", 19090))
         probe.listen.assert_called_once_with(1)
 
     def test_port_is_unavailable_when_tcp_listener_accepts_connections(self):
-        with patch("sbk_dashboard.processes.socket.socket") as socket_type:
-            connection = socket_type.return_value.__enter__.return_value
+        connection_context, connection = self._socket_context()
+        with patch("sbk_dashboard.processes.socket.socket", return_value=connection_context):
             connection.connect_ex.return_value = 0
             self.assertFalse(PortProcessManager.available(19090, "127.0.0.1"))
         connection.settimeout.assert_called_once_with(0.2)
@@ -130,42 +142,135 @@ class LifecycleTest(unittest.TestCase):
         connection.bind.assert_not_called()
 
     def test_windows_port_probe_requests_exclusive_address_use(self):
+        connection_context, connection = self._socket_context()
+        probe_context, probe = self._socket_context()
+        connection.connect_ex.return_value = 1
         with (
-            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[]),
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value={}),
             patch("sbk_dashboard.processes.os.name", "nt"),
             patch.object(socket, "SO_EXCLUSIVEADDRUSE", 123, create=True),
-            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+            patch("sbk_dashboard.processes.socket.socket", side_effect=[connection_context, probe_context]),
         ):
             self.assertTrue(PortProcessManager.available(19090))
-        probe = socket_type.return_value.__enter__.return_value
         probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 123, 1)
         probe.listen.assert_called_once_with(1)
 
-    def test_posix_port_probe_reuses_time_wait_addresses(self):
+    def test_windows_port_probe_reuses_only_time_wait_address(self):
+        connection_context, connection = self._socket_context()
+        exclusive_context, exclusive = self._socket_context()
+        reuse_context, reuse = self._socket_context()
+        connection.connect_ex.return_value = 1
+        exclusive.bind.side_effect = OSError("TIME_WAIT")
+        time_wait = SimpleNamespace(
+            family=socket.AF_INET,
+            laddr=SimpleNamespace(port=19090),
+            status=psutil.CONN_TIME_WAIT,
+        )
         with (
-            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[]),
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value={}),
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[time_wait]),
+            patch("sbk_dashboard.processes.os.name", "nt"),
+            patch.object(socket, "SO_EXCLUSIVEADDRUSE", 123, create=True),
+            patch(
+                "sbk_dashboard.processes.socket.socket",
+                side_effect=[connection_context, exclusive_context, reuse_context],
+            ),
+        ):
+            self.assertTrue(PortProcessManager.available(19090))
+        exclusive.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 123, 1)
+        reuse.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        reuse.listen.assert_called_once_with(1)
+
+    def test_windows_port_probe_does_not_reuse_non_time_wait_address(self):
+        connection_context, connection = self._socket_context()
+        exclusive_context, exclusive = self._socket_context()
+        connection.connect_ex.return_value = 1
+        exclusive.bind.side_effect = OSError("address in use")
+        listener = SimpleNamespace(
+            family=socket.AF_INET,
+            laddr=SimpleNamespace(port=19090),
+            status=psutil.CONN_LISTEN,
+        )
+        with (
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value={}),
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.os.name", "nt"),
+            patch.object(socket, "SO_EXCLUSIVEADDRUSE", 123, create=True),
+            patch(
+                "sbk_dashboard.processes.socket.socket",
+                side_effect=[connection_context, exclusive_context],
+            ),
+        ):
+            self.assertFalse(PortProcessManager.available(19090))
+
+    def test_posix_port_probe_reuses_time_wait_addresses(self):
+        connection_context, connection = self._socket_context()
+        probe_context, probe = self._socket_context()
+        connection.connect_ex.return_value = 1
+        with (
             patch("sbk_dashboard.processes.os.name", "posix"),
-            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+            patch("sbk_dashboard.processes.socket.socket", side_effect=[connection_context, probe_context]),
         ):
             self.assertTrue(PortProcessManager.available(19090, "127.0.0.1"))
-        probe = socket_type.return_value.__enter__.return_value
         probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind.assert_called_once_with(("127.0.0.1", 19090))
         probe.listen.assert_called_once_with(1)
 
     def test_port_probe_uses_configured_ipv6_family_and_address(self):
+        connection_context, connection = self._socket_context()
+        probe_context, probe = self._socket_context()
+        connection.connect_ex.return_value = 1
         with (
-            patch("sbk_dashboard.processes.psutil.net_connections", side_effect=psutil.Error()),
-            patch("sbk_dashboard.processes.socket.socket") as socket_type,
+            patch(
+                "sbk_dashboard.processes.socket.socket", side_effect=[connection_context, probe_context]
+            ) as socket_type,
         ):
             self.assertTrue(PortProcessManager.available(19090, "::1"))
         self.assertEqual(
             [call(socket.AF_INET6, socket.SOCK_STREAM), call(socket.AF_INET6, socket.SOCK_STREAM)],
             socket_type.call_args_list,
         )
-        probe = socket_type.return_value.__enter__.return_value
-        probe.bind.assert_called_once_with(("::1", 19090))
+        probe.bind.assert_called_once_with(("::1", 19090, 0, 0))
         probe.listen.assert_called_once_with(1)
+
+    def test_port_probe_resolves_ipv6_only_hostname(self):
+        connection_context, connection = self._socket_context()
+        probe_context, probe = self._socket_context()
+        connection.connect_ex.return_value = 1
+        resolved = [(socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("2001:db8::8", 19090, 0, 0))]
+        with (
+            patch("sbk_dashboard.processes.socket.getaddrinfo", return_value=resolved) as getaddrinfo,
+            patch(
+                "sbk_dashboard.processes.socket.socket", side_effect=[connection_context, probe_context]
+            ) as socket_type,
+        ):
+            self.assertTrue(PortProcessManager.available(19090, "v6-only.example"))
+        getaddrinfo.assert_called_once_with(
+            "v6-only.example", 19090, socket.AF_UNSPEC, socket.SOCK_STREAM, socket.IPPROTO_TCP
+        )
+        self.assertEqual(
+            [call(socket.AF_INET6, socket.SOCK_STREAM), call(socket.AF_INET6, socket.SOCK_STREAM)],
+            socket_type.call_args_list,
+        )
+        connection.connect_ex.assert_called_once_with(("2001:db8::8", 19090, 0, 0))
+        probe.bind.assert_called_once_with(("2001:db8::8", 19090, 0, 0))
+
+    def test_wildcard_probe_checks_each_local_address_before_binding(self):
+        loopback_context, loopback = self._socket_context()
+        public_context, public = self._socket_context()
+        loopback.connect_ex.return_value = 1
+        public.connect_ex.return_value = 0
+        local_addresses = {
+            "loopback": [SimpleNamespace(family=socket.AF_INET, address="127.0.0.1")],
+            "public": [SimpleNamespace(family=socket.AF_INET, address="192.0.2.10")],
+        }
+        with (
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value=local_addresses),
+            patch("sbk_dashboard.processes.socket.socket", side_effect=[loopback_context, public_context]),
+        ):
+            self.assertFalse(PortProcessManager.available(19090))
+        loopback.connect_ex.assert_called_once_with(("127.0.0.1", 19090))
+        public.connect_ex.assert_called_once_with(("192.0.2.10", 19090))
 
     def test_inspect_survives_process_disappearing_between_pid_and_exe(self):
         listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090), pid=1)
@@ -196,6 +301,57 @@ class LifecycleTest(unittest.TestCase):
             pump.close()
             self.assertEqual(0, process.returncode)
             self.assertFalse(pump._thread.is_alive())
+
+    def test_log_pump_recovers_after_transient_write_failure(self):
+        source = MagicMock()
+        source.read.side_effect = [b"lost", b"retained", b""]
+        process = SimpleNamespace(stdout=source)
+        failed_output = MagicMock()
+        failed_output.write.side_effect = OSError("disk temporarily unavailable")
+        recovered_output = MagicMock()
+        pump = RotatingProcessLog(process, Path("native.log"), 1024, 1)
+        with (
+            patch.object(pump, "_open_output", side_effect=[(failed_output, 0), (recovered_output, 0)]),
+            patch("sbk_dashboard.processes.time.monotonic", side_effect=[0.0, 2.0]),
+            self.assertLogs("sbk_dashboard.processes", level="INFO") as captured,
+        ):
+            pump._run()
+        recovered_output.write.assert_called_once_with(b"retained")
+        self.assertTrue(any("logging recovered" in message for message in captured.output))
+
+    def test_log_pump_close_reports_worker_that_does_not_stop(self):
+        stdout = MagicMock()
+        stdout.closed = False
+        process = SimpleNamespace(stdout=stdout)
+        pump = RotatingProcessLog(process, Path("native.log"), 1024, 1)
+        pump._thread = MagicMock()
+        pump._thread.is_alive.return_value = True
+        with self.assertRaisesRegex(OSError, "did not stop within 3 seconds"):
+            pump.close()
+        self.assertEqual([call(timeout=2), call(timeout=1)], pump._thread.join.call_args_list)
+        stdout.close.assert_called_once()
+
+    def test_managed_service_removes_ownership_when_log_pump_close_fails(self):
+        registry = MagicMock()
+        service = ManagedNativeService(
+            NativeServiceSpec(
+                "Test", "test", 19090, lambda: [], AlwaysReady(), Path("native.log"), 1024, 1
+            ),
+            registry,
+            threading.Event(),
+        )
+        process = MagicMock()
+        process.pid = 123
+        pump = MagicMock()
+        pump.close.side_effect = OSError("pump stuck")
+        service._process = process
+        service._log_pump = pump
+        with (
+            patch("sbk_dashboard.processes._terminate_owned_process"),
+            self.assertRaisesRegex(OSError, "pump stuck"),
+        ):
+            service._stop_process()
+        registry.remove.assert_called_once_with("test", 123)
 
 
 class TerminationTest(unittest.TestCase):

@@ -254,6 +254,12 @@ sbk-dashboard -continue true
 Attached services are not stopped at dashboard shutdown. They must already use configuration compatible with this
 data directory's Prometheus discovery and Grafana provisioning paths.
 
+Port checks resolve DNS bind names to every IPv4/IPv6 result and check wildcard binds through the host's bounded
+local-interface list before attempting a real `bind()` and `listen()`. On Windows an exclusive bind remains the
+default ownership test. A reusable fallback is allowed only when `psutil` confirms that every matching socket is in
+`TIME_WAIT`; active, unidentified, or non-`TIME_WAIT` owners remain unavailable. This permits fast restart without
+weakening the rule that unrelated listeners are never replaced.
+
 Owned services are supervised every five seconds. An exited child is restarted immediately; a running service that
 fails three consecutive health probes is replaced. Repeated launch failures use exponential backoff capped at 60
 seconds, preventing a crash loop from consuming CPU or filling logs. Attached `-continue true` services are observed
@@ -271,13 +277,16 @@ avoid spurious Grafana failures on slower hosts while keeping Prometheus failure
 - Registration/configuration replacements synchronize both file contents and their parent directory on POSIX so an
   atomic rename is durable across a crash. Windows retains atomic replacement with native filesystem semantics.
 - Prometheus and Grafana console output is continuously drained in 64 KiB chunks and rotated at 10 MiB with three
-  backups by default. No subprocess output pipe is allowed to accumulate in memory.
+  backups by default. A transient open, write, or rotation error is retried with bounded exponential backoff while
+  output continues to be drained and discarded; recovery is logged. No subprocess output pipe is allowed to
+  accumulate in memory.
 - Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
   and `failed` states. Shutdown is idempotent and reports incomplete child termination.
 - Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
   descendants; Windows uses a new process group plus recursive process-tree termination.
 - A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
-  joined at shutdown; subprocess log-pump threads exit at EOF and are joined.
+  joined at shutdown; subprocess log-pump threads exit at EOF and are joined. Shutdown reports an error instead of
+  declaring success if a log-pump worker does not stop after its pipe is closed.
 
 For unattended 24/7 use, run `sbk-dashboard` under the host service manager—such as systemd, launchd, or Windows
 Service Control Manager—with automatic restart enabled for failure of the Python control process itself. The internal
@@ -361,7 +370,8 @@ python -m build --no-isolation
 ```
 
 Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,
-log rotation, configuration precedence, all six native platform definitions, safe TAR.GZ and ZIP extraction,
+log rotation and transient recovery, IPv4/IPv6/DNS/TIME_WAIT port checks, configuration precedence, all six native
+platform definitions, safe TAR.GZ and ZIP extraction,
 endpoint persistence and compatibility, dashboard cloning and complete PromQL scoping, discovery generation,
 management APIs, health attachment, process ownership, and package resources. Native Linux validation is described
 in [testing documentation](docs/TESTING.md).
