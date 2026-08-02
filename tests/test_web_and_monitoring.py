@@ -195,8 +195,8 @@ class MonitoringContinueTest(unittest.TestCase):
         finally:
             stack.close()
         self.assertEqual(LifecycleState.STOPPED, stack.state)
-        self.assertFalse(PortProcessManager.available(self.prometheus.server_port))
-        self.assertFalse(PortProcessManager.available(self.grafana.server_port))
+        self.assertFalse(PortProcessManager.available(self.prometheus.server_port, "127.0.0.1"))
+        self.assertFalse(PortProcessManager.available(self.grafana.server_port, "127.0.0.1"))
 
     def test_default_grafana_url_follows_browser_host_but_explicit_url_is_authoritative(self):
         data = Path(self.temporary.name)
