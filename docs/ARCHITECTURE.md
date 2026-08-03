@@ -147,8 +147,10 @@ Windows child-spawn race where process-group signals are unavailable.
 The guardian independently validates the control-plane PID and creation time four times per second. If the main
 process disappears without running cleanup—including `SIGKILL` on POSIX or direct process termination on Windows—it
 terminates the native process and all descendants, removes its transient handshake file, and exits. The handshake is
-created before startup is considered successful, closing the launch/registration race. The main supervisor also
-validates the native PID and creation time directly and cleans the native tree if a guardian is killed unexpectedly.
+created before startup is considered successful, closing the launch/registration race. A transient Windows sharing
+violation while reading the atomically replaced handshake is retried only within the existing bounded startup
+deadline; persistent denial reports the last read error. The main supervisor also validates the native PID and
+creation time directly and cleans the native tree if a guardian is killed unexpectedly.
 Attached `-continue true` services have no guardian and remain outside application ownership.
 
 The supervisor restarts an exited owned process, or one that remains unhealthy for three checks. Failed restarts use

@@ -760,9 +760,9 @@ class ManagedNativeService:
     def _await_guardian_start(
         self, process: subprocess.Popen[bytes], state_path: Path
     ) -> tuple[int, float]:
-        deadline = time.monotonic() + min(
-            GUARDIAN_START_TIMEOUT_SECONDS, self.spec.startup_timeout_seconds
-        )
+        timeout = min(GUARDIAN_START_TIMEOUT_SECONDS, self.spec.startup_timeout_seconds)
+        deadline = time.monotonic() + timeout
+        last_transient_error: PermissionError | None = None
         while time.monotonic() < deadline:
             if self.shutdown_event.is_set():
                 raise OSError(f"{self.spec.name} guardian startup cancelled during shutdown")
@@ -770,23 +770,27 @@ class ManagedNativeService:
             if code is not None:
                 raise OSError(f"{self.spec.name} guardian exited during startup with code {code}")
             try:
-                value = json.loads(state_path.read_text(encoding="utf-8"))
-                raw_pid = value.get("pid")
-                if isinstance(raw_pid, bool) or not isinstance(raw_pid, int) or raw_pid < 1:
-                    raise ValueError("guardian PID is invalid")
-                native = psutil.Process(raw_pid)
-                if native.ppid() != process.pid:
-                    raise ValueError("guardian child relationship is invalid")
-                return raw_pid, native.create_time()
+                serialized = state_path.read_text(encoding="utf-8")
             except FileNotFoundError:
                 pass
-            except (OSError, ValueError, TypeError, psutil.Error) as error:
-                raise OSError(f"{self.spec.name} guardian state is invalid: {error}") from error
+            except PermissionError as error:
+                # Windows may briefly deny access after the guardian atomically replaces the handshake file.
+                last_transient_error = error
+            else:
+                try:
+                    value = json.loads(serialized)
+                    raw_pid = value.get("pid")
+                    if isinstance(raw_pid, bool) or not isinstance(raw_pid, int) or raw_pid < 1:
+                        raise ValueError("guardian PID is invalid")
+                    native = psutil.Process(raw_pid)
+                    if native.ppid() != process.pid:
+                        raise ValueError("guardian child relationship is invalid")
+                    return raw_pid, native.create_time()
+                except (OSError, ValueError, TypeError, psutil.Error) as error:
+                    raise OSError(f"{self.spec.name} guardian state is invalid: {error}") from error
             self.shutdown_event.wait(0.05)
-        raise OSError(
-            f"{self.spec.name} guardian did not launch its native process within "
-            f"{min(GUARDIAN_START_TIMEOUT_SECONDS, self.spec.startup_timeout_seconds)} seconds"
-        )
+        detail = f"; last state read failed: {last_transient_error}" if last_transient_error else ""
+        raise OSError(f"{self.spec.name} guardian did not launch its native process within {timeout} seconds{detail}")
 
     @staticmethod
     def _native_alive(pid: int | None, started: float | None) -> bool:

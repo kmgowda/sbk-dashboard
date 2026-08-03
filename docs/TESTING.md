@@ -41,7 +41,9 @@ regressions also verify that an unavailable log destination still drains output 
 write failure recovers after bounded backoff, a stuck log pump is reported while ownership cleanup still executes,
 captured descendants are force-cleaned when their parent disappears during external-process termination, startup
 failure removes guardian state, a killed guardian cannot orphan its native child, and hard parent death terminates
-both the guarded native process and guardian.
+both the guarded native process and guardian. Guardian-handshake tests also reproduce a transient Windows
+`PermissionError`, verify that a subsequent read succeeds, and ensure persistent access denial times out with useful
+diagnostics.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure.

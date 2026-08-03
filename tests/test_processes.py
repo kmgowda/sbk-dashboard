@@ -115,6 +115,52 @@ class LifecycleTest(unittest.TestCase):
             self.assertIsNone(registry.find("failing", 12348))
             self.assertEqual([], list(root.glob(".*-guardian-*.json")))
 
+    def test_guardian_handshake_retries_transient_permission_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Test", "test", 12349, lambda: [], AlwaysReady(), root / "test.log", 1024, 1
+                ),
+                ManagedProcessRegistry(root / "managed.json"),
+                threading.Event(),
+            )
+            guardian = MagicMock(pid=4321)
+            guardian.poll.return_value = None
+            native = MagicMock()
+            native.ppid.return_value = guardian.pid
+            native.create_time.return_value = 123.5
+            state_path = root / "guardian.json"
+            with (
+                patch.object(
+                    Path,
+                    "read_text",
+                    side_effect=[PermissionError("temporarily locked"), '{"pid": 9876}'],
+                ) as read_text,
+                patch("sbk_dashboard.processes.psutil.Process", return_value=native),
+            ):
+                self.assertEqual((9876, 123.5), service._await_guardian_start(guardian, state_path))
+            self.assertEqual(2, read_text.call_count)
+
+    def test_guardian_handshake_timeout_reports_last_permission_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Test", "test", 12350, lambda: [], AlwaysReady(), root / "test.log", 1024, 1
+                ),
+                ManagedProcessRegistry(root / "managed.json"),
+                threading.Event(),
+            )
+            guardian = MagicMock(pid=4321)
+            guardian.poll.return_value = None
+            with (
+                patch.object(Path, "read_text", side_effect=PermissionError("persistently locked")),
+                patch("sbk_dashboard.processes.time.monotonic", side_effect=[0.0, 0.0, 5.0]),
+                self.assertRaisesRegex(OSError, "last state read failed: persistently locked"),
+            ):
+                service._await_guardian_start(guardian, root / "guardian.json")
+
     @unittest.skipIf(os.name == "nt", "POSIX process-group assertion")
     def test_stop_terminates_descendants(self):
         with tempfile.TemporaryDirectory() as temporary:
