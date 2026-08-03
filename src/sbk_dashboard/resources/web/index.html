@@ -40,8 +40,8 @@
                 <div><h2>Add an endpoint</h2><p>Prometheus exporter address</p></div>
             </div>
             <form id="target-form">
-                <label>Display name<input name="name" maxlength="100" placeholder="NVMe endurance run"></label>
-                <label>Host or IP<input name="host" required placeholder="benchmark-01.internal"></label>
+                <label>Display name<input name="name" maxlength="100" value="SBK Dashboard"></label>
+                <label>Host or IP<input name="host" required value="127.0.0.1"></label>
                 <label>Port<input name="port" required type="number" min="1" max="65535" value="9718"></label>
                 <label>Metrics path<input name="metricsPath" required value="/metrics"></label>
                 <button type="submit"><span>Register endpoint</span><b aria-hidden="true">→</b></button>

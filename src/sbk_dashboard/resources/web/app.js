@@ -79,8 +79,7 @@ form.addEventListener('submit', async event => {
         });
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Unable to register endpoint');
-        form.elements.name.value = '';
-        form.elements.host.value = '';
+        form.reset();
         message.textContent = 'Endpoint registered. Its dedicated dashboard is ready.';
         await loadTargets();
     } catch (error) {

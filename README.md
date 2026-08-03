@@ -113,6 +113,8 @@ Defaults:
 - Prometheus: `http://127.0.0.1:9090/` (loopback only)
 - Grafana: `http://localhost:3000/`
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
+- Endpoint form display name: `SBK Dashboard`
+- Endpoint form host/IP: `127.0.0.1`
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
 - Prometheus retention: 7 days

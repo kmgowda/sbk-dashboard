@@ -54,7 +54,12 @@ class WebTest(unittest.TestCase):
 
     def test_ui_health_registration_dashboard_and_deletion(self):
         with urllib.request.urlopen(self.base + "/") as response:
-            self.assertIn(b"SBK Dashboard", response.read())
+            page = response.read()
+            self.assertIn(b'value="SBK Dashboard"', page)
+            self.assertIn(b'value="127.0.0.1"', page)
+            self.assertNotIn(b"NVMe endurance run", page)
+        with urllib.request.urlopen(self.base + "/app.js") as response:
+            self.assertIn(b"form.reset();", response.read())
         with urllib.request.urlopen(self.base + "/api/health") as response:
             self.assertEqual("ok", json.load(response)["status"])
         request = urllib.request.Request(self.base + "/api/targets", method="POST", data=json.dumps({
