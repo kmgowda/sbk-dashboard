@@ -1,0 +1,95 @@
+import re
+import unittest
+from pathlib import Path
+
+from sbk_dashboard.version import VERSION
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class ContainerContractTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        cls.compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        cls.workflow = (ROOT / ".github/workflows/container.yml").read_text(encoding="utf-8")
+        cls.properties = (
+            ROOT / "src/sbk_dashboard/resources/monitoring-download.properties"
+        ).read_text(encoding="utf-8")
+
+    def test_image_runs_as_non_root_with_persistent_data_and_two_public_ports(self):
+        self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
+        self.assertIn(f"image: sbk-dashboard:{VERSION}", self.compose)
+        self.assertIn("USER 10001:10001", self.dockerfile)
+        self.assertIn('VOLUME ["/var/lib/sbk-dashboard"]', self.dockerfile)
+        self.assertIn("EXPOSE 9721 3000", self.dockerfile)
+        self.assertNotIn("EXPOSE 9090", self.dockerfile)
+        self.assertIn('ENTRYPOINT ["/usr/bin/tini", "--", "sbk-dashboard"]', self.dockerfile)
+        self.assertIn("HEALTHCHECK", self.dockerfile)
+        self.assertIn("http://127.0.0.1:9721/api/health", self.dockerfile)
+
+    def test_compose_publishes_dashboard_ports_and_persists_state(self):
+        self.assertIn('"9721:9721"', self.compose)
+        self.assertIn('"3000:3000"', self.compose)
+        self.assertNotRegex(self.compose, r'["\s]9090:9090')
+        self.assertIn("sbk-dashboard-data:/var/lib/sbk-dashboard", self.compose)
+        self.assertIn("host.docker.internal:host-gateway", self.compose)
+        self.assertIn("no-new-privileges:true", self.compose)
+        self.assertIn("cap_drop:", self.compose)
+
+    def test_image_native_versions_and_checksums_match_packaged_bootstrap(self):
+        expected = {
+            "PROMETHEUS_AMD64_SHA256": self._property(
+                "prometheus.linux-x86_64.download.sha256"
+            ),
+            "PROMETHEUS_ARM64_SHA256": self._property(
+                "prometheus.linux-arm64.download.sha256"
+            ),
+            "GRAFANA_AMD64_SHA256": self._property("grafana.linux-x86_64.download.sha256"),
+            "GRAFANA_ARM64_SHA256": self._property("grafana.linux-arm64.download.sha256"),
+        }
+        for argument, checksum in expected.items():
+            self.assertEqual(checksum, self._argument(argument), argument)
+        self.assertIn(
+            f"ARG PROMETHEUS_VERSION={self._url_version('prometheus.linux-x86_64.download.url', 'prometheus')}",
+            self.dockerfile,
+        )
+        self.assertIn(
+            f"ARG GRAFANA_VERSION={self._url_version('grafana.linux-x86_64.download.url', 'grafana')}",
+            self.dockerfile,
+        )
+
+    def test_build_context_excludes_generated_and_runtime_data(self):
+        ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        for required in (".git", ".venv", ".coverage*", "build", "dist", "downloads", "runtime"):
+            self.assertIn(required, ignored)
+
+    def test_ci_runs_smoke_and_builds_both_linux_architectures(self):
+        self.assertIn("python tests/container_smoke.py --image sbk-dashboard:ci", self.workflow)
+        self.assertIn("platforms: linux/amd64", self.workflow)
+        self.assertIn("platforms: linux/arm64", self.workflow)
+        self.assertIn("platforms: linux/amd64,linux/arm64", self.workflow)
+        self.assertIn("ghcr.io/${{ github.repository }}", self.workflow)
+        self.assertIn("Verify release tag matches the package version", self.workflow)
+
+    def _argument(self, name):
+        match = re.search(rf"^ARG {re.escape(name)}=([^\s]+)$", self.dockerfile, re.MULTILINE)
+        self.assertIsNotNone(match, name)
+        return match.group(1)
+
+    def _property(self, name):
+        match = re.search(rf"^{re.escape(name)}=(.+)$", self.properties, re.MULTILINE)
+        self.assertIsNotNone(match, name)
+        return match.group(1).strip()
+
+    def _url_version(self, name, tool):
+        url = self._property(name)
+        match = re.search(rf"/{re.escape(tool)}[-_/](?:release/)?v?(\d+\.\d+\.\d+)", url)
+        if match is None:
+            match = re.search(r"/v?(\d+\.\d+\.\d+)/", url)
+        self.assertIsNotNone(match, url)
+        return match.group(1)
+
+
+if __name__ == "__main__":
+    unittest.main()
