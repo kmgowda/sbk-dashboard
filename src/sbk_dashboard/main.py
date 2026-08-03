@@ -12,6 +12,7 @@ import sys
 import threading
 from collections.abc import Callable
 from contextlib import suppress
+from importlib.resources import files
 from types import FrameType
 
 import psutil
@@ -112,6 +113,11 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
 
 
 def print_runtime(arguments: list[str]) -> None:
+    try:
+        banner = files("sbk_dashboard").joinpath("resources/banner.txt").read_text(encoding="utf-8").rstrip()
+        LOGGER.info("\n%s", banner)
+    except OSError as error:
+        LOGGER.warning("Unable to load startup banner: %s", error)
     LOGGER.info("SBK Dashboard version: %s", VERSION)
     LOGGER.info("Python version: %s (%s)", platform.python_version(), platform.python_implementation())
     LOGGER.info("Python executable: %s", sys.executable)

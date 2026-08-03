@@ -54,6 +54,8 @@ class MainTest(unittest.TestCase):
             print_runtime([])
             print_effective(configuration, configuration.monitoring)
         text = "\n".join(captured.output)
+        self.assertIn("/ ____|  _ \\| |/ /", text)
+        self.assertIn("|_____/|____/|_|\\_\\", text)
         self.assertIn("Supplied arguments: (none)", text)
         self.assertIn("SBK Dashboard version: 1.26.8.1", text)
         self.assertIn("port=19721 [command line]", text)
@@ -61,6 +63,15 @@ class MainTest(unittest.TestCase):
         self.assertIn("status-seconds=60 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
+
+    @patch("sbk_dashboard.main.files")
+    def test_runtime_continues_when_banner_cannot_be_read(self, resource_files):
+        resource_files.return_value.joinpath.return_value.read_text.side_effect = OSError("missing banner")
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            print_runtime([])
+        text = "\n".join(captured.output)
+        self.assertIn("Unable to load startup banner: missing banner", text)
+        self.assertIn("SBK Dashboard version: 1.26.8.1", text)
 
     def test_dashboard_links_always_include_loopback(self):
         links = dashboard_links(9721)
