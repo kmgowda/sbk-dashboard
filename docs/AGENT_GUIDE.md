@@ -16,8 +16,9 @@ bounded Python HTTP/API server
    |-- dynamic Prometheus file discovery
    |-- endpoint-scoped copies of the canonical Grafana dashboard
    `-- lifecycle facade/supervisor
-          |-- owned or attached Prometheus native process --> remote SBK/SBM /metrics
-          `-- owned or attached Grafana native process    --> Prometheus datasource
+          |-- owned Prometheus guardian --> native process --> remote SBK/SBM /metrics
+          |-- owned Grafana guardian    --> native process --> Prometheus datasource
+          `-- attached native services are observed without guardians
 ```
 
 The Python process must stay small and predictable. Prometheus owns scraping/TSDB retention, and Grafana owns query
@@ -174,9 +175,10 @@ registration and deletion serialized through reconciliation and preserve compens
 3. Avoid side effects in constructors and ensure partial `start()` failure unwinds.
 4. Keep process identity recording after launch and removal after termination.
 5. Drain pipes continuously with bounded reads/log rotation.
-6. Test clean stop, repeated stop, startup exit, unhealthy restart, crash restart, descendant cleanup, retry backoff,
-   attached non-termination, and unrelated port-owner refusal.
-7. Run a live kill/recovery test against native Prometheus and Grafana.
+6. Keep the guarded native PID/creation-time handshake intact; it closes the hard-parent-death launch race.
+7. Test clean stop, repeated stop, startup exit, unhealthy restart, guardian death, hard parent death, descendant
+   cleanup, retry backoff, attached non-termination, and unrelated port-owner refusal.
+8. Run a live kill/recovery test against native Prometheus and Grafana.
 
 ### Change HTTP concurrency
 

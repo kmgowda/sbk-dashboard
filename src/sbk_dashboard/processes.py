@@ -9,6 +9,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -25,6 +26,7 @@ import psutil
 from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
+GUARDIAN_START_TIMEOUT_SECONDS = 5
 LOG_RETRY_INITIAL_SECONDS = 1.0
 LOG_RETRY_MAXIMUM_SECONDS = 300.0
 MAX_LOCAL_PROBE_ADDRESSES = 256
@@ -141,15 +143,18 @@ class ManagedProcessRegistry:
             return {}
 
     def record(self, component: str, process: subprocess.Popen[bytes], port: int) -> None:
+        self.record_pid(component, process.pid, port)
+
+    def record_pid(self, component: str, pid: int, port: int) -> None:
         try:
-            native = psutil.Process(process.pid)
+            native = psutil.Process(pid)
             started = native.create_time()
             command = native.exe()
         except psutil.Error as error:
-            raise OSError(f"Unable to record managed {component} process {process.pid}: {error}") from error
+            raise OSError(f"Unable to record managed {component} process {pid}: {error}") from error
         with self._lock:
             values = self._read()
-            values[component] = {"pid": process.pid, "started": started, "command": command, "port": port}
+            values[component] = {"pid": pid, "started": started, "command": command, "port": port}
             atomic_json(self.path, values)
 
     def find(self, component: str, port: int) -> psutil.Process | None:
@@ -523,6 +528,8 @@ class ManagedNativeService:
         self._operation_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._process: subprocess.Popen[bytes] | None = None
+        self._native_pid: int | None = None
+        self._native_started: float | None = None
         self._log_pump: RotatingProcessLog | None = None
         self._attached = False
         self._last_healthy = False
@@ -538,7 +545,7 @@ class ManagedNativeService:
     @property
     def pid(self) -> int | None:
         with self._state_lock:
-            return self._process.pid if self._process else None
+            return self._native_pid
 
     def start(self, continue_existing: bool) -> None:
         with self._operation_lock:
@@ -570,8 +577,17 @@ class ManagedNativeService:
         with self._state_lock:
             attached = self._attached
             process = self._process
+            native_pid = self._native_pid
+            native_started = self._native_started
             last_healthy = self._last_healthy
-        return last_healthy and (attached or (process is not None and process.poll() is None))
+        return last_healthy and (
+            attached
+            or (
+                process is not None
+                and process.poll() is None
+                and self._native_alive(native_pid, native_started)
+            )
+        )
 
     def supervise(self) -> bool:
         if self.shutdown_event.is_set() or self.lifecycle.state not in {
@@ -582,13 +598,16 @@ class ManagedNativeService:
         with self._state_lock:
             attached = self._attached
             process = self._process
+            native_pid = self._native_pid
+            native_started = self._native_started
         if attached:
             ready = self.spec.health_probe.ready()
             with self._state_lock:
                 self._last_healthy = ready
             return ready
         ready = self.spec.health_probe.ready()
-        if process is not None and process.poll() is None and ready:
+        native_alive = self._native_alive(native_pid, native_started)
+        if process is not None and process.poll() is None and native_alive and ready:
             with self._state_lock:
                 self._last_healthy = True
             self._unhealthy_count = 0
@@ -600,6 +619,7 @@ class ManagedNativeService:
         if (
             process is not None
             and process.poll() is None
+            and native_alive
             and self._unhealthy_count < self.restart_policy.unhealthy_threshold
         ):
             return False
@@ -660,9 +680,29 @@ class ManagedNativeService:
     def _launch(self) -> None:
         command = self.spec.command()
         self.spec.log_path.parent.mkdir(parents=True, exist_ok=True)
+        guardian_state = self.spec.log_path.with_name(
+            f".{self.spec.component}-guardian-{os.getpid()}.json"
+        )
+        guardian_state.unlink(missing_ok=True)
+        parent_started = psutil.Process(os.getpid()).create_time()
+        guardian_command = [
+            sys.executable,
+            "-m",
+            "sbk_dashboard.guardian",
+            "--parent-pid",
+            str(os.getpid()),
+            "--parent-started",
+            repr(parent_started),
+            "--pid-file",
+            str(guardian_state),
+            "--name",
+            self.spec.name,
+            "--",
+            *command,
+        ]
         if os.name == "nt":
             process = subprocess.Popen(
-                command,
+                guardian_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
@@ -671,7 +711,7 @@ class ManagedNativeService:
             )
         else:
             process = subprocess.Popen(
-                command,
+                guardian_command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
@@ -683,13 +723,69 @@ class ManagedNativeService:
         with self._state_lock:
             self._process = process
             self._log_pump = pump
-        LOGGER.info("Started managed process %s (pid %s)", command[0], process.pid)
         try:
-            self.registry.record(self.spec.component, process, self.spec.port)
+            native_pid, native_started = self._await_guardian_start(process, guardian_state)
+            with self._state_lock:
+                self._native_pid = native_pid
+                self._native_started = native_started
+            self.registry.record_pid(self.spec.component, native_pid, self.spec.port)
+            LOGGER.info(
+                "Started managed process %s (pid %s, guardian pid %s)",
+                command[0],
+                native_pid,
+                process.pid,
+            )
             self._await_ready(process)
         except BaseException:
             self._stop_process()
             raise
+        finally:
+            guardian_state.unlink(missing_ok=True)
+
+    def _await_guardian_start(
+        self, process: subprocess.Popen[bytes], state_path: Path
+    ) -> tuple[int, float]:
+        deadline = time.monotonic() + min(
+            GUARDIAN_START_TIMEOUT_SECONDS, self.spec.startup_timeout_seconds
+        )
+        while time.monotonic() < deadline:
+            if self.shutdown_event.is_set():
+                raise OSError(f"{self.spec.name} guardian startup cancelled during shutdown")
+            code = process.poll()
+            if code is not None:
+                raise OSError(f"{self.spec.name} guardian exited during startup with code {code}")
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                raw_pid = value.get("pid")
+                if isinstance(raw_pid, bool) or not isinstance(raw_pid, int) or raw_pid < 1:
+                    raise ValueError("guardian PID is invalid")
+                native = psutil.Process(raw_pid)
+                if native.ppid() != process.pid:
+                    raise ValueError("guardian child relationship is invalid")
+                return raw_pid, native.create_time()
+            except FileNotFoundError:
+                pass
+            except (OSError, ValueError, TypeError, psutil.Error) as error:
+                raise OSError(f"{self.spec.name} guardian state is invalid: {error}") from error
+            self.shutdown_event.wait(0.05)
+        raise OSError(
+            f"{self.spec.name} guardian did not launch its native process within "
+            f"{min(GUARDIAN_START_TIMEOUT_SECONDS, self.spec.startup_timeout_seconds)} seconds"
+        )
+
+    @staticmethod
+    def _native_alive(pid: int | None, started: float | None) -> bool:
+        if pid is None or started is None:
+            return False
+        try:
+            native = psutil.Process(pid)
+            return (
+                native.is_running()
+                and native.status() != psutil.STATUS_ZOMBIE
+                and abs(native.create_time() - started) <= 0.01
+            )
+        except psutil.Error:
+            return False
 
     def _await_ready(self, process: subprocess.Popen[bytes]) -> None:
         deadline = time.monotonic() + self.spec.startup_timeout_seconds
@@ -719,17 +815,32 @@ class ManagedNativeService:
     def _stop_process(self) -> None:
         with self._state_lock:
             process = self._process
+            native_pid = self._native_pid
+            native_started = self._native_started
             pump = self._log_pump
             self._process = None
+            self._native_pid = None
+            self._native_started = None
             self._log_pump = None
         if process is None:
             return
         termination_error: OSError | None = None
         pump_error: OSError | None = None
         try:
-            _terminate_owned_process(process, self.spec.name)
-        except OSError as error:
-            termination_error = error
+            try:
+                _terminate_owned_process(process, self.spec.name)
+            except OSError as error:
+                termination_error = error
+            if self._native_alive(native_pid, native_started):
+                try:
+                    _terminate_psutil_tree(psutil.Process(native_pid), self.spec.name)
+                except (OSError, psutil.Error) as error:
+                    if termination_error is None:
+                        termination_error = OSError(
+                            f"Unable to stop guarded native {self.spec.name} process {native_pid}: {error}"
+                        )
+                    else:
+                        termination_error = OSError(f"{termination_error}; guarded native cleanup: {error}")
         finally:
             if pump:
                 try:
@@ -737,7 +848,8 @@ class ManagedNativeService:
                 except OSError as error:
                     pump_error = error
             try:
-                self.registry.remove(self.spec.component, process.pid)
+                if native_pid is not None:
+                    self.registry.remove(self.spec.component, native_pid)
             except OSError as error:
                 LOGGER.warning("Unable to update managed process ownership: %s", error)
         if termination_error and pump_error:

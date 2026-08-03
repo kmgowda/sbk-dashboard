@@ -44,3 +44,8 @@ backward compatible and needs no data migration.
 The Python server emits one concise INFO-level runtime status every 60 seconds by default. Use
 `-status-seconds <1-86400>` or `SBK_DASHBOARD_STATUS_SECONDS` to change the interval. This is operational output only;
 it adds no persisted field and requires no data migration.
+
+Owned Prometheus and Grafana processes now run beneath lightweight lifecycle guardians. This adds no service option
+or persisted-data migration. Service managers may retain their existing stop timeout and process-group policy; normal
+shutdown remains graceful, while hard termination of only the main PID now triggers guardian cleanup. Attached
+`-continue true` services remain externally owned and are never guarded or terminated by sbk-dashboard.

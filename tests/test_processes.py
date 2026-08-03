@@ -73,6 +73,48 @@ class LifecycleTest(unittest.TestCase):
             self.assertEqual(LifecycleState.STOPPED, service.lifecycle.state)
             self.assertFalse(psutil.pid_exists(second_pid))
 
+    def test_managed_service_cleans_native_child_if_guardian_is_killed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Test", "test", 12347,
+                    lambda: [sys.executable, "-c", "import time; time.sleep(60)"],
+                    AlwaysReady(), root / "test.log", 1024, 1,
+                ),
+                ManagedProcessRegistry(root / "managed.json"),
+                threading.Event(),
+            )
+            service.start(False)
+            first_native_pid = service.pid
+            guardian = psutil.Process(service._process.pid)
+            guardian.kill()
+            guardian.wait(3)
+            self.assertTrue(psutil.pid_exists(first_native_pid))
+            self.assertTrue(service.supervise())
+            self.assertFalse(psutil.pid_exists(first_native_pid))
+            self.assertNotEqual(first_native_pid, service.pid)
+            service.stop()
+
+    def test_managed_service_startup_failure_cleans_guardian_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            registry = ManagedProcessRegistry(root / "managed.json")
+            service = ManagedNativeService(
+                NativeServiceSpec(
+                    "Failing", "failing", 12348,
+                    lambda: [sys.executable, "-c", "raise SystemExit(7)"],
+                    AlwaysReady(), root / "failing.log", 1024, 1,
+                ),
+                registry,
+                threading.Event(),
+            )
+            with self.assertRaises(OSError):
+                service.start(False)
+            self.assertIsNone(service.pid)
+            self.assertIsNone(registry.find("failing", 12348))
+            self.assertEqual([], list(root.glob(".*-guardian-*.json")))
+
     @unittest.skipIf(os.name == "nt", "POSIX process-group assertion")
     def test_stop_terminates_descendants(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -345,6 +387,7 @@ class LifecycleTest(unittest.TestCase):
         pump = MagicMock()
         pump.close.side_effect = OSError("pump stuck")
         service._process = process
+        service._native_pid = 123
         service._log_pump = pump
         with (
             patch("sbk_dashboard.processes._terminate_owned_process"),

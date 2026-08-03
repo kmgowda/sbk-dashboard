@@ -16,7 +16,7 @@ modules and are never embedded in the Python interpreter.
                     |         +-- single native supervisor            |
                     |         +-- ManagedNativeService x 2            |
                     +---|---------------------|-----------------------+
-                        | child process       | child process
+                        | guardian process    | guardian process
                         v                     v
                   Prometheus              Grafana
                   loopback default        public bind default
@@ -116,10 +116,17 @@ Illegal transitions fail immediately. Construction has no process side effects; 
 `close()` is idempotent. Startup failure performs reverse-order cleanup. Shutdown first stops admission, signals the
 supervisor, joins it, and then stops Grafana and Prometheus in reverse dependency order.
 
-Owned POSIX children start in new sessions. Termination addresses the process group and captured descendant tree,
-first gracefully and then forcibly after a bounded timeout. Windows children start in new process groups and are
-terminated recursively with `psutil`. PIDs, executable paths, creation times, and ports are persisted to defend
-against PID reuse.
+Each owned native process is launched by a dedicated lightweight Python guardian in its own POSIX session or Windows
+process group. The native PID, executable, creation time, and port are persisted to defend against PID reuse. Normal
+termination addresses the guardian group and captured native descendant tree, first gracefully and then forcibly
+after a bounded timeout.
+
+The guardian independently validates the control-plane PID and creation time four times per second. If the main
+process disappears without running cleanup—including `SIGKILL` on POSIX or direct process termination on Windows—it
+terminates the native process and all descendants, removes its transient handshake file, and exits. The handshake is
+created before startup is considered successful, closing the launch/registration race. The main supervisor also
+validates the native PID and creation time directly and cleans the native tree if a guardian is killed unexpectedly.
+Attached `-continue true` services have no guardian and remain outside application ownership.
 
 The supervisor restarts an exited owned process, or one that remains unhealthy for three checks. Failed restarts use
 exponential backoff capped at 60 seconds. Attached processes are health-checked but never restarted or terminated.
@@ -145,6 +152,8 @@ The implementation uses patterns where they enforce runtime invariants:
 - **Strategy:** `HealthProbe` separates readiness policy from native process ownership and makes supervision
   independently testable.
 - **Supervisor:** one bounded control loop observes services, applies thresholds/backoff, and reconciles status.
+- **Process guardian:** one bounded helper per owned native service enforces parent-death cleanup even when the
+  control plane cannot execute signal handlers.
 - **Repository:** `TargetRegistry` and `ManagedProcessRegistry` own validation and atomic persistence.
 - **Compensating transaction:** target mutations are serialized across persistence and monitoring reconciliation;
   any reconciliation exception restores the prior registration snapshot before the API reports failure.

@@ -261,6 +261,12 @@ sbk-dashboard -continue true
 Attached services are not stopped at dashboard shutdown. They must already use configuration compatible with this
 data directory's Prometheus discovery and Grafana provisioning paths.
 
+Every Prometheus or Grafana process launched by sbk-dashboard runs beneath a lightweight lifecycle guardian. Normal
+`SIGINT`/`SIGTERM` shutdown still performs reverse-order graceful and then forceful process-tree cleanup. If the main
+Python process is terminated with `SIGKILL`, `TerminateProcess`, or an equivalent non-catchable termination, each
+guardian detects the missing parent by PID and creation time, terminates its native process tree, and exits. Guardians
+are not created for attached `-continue true` services, so externally owned processes remain untouched.
+
 Port checks resolve DNS bind names to every IPv4/IPv6 result and check wildcard binds through the host's bounded
 local-interface list before attempting a real `bind()` and `listen()`. On Windows an exclusive bind remains the
 default ownership test. A reusable fallback is allowed only when `psutil` confirms that every matching socket is in
@@ -291,6 +297,8 @@ avoid spurious Grafana failures on slower hosts while keeping Prometheus failure
   and `failed` states. Shutdown is idempotent and reports incomplete child termination.
 - Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
   descendants; Windows uses a new process group plus recursive process-tree termination.
+- One small guardian process per owned native service closes the cleanup gap where the control plane cannot run a
+  signal handler. It retains no samples or endpoint state and exits with its native child.
 - A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
   joined at shutdown; subprocess log-pump threads exit at EOF and are joined. Shutdown reports an error instead of
   declaring success if a log-pump worker does not stop after its pipe is closed.

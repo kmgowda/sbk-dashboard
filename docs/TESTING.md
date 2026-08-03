@@ -37,7 +37,9 @@ platform-specific reusable bind semantics. Port tests use distinct socket double
 cover AAAA-only DNS bind names, and permit Windows reuse only for confirmed `TIME_WAIT` sockets. Native lifecycle
 regressions also verify that an unavailable log destination still drains output beyond pipe capacity, a transient
 write failure recovers after bounded backoff, a stuck log pump is reported while ownership cleanup still executes,
-and captured descendants are force-cleaned when their parent disappears during external-process termination.
+captured descendants are force-cleaned when their parent disappears during external-process termination, startup
+failure removes guardian state, a killed guardian cannot orphan its native child, and hard parent death terminates
+both the guarded native process and guardian.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure.
@@ -92,6 +94,11 @@ Grafana and verify the dedicated URL recovers. Attached `-continue true` process
 
 Stop with `Ctrl+C`, restart with the same data directory, and confirm registrations, mappings, dashboard files, and
 Prometheus history remain. Prometheus and Grafana child PIDs started by that invocation must no longer be alive.
+
+Repeat with a unique temporary data directory, note the main, guardian, Prometheus, and Grafana PIDs, and force-kill
+only the main sbk-dashboard PID (`kill -9` on Linux/macOS or direct process termination on Windows). Within the bounded
+guardian cleanup period, both native process trees and both guardians must exit and both ports must stop listening.
+Do not run this check against an attached `-continue true` stack, whose external services must remain running.
 
 Startup logs must include a timestamp and level, and must report effective bind addresses, startup deadlines,
 target-health timeout, and the source of every CLI-backed setting. Run once with `-log-level DEBUG` and once with
