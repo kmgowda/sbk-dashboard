@@ -440,7 +440,12 @@ class MonitoringContinueTest(unittest.TestCase):
             run.return_value.returncode = 0
             stack._validate_prometheus_configuration()
             self.assertEqual(
-                [str(promtool), "check", "config", str(data / "monitoring/prometheus/prometheus.yml")],
+                [
+                    str(promtool.resolve()),
+                    "check",
+                    "config",
+                    str((data / "monitoring/prometheus/prometheus.yml").resolve()),
+                ],
                 run.call_args.args[0],
             )
             run.return_value.returncode = 1
