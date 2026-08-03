@@ -28,6 +28,7 @@ The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
   bind controls.
 - Timestamped, leveled control-plane logging suitable for journald, launchd, and Windows service wrappers.
 - Concise periodic runtime status with a configurable interval and a 60-second default.
+- Automatic landing-page launch in a local graphical browser, with SSH, CI, service, and headless-session detection.
 - Bounded recent-client telemetry for active landing-page browser sessions and Grafana dashboards opened from the
   landing page.
 - Process-group/descendant shutdown and bounded rotating native console logs.
@@ -134,6 +135,12 @@ selected native platform,
 all effective options and their sources, and dashboard links reachable through the configured address family. An
 IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
 discovered IPv6 addresses.
+
+After the HTTP server is ready, sbk-dashboard opens the first local dashboard link in the default graphical browser.
+It requests a new tab, so an already-running browser normally keeps its existing windows and adds the landing page.
+The browser ultimately controls tab/window policy. Automatic launch is skipped for SSH sessions (including X11
+forwarding), CI, non-interactive Windows service sessions, and Unix environments without `DISPLAY` or
+`WAYLAND_DISPLAY`. Failure to locate or start a browser produces a warning and does not stop the server.
 
 Host inputs are canonical IP literals or DNS names. Malformed numeric IPv4 attempts, invalid IPv6, embedded ports,
 zone identifiers, and unspecified remote targets are rejected before they can reach Prometheus configuration.

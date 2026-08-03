@@ -101,6 +101,9 @@ when that executable is available. Downloaded tool archives are checksum-pinned 
 - The composition-root thread waits on the shutdown signal with the configured status interval and logs one
   immutable, non-networked summary of HTTP lifecycle, monitoring lifecycle, native health, and endpoint-state counts.
   The default interval is 60 seconds and is bounded between one second and one day.
+- After HTTP readiness, the composition root makes one best-effort request to the platform default graphical browser
+  for the first local management URL, preferring a new tab. SSH, CI, Windows service, and headless Unix sessions are
+  skipped before invoking browser integration; failure is non-fatal and creates no background worker.
 - Target refresh has a bounded configurable timeout. Prometheus and Grafana have separate bounded startup deadlines
   because Grafana initialization can be materially slower on constrained hosts.
 - Each owned service has one 64 KiB chunked log-pump thread. Pipes are continuously drained, logs are bounded and

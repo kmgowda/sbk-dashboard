@@ -66,6 +66,10 @@ Periodic status now reports bounded recent browser activity: `clients_recent`, `
 does not change persisted data, command options, native Prometheus/Grafana configuration, or direct-server routing.
 Direct Grafana bookmarks and Prometheus API users remain outside these counts.
 
+Interactive local startup now makes one best-effort request to open the management landing page in a new browser tab.
+SSH, CI, non-interactive Windows service, and headless Unix sessions are detected and skipped automatically. Browser
+startup failure is non-fatal and adds no command-line option or persisted state.
+
 Endpoint registry loading now revalidates normalized host names, metrics paths, field bounds, and the stable
 host-and-port-derived endpoint ID before generating discovery or dashboard files. Registries produced by supported
 sbk-dashboard releases remain compatible. Manually modified entries with inconsistent IDs or invalid fields must be

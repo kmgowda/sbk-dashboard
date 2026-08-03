@@ -6,7 +6,15 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 from sbk_dashboard.config import parse_configuration
-from sbk_dashboard.main import dashboard_links, log_status, main, print_effective, print_runtime, run
+from sbk_dashboard.main import (
+    dashboard_links,
+    log_status,
+    main,
+    open_landing_page,
+    print_effective,
+    print_runtime,
+    run,
+)
 
 
 class MainTest(unittest.TestCase):
@@ -80,6 +88,50 @@ class MainTest(unittest.TestCase):
         self.assertEqual(["http://198.51.100.8:9721/"], dashboard_links(9721, "198.51.100.8"))
         self.assertEqual(["http://[::1]:9721/"], dashboard_links(9721, "::1"))
 
+    def test_landing_page_opens_in_new_tab_for_graphical_desktops(self):
+        for platform_name, os_name, environment in (
+            ("linux", "posix", {"DISPLAY": ":0"}),
+            ("linux", "posix", {"WAYLAND_DISPLAY": "wayland-0"}),
+            ("darwin", "posix", {}),
+            ("win32", "nt", {}),
+        ):
+            with self.subTest(platform=platform_name, environment=environment):
+                opener = MagicMock(return_value=True)
+                self.assertTrue(
+                    open_landing_page(
+                        "http://localhost:9721/", environment, platform_name, os_name, opener
+                    )
+                )
+                opener.assert_called_once_with("http://localhost:9721/", new=2, autoraise=True)
+
+    def test_landing_page_does_not_open_for_ssh_ci_or_headless_sessions(self):
+        for environment, platform_name, os_name in (
+            ({"SSH_CONNECTION": "client server"}, "linux", "posix"),
+            ({"SSH_CLIENT": "client"}, "darwin", "posix"),
+            ({"SSH_TTY": "/dev/pts/1", "DISPLAY": ":10"}, "linux", "posix"),
+            ({"CI": "true", "DISPLAY": ":0"}, "linux", "posix"),
+            ({"SESSIONNAME": "Services"}, "win32", "nt"),
+            ({}, "linux", "posix"),
+        ):
+            with self.subTest(environment=environment, platform=platform_name):
+                opener = MagicMock(return_value=True)
+                self.assertFalse(
+                    open_landing_page(
+                        "http://localhost:9721/", environment, platform_name, os_name, opener
+                    )
+                )
+                opener.assert_not_called()
+
+    def test_browser_launch_failure_is_non_fatal(self):
+        opener = MagicMock(side_effect=RuntimeError("browser unavailable"))
+        with self.assertLogs("sbk_dashboard.main", level="WARNING") as captured:
+            self.assertFalse(
+                open_landing_page(
+                    "http://localhost:9721/", {"DISPLAY": ":0"}, "linux", "posix", opener
+                )
+            )
+        self.assertIn("Unable to open landing page automatically", "\n".join(captured.output))
+
     def test_periodic_status_failure_is_non_fatal(self):
         monitoring = MagicMock()
         monitoring.summary.side_effect = RuntimeError("snapshot unavailable")
@@ -106,27 +158,30 @@ class MainTest(unittest.TestCase):
 
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")
+    @patch("sbk_dashboard.main.open_landing_page")
     @patch("sbk_dashboard.main.DashboardHttpServer")
     @patch("sbk_dashboard.main.ManagedMonitoringStack")
     @patch("sbk_dashboard.main.TargetRegistry")
     def test_run_starts_and_closes_every_component(
-        self, registry_type, monitoring_type, server_type, event_type, _signal
+        self, registry_type, monitoring_type, server_type, open_page, event_type, _signal
     ):
         configuration = parse_configuration([], {})
         event_type.return_value.wait.return_value = True
         run(configuration, configuration.monitoring)
         monitoring_type.return_value.start.assert_called_once_with(registry_type.return_value.list.return_value)
         server_type.return_value.start.assert_called_once_with()
+        open_page.assert_called_once_with("http://localhost:9721/")
         server_type.return_value.close.assert_called_once_with()
         monitoring_type.return_value.close.assert_called_once_with()
 
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")
+    @patch("sbk_dashboard.main.open_landing_page")
     @patch("sbk_dashboard.main.DashboardHttpServer")
     @patch("sbk_dashboard.main.ManagedMonitoringStack")
     @patch("sbk_dashboard.main.TargetRegistry")
     def test_run_prints_periodic_short_status_at_configured_interval(
-        self, _registry_type, monitoring_type, server_type, event_type, _signal
+        self, _registry_type, monitoring_type, server_type, _open_page, event_type, _signal
     ):
         configuration = parse_configuration(["-status-seconds", "7"], {})
         event_type.return_value.wait.side_effect = [False, True]
@@ -158,11 +213,12 @@ class MainTest(unittest.TestCase):
 
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")
+    @patch("sbk_dashboard.main.open_landing_page")
     @patch("sbk_dashboard.main.DashboardHttpServer")
     @patch("sbk_dashboard.main.ManagedMonitoringStack")
     @patch("sbk_dashboard.main.TargetRegistry")
     def test_run_aggregates_shutdown_errors(
-        self, _registry_type, monitoring_type, server_type, event_type, _signal
+        self, _registry_type, monitoring_type, server_type, _open_page, event_type, _signal
     ):
         configuration = parse_configuration([], {})
         event_type.return_value.wait.return_value = True

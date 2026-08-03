@@ -10,7 +10,8 @@ import signal
 import socket
 import sys
 import threading
-from collections.abc import Callable
+import webbrowser
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from importlib.resources import files
 from types import FrameType
@@ -79,7 +80,8 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             configuration.dashboard.port,
         )
         LOGGER.info("Dashboard links:")
-        for link in dashboard_links(configuration.dashboard.port, configuration.dashboard.bind_address):
+        links = dashboard_links(configuration.dashboard.port, configuration.dashboard.bind_address)
+        for link in links:
             LOGGER.info("  %s", link)
         LOGGER.info("Authentication: disabled")
         LOGGER.info(
@@ -93,6 +95,7 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             "Persistent history retention: %s day(s) per endpoint", configuration.dashboard.retention_days
         )
         print_effective(configuration, monitoring_configuration)
+        open_landing_page(links[0])
         while not stopped.wait(configuration.dashboard.status_interval_seconds):
             log_status(server, monitoring)
     finally:
@@ -191,6 +194,45 @@ def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) 
         )
     except Exception as error:  # a diagnostic heartbeat must never terminate the production server
         LOGGER.warning("Unable to produce periodic status: %s", error)
+
+
+def open_landing_page(
+    url: str,
+    environment: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+    os_name: str | None = None,
+    opener: Callable[..., bool] | None = None,
+) -> bool:
+    """Open *url* in a desktop browser, without disturbing SSH or headless sessions."""
+    selected_environment = os.environ if environment is None else environment
+    if any(selected_environment.get(name) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+        LOGGER.info("Automatic browser launch skipped: SSH session detected")
+        return False
+    if selected_environment.get("CI"):
+        LOGGER.info("Automatic browser launch skipped: CI environment detected")
+        return False
+    selected_platform = sys.platform if platform_name is None else platform_name
+    selected_os = os.name if os_name is None else os_name
+    if selected_os == "nt" and selected_environment.get("SESSIONNAME", "").casefold() == "services":
+        LOGGER.info("Automatic browser launch skipped: non-interactive Windows service session detected")
+        return False
+    graphical_session = selected_os == "nt" or selected_platform == "darwin" or any(
+        selected_environment.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY")
+    )
+    if not graphical_session:
+        LOGGER.info("Automatic browser launch skipped: no graphical desktop session detected")
+        return False
+    selected_opener = webbrowser.open if opener is None else opener
+    try:
+        opened = selected_opener(url, new=2, autoraise=True)
+    except Exception as error:  # browser backends are external and must never stop the server
+        LOGGER.warning("Unable to open landing page automatically: %s", error)
+        return False
+    if opened:
+        LOGGER.info("Opened landing page in the default web browser: %s", url)
+    else:
+        LOGGER.warning("No graphical web browser accepted the landing page: %s", url)
+    return opened
 
 
 def dashboard_links(port: int, bind_address: str = "0.0.0.0") -> list[str]:

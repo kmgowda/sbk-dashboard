@@ -46,7 +46,9 @@ both the guarded native process and guardian. Guardian-handshake tests also repr
 diagnostics.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
-non-fatal handling of a reporting failure.
+non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,
+macOS, and Windows environments; SSH, CI, Windows service, and headless suppression; startup URL selection; and
+non-fatal launcher errors.
 
 Web asset regressions verify that the landing page exposes total, up, and down counters and that each inventory
 refresh derives the health counts from exact `up` and `down` states. Pending and unknown states count only toward the
