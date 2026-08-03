@@ -48,20 +48,26 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 
 Use a pinned release in production instead of `latest`. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
+Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
+digest so AMD64 and ARM64 builds resolve the same reviewed manifest.
 
 ## Register endpoints
 
-The address entered in the landing page is resolved from inside the container:
+The address entered in the landing page is preserved and resolved or routed from inside the container:
 
 | Exporter location | Host field | Example |
 |---|---|---|
 | Same container | `127.0.0.1` | Only for an exporter deliberately running in this container |
 | Docker host | `host.docker.internal` | `host.docker.internal:9718/metrics` |
-| Remote system | Routable DNS or IP | `benchmark-01.example.com:9718/metrics` |
+| Remote system | Routable DNS, IPv4, or IPv6 | `benchmark-01.example.com:9718/metrics` |
 
 The supplied Compose and `docker run` commands install Docker's `host-gateway` mapping so a host SBK process is
 reachable on Linux and Docker Desktop. The host exporter must listen on an address reachable from the Docker bridge;
 an exporter bound exclusively to host `127.0.0.1` generally cannot be reached by a Linux container.
+
+Compose enables IPv6 on its user-defined bridge. IPv4 and DNS endpoints use Docker's normal outbound masquerading;
+literal IPv6 endpoints additionally require IPv6 routing in the Docker daemon, host OS, and upstream network. No
+inbound port publication is needed for scraping because Prometheus initiates the connection from the container.
 
 ## Configuration
 

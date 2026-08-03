@@ -86,23 +86,34 @@ class ContainerSmoke:
         self.expect_target_up = expect_target_up
         self.name = f"sbk-dashboard-smoke-{suffix}"
         self.volume = f"sbk-dashboard-smoke-data-{suffix}"
+        self.network = f"sbk-dashboard-smoke-net-{suffix}"
+        self.exporters = (
+            f"sbk-dashboard-smoke-exporter-v4-{suffix}",
+            f"sbk-dashboard-smoke-exporter-v6-{suffix}",
+        )
+        self.target_endpoints: list[tuple[str, int]] = []
         self.captured_pids: set[int] = set()
 
     def run(self) -> None:
         command("docker", "volume", "create", self.volume)
         try:
-            target_id = self._first_start()
+            command("docker", "network", "create", "--ipv6", self.network)
+            if self.expect_target_up:
+                self.target_endpoints = [(self.target_host, self.target_port)]
+            else:
+                self.target_endpoints = self._start_test_exporters()
+            target_ids = self._first_start()
             self._stop_and_remove()
             self._assert_processes_stopped()
             self._start()
             self._wait_until_healthy()
             targets = self._targets()
-            if [target["id"] for target in targets] != [target_id]:
+            if {target["id"] for target in targets} != set(target_ids):
                 raise AssertionError(f"Persisted target was not restored: {targets}")
-            if self.expect_target_up:
-                self._wait_for_target_up(target_id)
-                self._assert_real_metrics_and_panels(target_id)
-            self._wait_for_dashboard(targets[0]["dashboardUrl"])
+            for target in targets:
+                self._wait_for_target_up(target["id"])
+                self._assert_metrics_and_panels(target["id"])
+                self._wait_for_dashboard(target["dashboardUrl"])
             self._capture_processes()
             self._stop_and_remove()
             self._assert_processes_stopped()
@@ -113,9 +124,12 @@ class ContainerSmoke:
             raise
         finally:
             command("docker", "rm", "--force", self.name, check=False)
+            for exporter in self.exporters:
+                command("docker", "rm", "--force", exporter, check=False)
             command("docker", "volume", "rm", "--force", self.volume, check=False)
+            command("docker", "network", "rm", self.network, check=False)
 
-    def _first_start(self) -> str:
+    def _first_start(self) -> list[str]:
         self._start()
         self._wait_until_healthy()
         status, landing = request(f"http://127.0.0.1:{self.dashboard_port}/")
@@ -128,36 +142,39 @@ class ContainerSmoke:
         )
         if set(bindings) != {"3000/tcp", "9721/tcp"}:
             raise AssertionError(f"Unexpected published/exposed ports: {bindings}")
+        target_ids: list[str] = []
+        for index, (host, port) in enumerate(self.target_endpoints, start=1):
+            target = self._register_target(host, port, f"Docker smoke target {index}")
+            target_ids.append(target["id"])
+            self._wait_for_target_up(target["id"])
+            self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard(target["dashboardUrl"])
+        self._capture_processes()
+        return target_ids
+
+    def _register_target(self, host: str, port: int, name: str) -> dict[str, Any]:
         status, payload = request(
             f"http://127.0.0.1:{self.dashboard_port}/api/targets",
             "POST",
-            {
-                "name": "Docker smoke target",
-                "host": self.target_host,
-                "port": self.target_port,
-                "metricsPath": "/metrics",
-            },
+            {"name": name, "host": host, "port": port, "metricsPath": "/metrics"},
         )
         if status != 201:
             raise AssertionError(f"Target registration failed with HTTP {status}")
-        target = json.loads(payload)
+        target: dict[str, Any] = json.loads(payload)
         expected_prefix = f"http://127.0.0.1:{self.grafana_port}/d/sbk-"
         if not target["dashboardUrl"].startswith(expected_prefix):
             raise AssertionError(f"Grafana URL is not host-accessible: {target['dashboardUrl']}")
-        if self.expect_target_up:
-            self._wait_for_target_up(target["id"])
-            self._assert_real_metrics_and_panels(target["id"])
-        self._wait_for_dashboard(target["dashboardUrl"])
-        self._capture_processes()
-        return target["id"]
+        return target
 
     def _start(self) -> None:
-        command(
+        docker_arguments = [
             "docker",
             "run",
             "--detach",
             "--name",
             self.name,
+            "--network",
+            self.network,
             "--volume",
             f"{self.volume}:/var/lib/sbk-dashboard",
             "--publish",
@@ -166,8 +183,12 @@ class ContainerSmoke:
             f"127.0.0.1:{self.grafana_port}:3000",
             "--add-host",
             "host.docker.internal:host-gateway",
-            self.image,
-        )
+        ]
+        if self.grafana_port != 3000:
+            docker_arguments.extend(
+                ("--env", f"SBK_DASHBOARD_GRAFANA_URL=http://127.0.0.1:{self.grafana_port}")
+            )
+        command(*docker_arguments, self.image)
 
     def _wait_until_healthy(self) -> None:
         body = wait_for(f"http://127.0.0.1:{self.dashboard_port}/api/health")
@@ -193,9 +214,9 @@ class ContainerSmoke:
             if last_state == "up":
                 return
             time.sleep(1)
-        raise AssertionError(f"Real SBK target did not become up; last state={last_state}")
+        raise AssertionError(f"Target did not become up; last state={last_state}")
 
-    def _assert_real_metrics_and_panels(self, target_id: str) -> None:
+    def _assert_metrics_and_panels(self, target_id: str) -> None:
         expression = f'count({{sbk_endpoint_id="{target_id}",__name__=~"SBK_.+"}})'
         query = urllib.parse.urlencode({"query": expression})
         query_script = (
@@ -222,6 +243,57 @@ class ContainerSmoke:
         panels = int(command("docker", "exec", self.name, "python", "-c", panel_script).stdout)
         if panels != 53:
             raise AssertionError(f"Generated dashboard contains {panels} panels instead of 53")
+
+    def _start_test_exporters(self) -> list[tuple[str, int]]:
+        ipv4_script = self._exporter_script("0.0.0.0", 19718, False)
+        ipv6_script = self._exporter_script("::", 19719, True)
+        for name, script in zip(self.exporters, (ipv4_script, ipv6_script), strict=True):
+            command(
+                "docker",
+                "run",
+                "--detach",
+                "--name",
+                name,
+                "--network",
+                self.network,
+                "--entrypoint",
+                "python",
+                self.image,
+                "-c",
+                script,
+            )
+        ipv4_network = self._container_network(self.exporters[0])
+        ipv6_network = self._container_network(self.exporters[1])
+        ipv4 = str(ipv4_network["IPAddress"])
+        ipv6 = str(ipv6_network["GlobalIPv6Address"])
+        if not ipv4 or not ipv6:
+            raise AssertionError(f"Docker did not assign remote test addresses: IPv4={ipv4!r}, IPv6={ipv6!r}")
+        return [(ipv4, 19718), (ipv6, 19719)]
+
+    def _container_network(self, name: str) -> dict[str, Any]:
+        details = json.loads(command("docker", "inspect", name).stdout)[0]
+        network: dict[str, Any] = details["NetworkSettings"]["Networks"][self.network]
+        return network
+
+    @staticmethod
+    def _exporter_script(address: str, port: int, ipv6: bool) -> str:
+        family = "socket.AF_INET6" if ipv6 else "socket.AF_INET"
+        return (
+            "import socket\n"
+            "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+            "class Handler(BaseHTTPRequestHandler):\n"
+            " def do_GET(self):\n"
+            "  body=b'# TYPE SBK_DockerSmoke gauge\\nSBK_DockerSmoke 1\\n'\n"
+            "  self.send_response(200)\n"
+            "  self.send_header('Content-Type','text/plain; version=0.0.4')\n"
+            "  self.send_header('Content-Length',str(len(body)))\n"
+            "  self.end_headers()\n"
+            "  self.wfile.write(body)\n"
+            " def log_message(self, format, *args): pass\n"
+            "class Server(ThreadingHTTPServer): pass\n"
+            f"Server.address_family={family}\n"
+            f"Server(({address!r},{port}),Handler).serve_forever()\n"
+        )
 
     def _capture_processes(self) -> None:
         identifiers, output = process_ids(self.name)

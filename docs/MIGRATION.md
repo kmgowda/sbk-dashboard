@@ -91,3 +91,8 @@ it and must not be used during a normal upgrade.
 Inside a container, `127.0.0.1` identifies the container itself. Register an exporter running on the Docker host as
 `host.docker.internal` (the supplied Compose file adds the host-gateway mapping), or use a routable DNS/IP address
 for a remote endpoint. See `docs/DOCKER.md` for the complete procedure.
+
+The production container base is now pinned to Python 3.12.13 on Debian Trixie by immutable multi-architecture
+digest, and container CI is pinned to Ubuntu 24.04. This changes only the packaged Linux userspace and build runner;
+application behavior, persisted data, endpoint identity, and native deployment support are unchanged. Compose now
+enables IPv6 on its bridge so literal IPv6 targets can be scraped when the Docker host has working IPv6 routing.

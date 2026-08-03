@@ -100,6 +100,10 @@ runtime data as source material.
   activation commands when alternatives are also documented.
 - Downloaded archives require HTTPS, pinned SHA-256, traversal-safe extraction, partial-file cleanup, and atomic
   installation.
+- Container bases require an official supported distribution, complete language patch version, and reviewed
+  multi-architecture digest. Container CI uses an explicit stable runner label rather than a moving `-latest` label.
+- Preserve outbound DNS, IPv4, and IPv6 endpoint scraping through the Compose bridge; IPv6 operation still depends
+  on Docker-host and upstream routing.
 
 ## Source map
 

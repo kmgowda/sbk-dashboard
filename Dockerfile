@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
 
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_BASE=python:3.12.13-slim-trixie@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS package-builder
+FROM ${PYTHON_BASE} AS package-builder
 WORKDIR /source
 COPY LICENSE README.md pyproject.toml ./
 COPY src ./src
 RUN python -m pip wheel --disable-pip-version-check --wheel-dir /wheels .
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS native-tools
+FROM ${PYTHON_BASE} AS native-tools
 ARG TARGETARCH
 ARG PROMETHEUS_VERSION=3.10.0
 ARG PROMETHEUS_AMD64_SHA256=41c50d97bb6a181623fc89d3fe61d0cc68ee69cc93da9091b8bba005f9690122
@@ -29,9 +29,11 @@ RUN set -eux; \
     esac; \
     prometheus_archive="prometheus-${PROMETHEUS_VERSION}.linux-${native_arch}.tar.gz"; \
     grafana_archive="grafana_${GRAFANA_VERSION}_${GRAFANA_BUILD}_linux_${native_arch}.tar.gz"; \
-    curl --fail --location --retry 3 --output "/tmp/${prometheus_archive}" \
+    curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      --output "/tmp/${prometheus_archive}" \
       "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${prometheus_archive}"; \
-    curl --fail --location --retry 3 --output "/tmp/${grafana_archive}" \
+    curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      --output "/tmp/${grafana_archive}" \
       "https://dl.grafana.com/grafana/release/${GRAFANA_VERSION}/${grafana_archive}"; \
     echo "${prometheus_sha}  /tmp/${prometheus_archive}" | sha256sum --check --strict; \
     echo "${grafana_sha}  /tmp/${grafana_archive}" | sha256sum --check --strict; \
@@ -43,7 +45,7 @@ RUN set -eux; \
     test -x /opt/grafana/bin/grafana; \
     rm -f "/tmp/${prometheus_archive}" "/tmp/${grafana_archive}"
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
+FROM ${PYTHON_BASE} AS runtime
 ARG APPLICATION_VERSION=1.26.8.1
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="SBK Dashboard" \

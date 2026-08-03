@@ -23,3 +23,7 @@ services:
 
 volumes:
   sbk-dashboard-data:
+
+networks:
+  default:
+    enable_ipv6: true

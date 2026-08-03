@@ -45,10 +45,12 @@ docker build --tag sbk-dashboard:test .
 python tests/container_smoke.py --image sbk-dashboard:test
 ```
 
-It starts a uniquely named disposable container and volume, validates landing/Grafana host access, registers a
-target, follows its generated dashboard URL, verifies only 9721 and 3000 are published, stops cleanly, checks that
-the recorded native PIDs no longer exist, restarts with the same volume, and verifies registrations/dashboard state
-survive. Its `finally` cleanup removes only those uniquely named artifacts.
+It starts a uniquely named IPv6-enabled bridge, two synthetic remote exporters, a disposable dashboard container,
+and a volume. The exporters are registered by their literal container IPv4 and IPv6 addresses, proving that
+Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
+host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
+clean shutdown, absence of recorded native PIDs, and registration/dashboard persistence across a full restart. Its
+`finally` cleanup removes only those uniquely named containers, network, and volume.
 
 For real SBK integration, expose a non-default host exporter port for at least 120 seconds:
 
@@ -73,8 +75,9 @@ This mode additionally requires the target to become `up`, verifies endpoint-sco
 container's internal Prometheus, counts exactly 53 panels in the generated dashboard, and repeats those assertions
 after a full container restart. Stop SBK and remove only `/tmp/sbk-dashboard-container-test.bin` afterward.
 
-CI builds/runs Linux AMD64 and builds Linux ARM64 under QEMU. A successful QEMU build is not a native ARM runtime
-claim. Docker Desktop behavior on macOS/Windows and native ARM execution still require their respective smoke tests.
+CI uses the stable `ubuntu-24.04` runner, builds/runs Linux AMD64, and builds Linux ARM64 under QEMU. A successful
+QEMU build is not a native ARM runtime claim. Docker Desktop behavior on macOS/Windows and native ARM execution still
+require their respective smoke tests.
 
 Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
 wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.

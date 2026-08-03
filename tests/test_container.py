@@ -5,6 +5,10 @@ from pathlib import Path
 from sbk_dashboard.version import VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
+PYTHON_BASE = (
+    "python:3.12.13-slim-trixie@"
+    "sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de"
+)
 
 
 class ContainerContractTest(unittest.TestCase):
@@ -18,6 +22,9 @@ class ContainerContractTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
     def test_image_runs_as_non_root_with_persistent_data_and_two_public_ports(self):
+        self.assertIn(f"ARG PYTHON_BASE={PYTHON_BASE}", self.dockerfile)
+        self.assertEqual(3, self.dockerfile.count("FROM ${PYTHON_BASE}"))
+        self.assertNotIn("slim-bookworm", self.dockerfile)
         self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
         self.assertIn(f"image: sbk-dashboard:{VERSION}", self.compose)
         self.assertIn("USER 10001:10001", self.dockerfile)
@@ -36,6 +43,7 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("host.docker.internal:host-gateway", self.compose)
         self.assertIn("no-new-privileges:true", self.compose)
         self.assertIn("cap_drop:", self.compose)
+        self.assertIn("enable_ipv6: true", self.compose)
 
     def test_image_native_versions_and_checksums_match_packaged_bootstrap(self):
         expected = {
@@ -71,6 +79,8 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("platforms: linux/amd64,linux/arm64", self.workflow)
         self.assertIn("ghcr.io/${{ github.repository }}", self.workflow)
         self.assertIn("Verify release tag matches the package version", self.workflow)
+        self.assertEqual(2, self.workflow.count("runs-on: ubuntu-24.04"))
+        self.assertNotIn("ubuntu-latest", self.workflow)
 
     def _argument(self, name):
         match = re.search(rf"^ARG {re.escape(name)}=([^\s]+)$", self.dockerfile, re.MULTILINE)

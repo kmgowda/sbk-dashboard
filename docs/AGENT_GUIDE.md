@@ -229,9 +229,12 @@ to make a test convenient.
 2. Keep Prometheus internal; publish only management 9721 and Grafana 3000.
 3. Keep `/var/lib/sbk-dashboard` on a persistent volume and never bake runtime state into an image layer.
 4. Synchronize application/native versions and pinned SHA-256 values with `version.py` and packaged properties.
+   Keep the official Python base on a supported Debian stable generation, pin its complete patch tag and
+   multi-architecture digest, and update that digest deliberately with full AMD64/ARM64 validation.
 5. Validate both Dockerfile/Compose contracts and `tests/container_smoke.py`; run the real-SBK mode for lifecycle,
    metrics, 53-panel provisioning, and restart persistence changes.
-6. Build both `linux/amd64` and `linux/arm64`; do not claim native ARM execution from a QEMU build-only check.
+6. Build both `linux/amd64` and `linux/arm64`; test literal IPv4 and IPv6 scrape addresses on an IPv6-enabled bridge,
+   and do not claim native ARM execution from a QEMU build-only check.
 7. Update `docs/DOCKER.md`, and remove only the exact disposable containers/volumes/files created by validation.
 
 ## Debugging guide

@@ -238,15 +238,17 @@ Python control plane, two guardians, one native Prometheus process, and one nati
 process retains configuration, reconciliation, supervision, and cleanup ownership. Prometheus remains loopback-only
 inside the container; only management port 9721 and Grafana port 3000 are published to the host.
 
-The image runs as UID/GID 10001, embeds checksum-pinned official AMD64 or ARM64 Linux native tools, and stores the
-entire data root in `/var/lib/sbk-dashboard`. A persistent volume therefore preserves endpoint registrations,
+The image runs as UID/GID 10001, uses a digest-pinned official Python 3.12 slim image on the current Debian stable
+generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools, and stores the entire data root in
+`/var/lib/sbk-dashboard`. A persistent volume therefore preserves endpoint registrations,
 generated mappings/dashboards, Prometheus TSDB history, Grafana state, and process logs across replacement. `tini`
 forwards termination and reaps children, while the existing guardians retain hard-parent-death protection.
 
 Compose adds `host.docker.internal:host-gateway`, allowing container Prometheus to scrape an SBK exporter on the
-Docker host. Remote exporters use normal routable DNS/IP addresses. Request-derived Grafana URLs continue to use the
-hostname by which the browser reached port 9721 and retain Grafana port 3000, so localhost, public IP, and DNS access
-remain consistent without persisting client-specific routing.
+Docker host, and enables IPv6 on its user-defined bridge. Remote exporters use normal routable DNS, IPv4, or IPv6
+addresses; outbound access follows the Docker host's routes and firewall policy. Request-derived Grafana URLs continue
+to use the hostname by which the browser reached port 9721 and retain Grafana port 3000, so localhost, public IP, and
+DNS access remain consistent without persisting client-specific routing.
 
 Docker Desktop can run this Linux image on macOS and Windows. That is distinct from the directly installed native
 macOS/Windows Python application and native tool archives. Kubernetes and a split-service Compose topology remain

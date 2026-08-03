@@ -34,8 +34,8 @@ The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
-- Non-root Linux container image for AMD64 and ARM64, with pinned native tools, persistent state, health checks,
-  graceful lifecycle handling, and host-published management/Grafana ports.
+- Non-root Linux container image for AMD64 and ARM64, with an immutable Python 3.12/Debian stable base, pinned native
+  tools, IPv4/IPv6 endpoint routing, persistent state, health checks, and host-published management/Grafana ports.
 
 ## Architecture
 
@@ -84,7 +84,8 @@ and 3000.
 
 When SBK runs on the Docker host, register `host.docker.internal` and its exporter port instead of `127.0.0.1`;
 Compose installs the portable host-gateway mapping. A remote SBK endpoint should be registered with its normal DNS
-name or IP address. Prometheus port 9090 is deliberately not published.
+name, IPv4 address, or IPv6 address. The Compose network enables IPv6, but the Docker host and upstream network must
+also provide IPv6 routing. Prometheus port 9090 is deliberately not published.
 
 For a released image without a source checkout:
 
