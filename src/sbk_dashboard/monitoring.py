@@ -7,6 +7,7 @@ import logging
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,20 @@ from sbk_dashboard.provisioning import (
 )
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MonitoringStatusSummary:
+    """Bounded immutable snapshot used by the periodic control-plane heartbeat."""
+
+    stack_state: str
+    prometheus_healthy: bool
+    grafana_healthy: bool
+    endpoints: int
+    up: int
+    down: int
+    pending: int
+    unknown: int
 
 
 class ManagedMonitoringStack:
@@ -131,6 +146,28 @@ class ManagedMonitoringStack:
     def healthy(self) -> bool:
         return self.lifecycle.state == LifecycleState.RUNNING and bool(self._services) and all(
             service.healthy() for service in self._services
+        )
+
+    def summary(self) -> MonitoringStatusSummary:
+        """Return one lock-bounded status snapshot without network or process waits."""
+        services = self._services
+        prometheus_healthy = len(services) > 0 and services[0].healthy()
+        grafana_healthy = len(services) > 1 and services[1].healthy()
+        counts = {"up": 0, "down": 0, "pending": 0, "unknown": 0}
+        with self._data_lock:
+            endpoints = len(self._targets)
+            for status in self._statuses.values():
+                state = status.state if status.state in counts else "unknown"
+                counts[state] += 1
+        return MonitoringStatusSummary(
+            self.lifecycle.state.value,
+            prometheus_healthy,
+            grafana_healthy,
+            endpoints,
+            counts["up"],
+            counts["down"],
+            counts["pending"],
+            counts["unknown"],
         )
 
     def close(self) -> None:

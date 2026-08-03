@@ -3,10 +3,10 @@ import io
 import socket
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from sbk_dashboard.config import parse_configuration
-from sbk_dashboard.main import dashboard_links, main, print_effective, print_runtime, run
+from sbk_dashboard.main import dashboard_links, log_status, main, print_effective, print_runtime, run
 
 
 class MainTest(unittest.TestCase):
@@ -22,6 +22,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(0, stopped.exception.code)
         self.assertIn("Python version:", error.getvalue())
         self.assertIn("-continue", output.getvalue())
+        self.assertIn("-status-seconds", output.getvalue())
 
     def test_invalid_configuration_exits_with_usage_error(self):
         error = io.StringIO()
@@ -39,6 +40,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("Supplied arguments: (none)", text)
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
+        self.assertIn("status-seconds=60 [default]", text)
 
     def test_dashboard_links_always_include_loopback(self):
         links = dashboard_links(9721)
@@ -46,6 +48,13 @@ class MainTest(unittest.TestCase):
         self.assertEqual("http://127.0.0.1:9721/", links[1])
         self.assertEqual(["http://198.51.100.8:9721/"], dashboard_links(9721, "198.51.100.8"))
         self.assertEqual(["http://[::1]:9721/"], dashboard_links(9721, "::1"))
+
+    def test_periodic_status_failure_is_non_fatal(self):
+        monitoring = MagicMock()
+        monitoring.summary.side_effect = RuntimeError("snapshot unavailable")
+        with self.assertLogs("sbk_dashboard.main", level="WARNING") as captured:
+            log_status(MagicMock(), monitoring)
+        self.assertIn("Unable to produce periodic status: snapshot unavailable", "\n".join(captured.output))
 
     @patch("sbk_dashboard.main.psutil.net_if_addrs")
     def test_wildcard_dashboard_links_match_bound_address_family(self, addresses):
@@ -79,6 +88,36 @@ class MainTest(unittest.TestCase):
         server_type.return_value.start.assert_called_once_with()
         server_type.return_value.close.assert_called_once_with()
         monitoring_type.return_value.close.assert_called_once_with()
+
+    @patch("sbk_dashboard.main.signal.signal", return_value=0)
+    @patch("sbk_dashboard.main.threading.Event")
+    @patch("sbk_dashboard.main.DashboardHttpServer")
+    @patch("sbk_dashboard.main.ManagedMonitoringStack")
+    @patch("sbk_dashboard.main.TargetRegistry")
+    def test_run_prints_periodic_short_status_at_configured_interval(
+        self, _registry_type, monitoring_type, server_type, event_type, _signal
+    ):
+        configuration = parse_configuration(["-status-seconds", "7"], {})
+        event_type.return_value.wait.side_effect = [False, True]
+        server_type.return_value.lifecycle.state.value = "running"
+        monitoring_type.return_value.summary.return_value = SimpleNamespace(
+            stack_state="running",
+            prometheus_healthy=True,
+            grafana_healthy=False,
+            endpoints=3,
+            up=1,
+            down=1,
+            pending=1,
+            unknown=0,
+        )
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            run(configuration, configuration.monitoring)
+        self.assertEqual([call(7), call(7)], event_type.return_value.wait.call_args_list)
+        self.assertIn(
+            "Status: server=running stack=running prometheus=up grafana=down "
+            "endpoints=3 up=1 down=1 pending=1 unknown=0",
+            "\n".join(captured.output),
+        )
 
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")

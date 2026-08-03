@@ -91,7 +91,8 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             "Persistent history retention: %s day(s) per endpoint", configuration.dashboard.retention_days
         )
         print_effective(configuration, monitoring_configuration)
-        stopped.wait()
+        while not stopped.wait(configuration.dashboard.status_interval_seconds):
+            log_status(server, monitoring)
     finally:
         shutdown_errors: list[str] = []
         try:
@@ -125,6 +126,7 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
         "continue": dashboard.continue_existing, "data": dashboard.data_directory,
         "retention-days": dashboard.retention_days, "scrape-seconds": dashboard.scrape_interval_seconds,
         "bind": dashboard.bind_address, "log-level": dashboard.log_level,
+        "status-seconds": dashboard.status_interval_seconds,
         "prometheus-bin": monitoring.prometheus_binary, "prometheus-port": monitoring.prometheus_port,
         "prometheus-bind": monitoring.prometheus_bind_address,
         "grafana-home": monitoring.grafana_home, "grafana-port": monitoring.grafana_port,
@@ -165,6 +167,26 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
     for name, (value, environment) in operational.items():
         source = f"environment {environment}" if os.environ.get(environment) else "default"
         LOGGER.info("  %s=%s [%s]", name, value, source)
+
+
+def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) -> None:
+    """Log one concise, non-blocking status snapshot."""
+    try:
+        summary = monitoring.summary()
+        LOGGER.info(
+            "Status: server=%s stack=%s prometheus=%s grafana=%s endpoints=%s up=%s down=%s pending=%s unknown=%s",
+            server.lifecycle.state.value,
+            summary.stack_state,
+            "up" if summary.prometheus_healthy else "down",
+            "up" if summary.grafana_healthy else "down",
+            summary.endpoints,
+            summary.up,
+            summary.down,
+            summary.pending,
+            summary.unknown,
+        )
+    except Exception as error:  # a diagnostic heartbeat must never terminate the production server
+        LOGGER.warning("Unable to produce periodic status: %s", error)
 
 
 def dashboard_links(port: int, bind_address: str = "0.0.0.0") -> list[str]:

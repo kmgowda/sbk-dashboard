@@ -23,6 +23,7 @@ health, and shutdown.
 - Least-privilege service binding: Prometheus is loopback-only by default, with independent management and Grafana
   bind controls.
 - Timestamped, leveled control-plane logging suitable for journald, launchd, and Windows service wrappers.
+- Concise periodic runtime status with a configurable interval and a 60-second default.
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
@@ -120,6 +121,7 @@ Defaults:
 - Prometheus retention: 7 days
 - Scrape interval: 5 seconds
 - Existing-process continuation: disabled
+- Short-status interval: 60 seconds
 
 Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
 all effective options and their sources, and dashboard links reachable through the configured address family. An
@@ -143,7 +145,8 @@ sbk-dashboard \
   -grafana-home /opt/grafana \
   -grafana-port 3000 \
   -grafana-bind 0.0.0.0 \
-  -grafana-url http://dashboard.example.com:3000
+  -grafana-url http://dashboard.example.com:3000 \
+  -status-seconds 60
 ```
 
 When `-grafana-url` is not supplied, every generated dashboard link follows the hostname or IP address used to open
@@ -173,6 +176,7 @@ from Grafana's local listen address.
 -grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
+-status-seconds <seconds>     Periodic short-status interval (default 60; range 1-86400)
 -monitoring-properties <file> Download URLs, checksums, and install directories
 ```
 
@@ -192,6 +196,7 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_GRAFANA_BIND` | Fallback for `-grafana-bind`; default `0.0.0.0` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
 | `SBK_DASHBOARD_LOG_LEVEL` | Fallback for `-log-level`; default `INFO` |
+| `SBK_DASHBOARD_STATUS_SECONDS` | Fallback for `-status-seconds`; default 60, maximum 86,400 |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
 | `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
 | `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |

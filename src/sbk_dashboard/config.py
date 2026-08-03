@@ -18,6 +18,7 @@ DEFAULT_PORT = 9721
 DEFAULT_PROMETHEUS_PORT = 9090
 DEFAULT_GRAFANA_PORT = 3000
 DEFAULT_RETENTION_DAYS = 7
+DEFAULT_STATUS_INTERVAL_SECONDS = 60
 
 
 def _select(option: str | None, environment: dict[str, str], variable: str, default: str) -> tuple[str, str]:
@@ -113,6 +114,7 @@ class DashboardConfig:
     target_health_timeout_seconds: int = 4
     prometheus_startup_timeout_seconds: int = 45
     grafana_startup_timeout_seconds: int = 120
+    status_interval_seconds: int = DEFAULT_STATUS_INTERVAL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -180,6 +182,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
     result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+    result.add_argument(
+        "-status-seconds",
+        metavar="seconds",
+        help="periodic short-status interval seconds (default: 60)",
+    )
     result.add_argument("-monitoring-properties", metavar="file", help="native download properties file")
     return result
 
@@ -203,6 +210,15 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
     scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
+    status_interval, status_interval_source = _select(
+        namespace.status_seconds,
+        environment,
+        "SBK_DASHBOARD_STATUS_SECONDS",
+        str(DEFAULT_STATUS_INTERVAL_SECONDS),
+    )
+    selected_status_interval = _positive(status_interval, "status interval")
+    if selected_status_interval > 86_400:
+        raise ValueError("status interval must be between 1 and 86400 seconds")
     http_workers = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_WORKERS", 8, 1, 128)
     http_queue = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_QUEUE", 64, 0, 10_000)
     request_timeout = _bounded_environment(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS", 15, 1, 300)
@@ -227,7 +243,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,
-         "bind": bind_source, "log-level": log_level_source},
+         "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source},
         http_workers,
         http_queue,
         request_timeout,
@@ -241,6 +257,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         target_health_timeout,
         prometheus_startup_timeout,
         grafana_startup_timeout,
+        selected_status_interval,
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")

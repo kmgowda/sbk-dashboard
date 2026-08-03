@@ -120,6 +120,7 @@ Important defaults:
 | Client timeout | 15 seconds |
 | Max endpoints | 10,000 |
 | Native log generation/backups | 10 MiB / 3 |
+| Periodic short status | 60 seconds |
 | Target-health timeout | 4 seconds |
 | Prometheus/Grafana startup | 45 / 120 seconds |
 

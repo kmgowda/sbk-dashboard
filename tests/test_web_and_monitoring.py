@@ -7,9 +7,10 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig
-from sbk_dashboard.models import TargetStatus
+from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import LifecycleState, PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
@@ -231,6 +232,37 @@ class MonitoringContinueTest(unittest.TestCase):
         monitoring = MonitoringConfig(binary, data / "unused", 19090, 3000, "http://localhost:3000", {})
         command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
         self.assertIn("--web.listen-address=127.0.0.1:19090", command)
+
+    def test_status_summary_is_bounded_to_published_snapshots(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(Path("unused"), data / "unused", 19090, 3000, "http://localhost:3000", {})
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        targets = tuple(
+            BenchmarkTarget(str(index), f"Run {index}", "127.0.0.1", 9718 + index, "/metrics", "SBK", "now")
+            for index in range(4)
+        )
+        stack.lifecycle.transition(LifecycleState.STARTING)
+        stack.lifecycle.transition(LifecycleState.RUNNING)
+        stack._services = (
+            SimpleNamespace(healthy=lambda: True),
+            SimpleNamespace(healthy=lambda: False),
+        )
+        with stack._data_lock:
+            stack._targets = targets
+            stack._statuses = {
+                "0": TargetStatus("up"),
+                "1": TargetStatus("down"),
+                "2": TargetStatus("pending"),
+                "3": TargetStatus("unexpected"),
+            }
+        summary = stack.summary()
+        self.assertEqual("running", summary.stack_state)
+        self.assertTrue(summary.prometheus_healthy)
+        self.assertFalse(summary.grafana_healthy)
+        self.assertEqual((4, 1, 1, 1, 1), (
+            summary.endpoints, summary.up, summary.down, summary.pending, summary.unknown
+        ))
 
     @staticmethod
     def _service(routes):

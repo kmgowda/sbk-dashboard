@@ -38,6 +38,9 @@ cover AAAA-only DNS bind names, and permit Windows reuse only for confirmed `TIM
 regressions also verify that an unavailable log destination still drains output beyond pipe capacity, a transient
 write failure recovers after bounded backoff, a stuck log pump is reported while ownership cleanup still executes,
 and captured descendants are force-cleaned when their parent disappears during external-process termination.
+Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
+range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
+non-fatal handling of a reporting failure.
 
 ## Manual Linux end-to-end test
 
@@ -93,6 +96,10 @@ Prometheus history remain. Prometheus and Grafana child PIDs started by that inv
 Startup logs must include a timestamp and level, and must report effective bind addresses, startup deadlines,
 target-health timeout, and the source of every CLI-backed setting. Run once with `-log-level DEBUG` and once with
 `SBK_DASHBOARD_LOG_LEVEL=WARNING` to verify precedence and filtering.
+
+Run once with `-status-seconds 5` and leave the application active for at least 12 seconds. Confirm at least two
+`Status:` records appear, each containing server/stack state, Prometheus and Grafana health, and endpoint totals for
+`up`, `down`, `pending`, and `unknown`. Stop the application and confirm no additional status appears after shutdown.
 
 ## venv and Conda checks
 

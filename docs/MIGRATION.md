@@ -40,3 +40,7 @@ Prometheus and Grafana console logs remain in bounded rotating files under the m
 
 Grafana's default startup deadline is now 120 seconds; Prometheus remains 45 seconds. Persistent JSON remains
 backward compatible and needs no data migration.
+
+The Python server emits one concise INFO-level runtime status every 60 seconds by default. Use
+`-status-seconds <1-86400>` or `SBK_DASHBOARD_STATUS_SECONDS` to change the interval. This is operational output only;
+it adds no persisted field and requires no data migration.

@@ -76,6 +76,9 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
   state. The map is capped by the configured endpoint limit.
 - One supervisor thread checks both native services and refreshes target state. It sleeps on a shutdown event, so
   shutdown interrupts the wait without polling delay.
+- The composition-root thread waits on the shutdown signal with the configured status interval and logs one
+  immutable, non-networked summary of HTTP lifecycle, monitoring lifecycle, native health, and endpoint-state counts.
+  The default interval is 60 seconds and is bounded between one second and one day.
 - Target refresh has a bounded configurable timeout. Prometheus and Grafana have separate bounded startup deadlines
   because Grafana initialization can be materially slower on constrained hosts.
 - Each owned service has one 64 KiB chunked log-pump thread. Pipes are continuously drained, logs are bounded and
@@ -165,6 +168,9 @@ manager should supervise the Python process; its internal supervisor is responsi
 
 The Python control plane uses standard logging with timestamps and severity levels. Native child output remains
 separately drained and rotated so neither Python logging nor a blocked process pipe can grow without bound.
+Periodic status is a single concise INFO record; it reads only already-published bounded snapshots and does not add
+another thread, health request, retry loop, or retained history. A snapshot/reporting error emits a warning and does
+not terminate the server.
 
 ## Cross-platform strategy
 
