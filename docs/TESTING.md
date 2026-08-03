@@ -118,7 +118,13 @@ target-health timeout, and the source of every CLI-backed setting. Run once with
 
 Run once with `-status-seconds 5` and leave the application active for at least 12 seconds. Confirm at least two
 `Status:` records appear, each containing server/stack state, Prometheus and Grafana health, and endpoint totals for
-`up`, `down`, `pending`, and `unknown`. Stop the application and confirm no additional status appears after shutdown.
+`up`, `down`, `pending`, and `unknown`, plus `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. Stop the
+application and confirm no additional status appears after shutdown.
+
+Client-activity regressions validate URL-safe opaque IDs, invalid surface/method rejection, same-browser de-duplication
+across landing and Grafana categories, per-category capacity eviction, exact two-/five-minute expiry, and the
+30-second browser heartbeat/dashboard-click hooks. Native Prometheus and Grafana configuration and routing remain
+unchanged; direct native-server clients are deliberately not asserted as observable.
 
 ## venv and Conda checks
 

@@ -87,6 +87,9 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
   state. The map is capped by the configured endpoint limit.
 - One supervisor thread checks both native services and refreshes target state. It sleeps on a shutdown event, so
   shutdown interrupts the wait without polling delay.
+- Recent browser activity uses two fixed-capacity LRU maps under one short-held lock. Landing heartbeats expire after
+  two minutes; Grafana opens initiated by the landing page expire after five minutes. Only opaque per-tab IDs and
+  monotonic timestamps are retained, with no persistence, IP history, extra worker, or native-server request.
 - The composition-root thread waits on the shutdown signal with the configured status interval and logs one
   immutable, non-networked summary of HTTP lifecycle, monitoring lifecycle, native health, and endpoint-state counts.
   The default interval is 60 seconds and is bounded between one second and one day.
@@ -178,9 +181,9 @@ describe state and policies, while lifecycle-owning objects encapsulate mutation
 ## Resource bounds and 24/7 operation
 
 Python-side growth is bounded by the endpoint limit, fixed HTTP workers/queue, maximum request/health payloads, one
-status per endpoint, two child descriptors, and fixed log generations. Repeated warning text is emitted only when the
-failure changes, avoiding identical five-second log spam. Endpoint reconciliation serializes one dashboard clone at
-a time rather than retaining all cloned JSON trees.
+status per endpoint, two 10,000-entry recent-client maps, two child descriptors, and fixed log generations. Repeated
+warning text is emitted only when the failure changes, avoiding identical five-second log spam. Endpoint
+reconciliation serializes one dashboard clone at a time rather than retaining all cloned JSON trees.
 
 Prometheus TSDB memory/disk use and Grafana query memory remain native-service concerns. Time retention constrains
 Prometheus history, while operators must size the VM for metric cardinality and dashboard query load. A host service
@@ -188,9 +191,13 @@ manager should supervise the Python process; its internal supervisor is responsi
 
 The Python control plane uses standard logging with timestamps and severity levels. Native child output remains
 separately drained and rotated so neither Python logging nor a blocked process pipe can grow without bound.
-Periodic status is a single concise INFO record; it reads only already-published bounded snapshots and does not add
-another thread, health request, retry loop, or retained history. A snapshot/reporting error emits a warning and does
-not terminate the server.
+Periodic status is a single concise INFO record; it reads only already-published endpoint/native snapshots and the
+bounded recent-client maps. It does not add another thread, native health request, retry loop, or persisted history.
+A snapshot/reporting error emits a warning and does not terminate the server.
+
+Prometheus and Grafana remain direct native servers rather than Python-proxied routes. Consequently the control plane
+does not claim visibility into users who directly bookmark Grafana or call Prometheus. `grafana_opens_5m` means recent
+dashboard opens initiated from the landing page, not continuously active Grafana sessions.
 
 ## Cross-platform strategy
 

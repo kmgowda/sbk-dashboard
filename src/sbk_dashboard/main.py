@@ -173,8 +173,10 @@ def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) 
     """Log one concise, non-blocking status snapshot."""
     try:
         summary = monitoring.summary()
+        clients = server.client_activity()
         LOGGER.info(
-            "Status: server=%s stack=%s prometheus=%s grafana=%s endpoints=%s up=%s down=%s pending=%s unknown=%s",
+            "Status: server=%s stack=%s prometheus=%s grafana=%s endpoints=%s up=%s down=%s pending=%s "
+            "unknown=%s clients_recent=%s landing_clients_2m=%s grafana_opens_5m=%s",
             server.lifecycle.state.value,
             summary.stack_state,
             "up" if summary.prometheus_healthy else "down",
@@ -184,6 +186,9 @@ def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) 
             summary.down,
             summary.pending,
             summary.unknown,
+            clients.total,
+            clients.landing,
+            clients.grafana_opens,
         )
     except Exception as error:  # a diagnostic heartbeat must never terminate the production server
         LOGGER.warning("Unable to produce periodic status: %s", error)

@@ -60,3 +60,8 @@ session endpoints. This status correction requires no configuration or data migr
 Landing-page JavaScript and CSS URLs now include a content fingerprint, and all assets require browser revalidation.
 Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
 compatible control script and stylesheet automatically.
+
+Periodic status now reports bounded recent browser activity: `clients_recent`, `landing_clients_2m`, and
+`grafana_opens_5m`. This adds only an in-memory control-plane heartbeat endpoint and opaque per-tab browser IDs; it
+does not change persisted data, command options, native Prometheus/Grafana configuration, or direct-server routing.
+Direct Grafana bookmarks and Prometheus API users remain outside these counts.

@@ -25,6 +25,8 @@ health, and shutdown.
   bind controls.
 - Timestamped, leveled control-plane logging suitable for journald, launchd, and Windows service wrappers.
 - Concise periodic runtime status with a configurable interval and a 60-second default.
+- Bounded recent-client telemetry for active landing-page browser sessions and Grafana dashboards opened from the
+  landing page.
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
@@ -139,6 +141,15 @@ after a successful scrape.
 The landing page uses a content fingerprint in its JavaScript and stylesheet URLs and also requires browsers to
 revalidate those resources. This prevents an upgrade from combining new HTML with an older cached script and
 displaying stale endpoint counters.
+
+The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
+opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,
+and clicking **Open dashboard** records that browser in a five-minute Grafana-open window. IDs and timestamps are
+bounded to 10,000 entries per category, remain only in memory, and are discarded after expiry or restart.
+
+These fields do not modify or proxy native Prometheus/Grafana traffic. Direct Grafana bookmarks and direct
+Prometheus API users bypass the Python server and are therefore not counted. Exact native-server client identity
+would require a reverse proxy or native access-log processing, which is intentionally outside this design.
 
 ### Production example
 

@@ -110,12 +110,18 @@ class MainTest(unittest.TestCase):
             pending=1,
             unknown=0,
         )
+        server_type.return_value.client_activity.return_value = SimpleNamespace(
+            total=2,
+            landing=2,
+            grafana_opens=1,
+        )
         with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
             run(configuration, configuration.monitoring)
         self.assertEqual([call(7), call(7)], event_type.return_value.wait.call_args_list)
         self.assertIn(
             "Status: server=running stack=running prometheus=up grafana=down "
-            "endpoints=3 up=1 down=1 pending=1 unknown=0",
+            "endpoints=3 up=1 down=1 pending=1 unknown=0 clients_recent=2 "
+            "landing_clients_2m=2 grafana_opens_5m=1",
             "\n".join(captured.output),
         )
 

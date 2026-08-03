@@ -6,6 +6,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import LifecycleState, PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
-from sbk_dashboard.web import MAX_REQUEST_BYTES, DashboardHttpServer
+from sbk_dashboard.web import MAX_REQUEST_BYTES, DashboardHttpServer, RecentClientActivity
 
 
 class FakeMonitoring:
@@ -75,6 +76,9 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"updateEndpointSummary(targets);", script)
             self.assertIn(b"target.status.state === 'up'", script)
             self.assertIn(b"target.status.state === 'down'", script)
+            self.assertIn(b"reportActivity('landing');", script)
+            self.assertIn(b"reportActivity('grafana')", script)
+            self.assertIn(b"window.sessionStorage", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
             self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()
@@ -82,6 +86,18 @@ class WebTest(unittest.TestCase):
             self.assertNotIn(b".hero-stat { display: none; }", stylesheet)
         with urllib.request.urlopen(self.base + "/api/health") as response:
             self.assertEqual("ok", json.load(response)["status"])
+        for surface in ("landing", "grafana"):
+            activity = urllib.request.Request(
+                self.base + f"/api/activity/{surface}",
+                method="POST",
+                data=json.dumps({"clientId": "browser-client-0001"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(activity) as response:
+                self.assertEqual(204, response.status)
+                self.assertEqual("no-store", response.headers["Cache-Control"])
+        clients = self.server.client_activity()
+        self.assertEqual((1, 1, 1), (clients.total, clients.landing, clients.grafana_opens))
         request = urllib.request.Request(self.base + "/api/targets", method="POST", data=json.dumps({
             "name": "Run", "host": "127.0.0.1", "port": 9718, "metricsPath": "/metrics",
         }).encode(), headers={"Content-Type": "application/json"})
@@ -117,6 +133,55 @@ class WebTest(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request)
             self.assertEqual(status, caught.exception.code)
+
+    def test_rejects_invalid_client_activity(self):
+        requests = (
+            urllib.request.Request(self.base + "/api/activity/landing", method="GET"),
+            urllib.request.Request(
+                self.base + "/api/activity/unknown",
+                method="POST",
+                data=json.dumps({"clientId": "browser-client-0001"}).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            urllib.request.Request(
+                self.base + "/api/activity/landing",
+                method="POST",
+                data=json.dumps({"clientId": "short"}).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+        )
+        for request, expected in zip(requests, (405, 400, 400), strict=True):
+            with self.subTest(expected=expected), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(expected, caught.exception.code)
+
+    def test_recent_client_activity_is_bounded_and_expires(self):
+        activity = RecentClientActivity(capacity=2)
+        activity.record("landing", "browser-client-0001", now=0)
+        activity.record("landing", "browser-client-0002", now=1)
+        activity.record("landing", "browser-client-0003", now=2)
+        activity.record("grafana", "browser-client-0002", now=2)
+        summary = activity.summary(now=2)
+        self.assertEqual((2, 2, 1), (summary.total, summary.landing, summary.grafana_opens))
+
+        summary = activity.summary(now=121.5)
+        self.assertEqual((2, 1, 1), (summary.total, summary.landing, summary.grafana_opens))
+        summary = activity.summary(now=303)
+        self.assertEqual((0, 0, 0), (summary.total, summary.landing, summary.grafana_opens))
+        with self.assertRaisesRegex(ValueError, "positive"):
+            RecentClientActivity(capacity=0)
+
+    def test_recent_client_activity_remains_bounded_under_concurrency(self):
+        activity = RecentClientActivity(capacity=10)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(
+                executor.map(
+                    lambda index: activity.record("landing", f"browser-client-{index:04d}"),
+                    range(100),
+                )
+            )
+        summary = activity.summary()
+        self.assertEqual((10, 10, 0), (summary.total, summary.landing, summary.grafana_opens))
 
     def test_negative_content_length_cannot_bypass_request_limit(self):
         body = json.dumps({"host": "127.0.0.1", "port": 9718}).encode()

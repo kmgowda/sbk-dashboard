@@ -5,9 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import socket
 import threading
+import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
@@ -21,7 +25,64 @@ from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_TRACKED_CLIENTS = 10_000
+LANDING_ACTIVITY_SECONDS = 120.0
+GRAFANA_ACTIVITY_SECONDS = 300.0
+CLIENT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{16,64}")
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ClientActivitySummary:
+    """Bounded recent-browser snapshot for the periodic operational status."""
+
+    total: int
+    landing: int
+    grafana_opens: int
+
+
+class RecentClientActivity:
+    """Track opaque browser IDs in fixed-size, expiring LRU sets."""
+
+    def __init__(self, capacity: int = MAX_TRACKED_CLIENTS) -> None:
+        if capacity < 1:
+            raise ValueError("Client activity capacity must be positive")
+        self._capacity = capacity
+        self._values: dict[str, OrderedDict[str, float]] = {
+            "landing": OrderedDict(),
+            "grafana": OrderedDict(),
+        }
+        self._lock = threading.Lock()
+
+    def record(self, surface: str, client_id: str, now: float | None = None) -> None:
+        if surface not in self._values:
+            raise ValueError("Activity surface must be landing or grafana")
+        if not CLIENT_ID_PATTERN.fullmatch(client_id):
+            raise ValueError("Client ID must contain 16 to 64 URL-safe characters")
+        observed = time.monotonic() if now is None else now
+        with self._lock:
+            values = self._values[surface]
+            values[client_id] = observed
+            values.move_to_end(client_id)
+            while len(values) > self._capacity:
+                values.popitem(last=False)
+
+    def summary(self, now: float | None = None) -> ClientActivitySummary:
+        observed = time.monotonic() if now is None else now
+        with self._lock:
+            self._expire(self._values["landing"], observed - LANDING_ACTIVITY_SECONDS)
+            self._expire(self._values["grafana"], observed - GRAFANA_ACTIVITY_SECONDS)
+            landing = set(self._values["landing"])
+            grafana = set(self._values["grafana"])
+            return ClientActivitySummary(len(landing | grafana), len(landing), len(grafana))
+
+    @staticmethod
+    def _expire(values: OrderedDict[str, float], deadline: float) -> None:
+        while values:
+            _, timestamp = next(iter(values.items()))
+            if timestamp > deadline:
+                return
+            values.popitem(last=False)
 
 
 class DashboardHttpServer:
@@ -31,6 +92,7 @@ class DashboardHttpServer:
         self.lifecycle = LifecycleController()
         self._close_lock = threading.Lock()
         self._mutation_lock = threading.Lock()
+        self._client_activity = RecentClientActivity()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -86,6 +148,9 @@ class DashboardHttpServer:
             self._server.close_pool()
             self.lifecycle.transition(LifecycleState.STOPPED)
 
+    def client_activity(self) -> ClientActivitySummary:
+        return self._client_activity.summary()
+
     def _handle(self, request: BaseHTTPRequestHandler) -> None:
         path = urlparse(request.path).path
         try:
@@ -95,6 +160,8 @@ class DashboardHttpServer:
                 self._json(request, 200 if healthy else 503,
                            {"status": "ok" if healthy else "degraded", "authentication": False,
                             "targets": len(self.registry.list())})
+            elif path.startswith("/api/activity/"):
+                self._activity(request, path[len("/api/activity/"):])
             elif path == "/api/targets":
                 self._targets(request)
             elif path.startswith("/api/targets/"):
@@ -111,6 +178,17 @@ class DashboardHttpServer:
         except Exception as error:  # defensive HTTP boundary
             LOGGER.exception("Unexpected request failure: %s", error)
             self._json(request, 500, {"error": "Unexpected server error"})
+
+    def _activity(self, request: BaseHTTPRequestHandler, surface: str) -> None:
+        self._require(request, "POST")
+        body = self._read_json(request)
+        client_id = body.get("clientId")
+        if not isinstance(client_id, str):
+            raise ValueError("Client ID must be a string")
+        self._client_activity.record(surface, client_id)
+        request.send_response(HTTPStatus.NO_CONTENT)
+        request.send_header("Cache-Control", "no-store")
+        request.end_headers()
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
         if request.command == "GET":

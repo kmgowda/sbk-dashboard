@@ -5,6 +5,40 @@ const emptyState = document.querySelector('#empty-state');
 const targetCount = document.querySelector('#target-count');
 const upCount = document.querySelector('#up-count');
 const downCount = document.querySelector('#down-count');
+const CLIENT_ID_KEY = 'sbk-dashboard-client-id';
+
+function createClientId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+}
+
+function browserClientId() {
+    try {
+        let value = window.sessionStorage.getItem(CLIENT_ID_KEY);
+        if (!value) {
+            value = createClientId();
+            window.sessionStorage.setItem(CLIENT_ID_KEY, value);
+        }
+        return value;
+    } catch (_error) {
+        return createClientId();
+    }
+}
+
+const clientId = browserClientId();
+
+function reportActivity(surface) {
+    fetch(`/api/activity/${surface}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({clientId}),
+        keepalive: true
+    }).catch(() => {});
+}
 
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -29,6 +63,7 @@ function renderTarget(target) {
     dashboard.href = target.dashboardUrl;
     dashboard.target = '_blank';
     dashboard.rel = 'noopener';
+    dashboard.addEventListener('click', () => reportActivity('grafana'));
     const remove = element('button', 'delete-button', 'Remove');
     remove.type = 'button';
     remove.addEventListener('click', () => deleteTarget(target, remove));
@@ -105,4 +140,6 @@ form.addEventListener('submit', async event => {
 
 document.querySelector('#refresh').addEventListener('click', loadTargets);
 loadTargets();
+reportActivity('landing');
 window.setInterval(loadTargets, 10000);
+window.setInterval(() => reportActivity('landing'), 30000);
