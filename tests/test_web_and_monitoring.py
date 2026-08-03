@@ -59,6 +59,9 @@ class WebTest(unittest.TestCase):
     def test_ui_health_registration_dashboard_and_deletion(self):
         with urllib.request.urlopen(self.base + "/") as response:
             page = response.read()
+            self.assertIn(b"<title>SBK DASHBOARD</title>", page)
+            self.assertIn(b"<h1>SBK DASHBOARD</h1>", page)
+            self.assertNotIn(b"performance control plane", page.lower())
             self.assertIn(b'value="SBK Dashboard"', page)
             self.assertIn(b'value="127.0.0.1"', page)
             self.assertIn(b'id="target-count"', page)
