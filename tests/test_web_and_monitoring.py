@@ -444,7 +444,7 @@ class MonitoringContinueTest(unittest.TestCase):
                     str(promtool.resolve()),
                     "check",
                     "config",
-                    str((data / "monitoring/prometheus/prometheus.yml").resolve()),
+                    str(data / "monitoring/prometheus/prometheus.yml"),
                 ],
                 run.call_args.args[0],
             )
