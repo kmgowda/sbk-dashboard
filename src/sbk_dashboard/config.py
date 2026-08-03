@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from sbk_dashboard.network import normalize_host
+from sbk_dashboard.version import VERSION
 
 DEFAULT_PORT = 9721
 DEFAULT_PROMETHEUS_PORT = 9090
@@ -169,6 +170,7 @@ def parser() -> argparse.ArgumentParser:
         description="SBK/SBM dashboard control server with managed Prometheus and Grafana",
         epilog="Prometheus and Grafana run as child processes; Docker is not required.",
     )
+    result.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
     result.add_argument("-port", default=str(DEFAULT_PORT), metavar="port", help="dashboard HTTP port (default: 9721)")
     result.add_argument("-bind", metavar="address", help="management bind address (default: 0.0.0.0)")
     result.add_argument("-auth", default="false", metavar="true|false", help="false only; reserved for future use")

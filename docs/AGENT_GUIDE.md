@@ -145,6 +145,12 @@ See `README.md` and `config.py` for the complete environment-variable table and 
 
 Bind settings are independent: do not make Prometheus public merely because the management UI or Grafana is public.
 Listener binding and browser-visible Grafana URL resolution are separate contracts.
+
+### Change the release version
+
+Update only `src/sbk_dashboard/version.py`. The `Major.Year.Month.Minor` value flows into setuptools package
+metadata through `pyproject.toml`, normal startup output, and `sbk-dashboard -v`. Validate all three surfaces and
+build both wheel and source distributions; do not add another version literal to application or packaging code.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
 

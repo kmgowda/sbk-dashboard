@@ -105,6 +105,7 @@ runtime data as source material.
 | Path | Responsibility |
 |---|---|
 | `src/sbk_dashboard/main.py` | Composition root, bootstrap, signals, startup output, shutdown |
+| `src/sbk_dashboard/version.py` | Single source of truth for package and runtime version |
 | `src/sbk_dashboard/config.py` | CLI/environment/default precedence, validation, platform/download definitions |
 | `src/sbk_dashboard/network.py` | Shared canonical IP literal and conservative DNS-name validation |
 | `src/sbk_dashboard/web.py` | Bounded HTTP server, REST API, assets, request-host URL resolution |

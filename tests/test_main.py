@@ -23,6 +23,20 @@ class MainTest(unittest.TestCase):
         self.assertIn("Python version:", error.getvalue())
         self.assertIn("-continue", output.getvalue())
         self.assertIn("-status-seconds", output.getvalue())
+        self.assertIn("-v, --version", output.getvalue())
+
+    def test_version_option_prints_application_version(self):
+        output = io.StringIO()
+        error = io.StringIO()
+        with (
+            contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(error),
+            self.assertRaises(SystemExit) as stopped,
+        ):
+            main(["-v"])
+        self.assertEqual(0, stopped.exception.code)
+        self.assertEqual("sbk-dashboard 1.26.8.1\n", output.getvalue())
+        self.assertIn("SBK Dashboard version: 1.26.8.1", error.getvalue())
 
     def test_invalid_configuration_exits_with_usage_error(self):
         error = io.StringIO()
@@ -41,6 +55,7 @@ class MainTest(unittest.TestCase):
             print_effective(configuration, configuration.monitoring)
         text = "\n".join(captured.output)
         self.assertIn("Supplied arguments: (none)", text)
+        self.assertIn("SBK Dashboard version: 1.26.8.1", text)
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)

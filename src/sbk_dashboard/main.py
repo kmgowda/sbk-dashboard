@@ -20,6 +20,7 @@ from sbk_dashboard.bootstrap import NativeToolBootstrap
 from sbk_dashboard.config import MonitoringConfig, ParsedConfiguration, parse_configuration, parser
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.registry import TargetRegistry
+from sbk_dashboard.version import VERSION
 from sbk_dashboard.web import DashboardHttpServer
 
 LOGGER = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
 
 
 def print_runtime(arguments: list[str]) -> None:
+    LOGGER.info("SBK Dashboard version: %s", VERSION)
     LOGGER.info("Python version: %s (%s)", platform.python_version(), platform.python_implementation())
     LOGGER.info("Python executable: %s", sys.executable)
     environment = "Conda" if os.environ.get("CONDA_PREFIX") else "venv" if sys.prefix != sys.base_prefix else "system"

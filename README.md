@@ -8,6 +8,9 @@ This implementation is non-containerized. Prometheus and Grafana are official na
 libraries—and the Python server manages their verified installation, configuration, readiness, reconciliation,
 health, and shutdown.
 
+The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
+`src/sbk_dashboard/version.py` is the single source used by package metadata, startup logging, and `-v` output.
+
 ## Features
 
 - Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints, with live total, up, and
@@ -126,7 +129,8 @@ Defaults:
 - Existing-process continuation: disabled
 - Short-status interval: 60 seconds
 
-Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
+Startup prints the SBK Dashboard version, Python version and executable, environment type, supplied arguments,
+selected native platform,
 all effective options and their sources, and dashboard links reachable through the configured address family. An
 IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
 discovered IPv6 addresses.
@@ -182,6 +186,7 @@ from Grafana's local listen address.
 
 ```text
 -h, --help                    Show help and exit
+-v, --version                 Print the SBK Dashboard version and exit
 -port <port>                  Management HTTP port (default 9721)
 -bind <address>               Management bind address (default 0.0.0.0)
 -auth <true|false>            Must be false in this release

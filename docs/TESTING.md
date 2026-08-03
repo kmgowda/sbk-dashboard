@@ -15,6 +15,7 @@ coverage report
 python -m build --no-isolation
 python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
 sbk-dashboard -h
+sbk-dashboard -v
 ```
 
 The standard-library suite is also runnable without pytest. Promoting `ResourceWarning` to an error checks leaked
