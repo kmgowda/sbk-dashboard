@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 import threading
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +34,20 @@ from sbk_dashboard.provisioning import (
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class MonitoringStatusSummary:
+    """Bounded immutable snapshot used by the periodic control-plane heartbeat."""
+
+    stack_state: str
+    prometheus_healthy: bool
+    grafana_healthy: bool
+    endpoints: int
+    up: int
+    down: int
+    pending: int
+    unknown: int
+
+
 class ManagedMonitoringStack:
     """Facade coordinating native services and endpoint provisioning as one lifecycle."""
 
@@ -48,6 +64,7 @@ class ManagedMonitoringStack:
         self._operation_lock = threading.Lock()
         self._statuses: dict[str, TargetStatus] = {}
         self._targets: tuple[BenchmarkTarget, ...] = ()
+        self._target_generation = 0
         self._data_lock = threading.RLock()
         self._shutdown_event = threading.Event()
         self._supervisor_thread: threading.Thread | None = None
@@ -69,6 +86,7 @@ class ManagedMonitoringStack:
         try:
             self._prepare_configuration()
             self.reconcile(initial_targets)
+            self._validate_prometheus_configuration()
             if not self.dashboard.continue_existing:
                 PortProcessManager.terminate_existing(
                     self.monitoring.prometheus_port,
@@ -110,6 +128,7 @@ class ManagedMonitoringStack:
         with self._data_lock:
             previous = self._statuses
             self._targets = snapshot
+            self._target_generation += 1
             self._statuses = {
                 target.id: previous.get(
                     target.id, TargetStatus("pending", now, "Waiting for Prometheus target discovery")
@@ -131,6 +150,28 @@ class ManagedMonitoringStack:
     def healthy(self) -> bool:
         return self.lifecycle.state == LifecycleState.RUNNING and bool(self._services) and all(
             service.healthy() for service in self._services
+        )
+
+    def summary(self) -> MonitoringStatusSummary:
+        """Return one lock-bounded status snapshot without network or process waits."""
+        services = self._services
+        prometheus_healthy = len(services) > 0 and services[0].healthy()
+        grafana_healthy = len(services) > 1 and services[1].healthy()
+        counts = {"up": 0, "down": 0, "pending": 0, "unknown": 0}
+        with self._data_lock:
+            endpoints = len(self._targets)
+            for status in self._statuses.values():
+                state = status.state if status.state in counts else "unknown"
+                counts[state] += 1
+        return MonitoringStatusSummary(
+            self.lifecycle.state.value,
+            prometheus_healthy,
+            grafana_healthy,
+            endpoints,
+            counts["up"],
+            counts["down"],
+            counts["pending"],
+            counts["unknown"],
         )
 
     def close(self) -> None:
@@ -162,6 +203,8 @@ class ManagedMonitoringStack:
     def refresh_statuses(self) -> None:
         """Publish an immutable replacement status map from one bounded Prometheus response."""
         try:
+            with self._data_lock:
+                requested_generation = self._target_generation
             url = f"http://{self._prometheus_host()}:{self.monitoring.prometheus_port}/api/v1/targets?state=active"
             with urllib.request.urlopen(url, timeout=self.dashboard.target_health_timeout_seconds) as response:
                 if response.status != 200:
@@ -178,13 +221,16 @@ class ManagedMonitoringStack:
                 for item in payload.get("data", {}).get("activeTargets", [])
             }
             with self._data_lock:
+                if requested_generation != self._target_generation:
+                    LOGGER.debug("Discarding Prometheus target health from an obsolete reconciliation generation")
+                    return
                 targets = self._targets
                 next_statuses: dict[str, TargetStatus] = {}
                 for target in targets:
                     observed = active.get(target.id)
                     if observed is None:
                         next_statuses[target.id] = TargetStatus(
-                            "pending", _now(), "Prometheus is discovering the endpoint"
+                            "down", _now(), "Prometheus does not report the registered endpoint"
                         )
                     else:
                         health = observed.get("health", "unknown")
@@ -332,6 +378,39 @@ class ManagedMonitoringStack:
             "--web.listen-address="
             + _listen_address(self.monitoring.prometheus_bind_address, self.monitoring.prometheus_port),
         ]
+
+    def _validate_prometheus_configuration(self) -> None:
+        current = RuntimePlatform.current()
+        prometheus = resolve_on_path(self.monitoring.prometheus_binary, current)
+        if prometheus is None:
+            LOGGER.warning("Prometheus executable is unavailable; generated configuration was not pre-validated")
+            return
+        name = "promtool.exe" if current.windows else "promtool"
+        adjacent = prometheus.parent / name
+        promtool = adjacent if executable(adjacent, current) else resolve_on_path(Path(name), current)
+        if promtool is None:
+            LOGGER.warning("promtool is unavailable; generated Prometheus configuration was not pre-validated")
+            return
+        config = self.runtime_directory / "prometheus/prometheus.yml"
+        try:
+            result = subprocess.run(
+                [str(promtool), "check", "config", str(config)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise OSError("promtool configuration validation timed out after 30 seconds") from error
+        except (OSError, subprocess.SubprocessError) as error:
+            raise OSError(f"Unable to run promtool configuration validation: {error}") from error
+        if result.returncode != 0:
+            raise OSError(
+                f"promtool rejected generated Prometheus configuration {config}; "
+                f"run '{promtool} check config {config}' for details"
+            )
+        LOGGER.info("Prometheus configuration validated with %s", promtool)
 
     def _grafana_command(self) -> list[str]:
         binary = self._grafana_executable()

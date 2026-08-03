@@ -10,8 +10,10 @@ import signal
 import socket
 import sys
 import threading
-from collections.abc import Callable
+import webbrowser
+from collections.abc import Callable, Mapping
 from contextlib import suppress
+from importlib.resources import files
 from types import FrameType
 
 import psutil
@@ -20,6 +22,7 @@ from sbk_dashboard.bootstrap import NativeToolBootstrap
 from sbk_dashboard.config import MonitoringConfig, ParsedConfiguration, parse_configuration, parser
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.registry import TargetRegistry
+from sbk_dashboard.version import VERSION
 from sbk_dashboard.web import DashboardHttpServer
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +80,8 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             configuration.dashboard.port,
         )
         LOGGER.info("Dashboard links:")
-        for link in dashboard_links(configuration.dashboard.port, configuration.dashboard.bind_address):
+        links = dashboard_links(configuration.dashboard.port, configuration.dashboard.bind_address)
+        for link in links:
             LOGGER.info("  %s", link)
         LOGGER.info("Authentication: disabled")
         LOGGER.info(
@@ -91,7 +95,9 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             "Persistent history retention: %s day(s) per endpoint", configuration.dashboard.retention_days
         )
         print_effective(configuration, monitoring_configuration)
-        stopped.wait()
+        open_landing_page(links[0])
+        while not stopped.wait(configuration.dashboard.status_interval_seconds):
+            log_status(server, monitoring)
     finally:
         shutdown_errors: list[str] = []
         try:
@@ -110,6 +116,12 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
 
 
 def print_runtime(arguments: list[str]) -> None:
+    try:
+        banner = files("sbk_dashboard").joinpath("resources/banner.txt").read_text(encoding="utf-8").rstrip()
+        LOGGER.info("\n%s", banner)
+    except OSError as error:
+        LOGGER.warning("Unable to load startup banner: %s", error)
+    LOGGER.info("SBK Dashboard version: %s", VERSION)
     LOGGER.info("Python version: %s (%s)", platform.python_version(), platform.python_implementation())
     LOGGER.info("Python executable: %s", sys.executable)
     environment = "Conda" if os.environ.get("CONDA_PREFIX") else "venv" if sys.prefix != sys.base_prefix else "system"
@@ -125,6 +137,7 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
         "continue": dashboard.continue_existing, "data": dashboard.data_directory,
         "retention-days": dashboard.retention_days, "scrape-seconds": dashboard.scrape_interval_seconds,
         "bind": dashboard.bind_address, "log-level": dashboard.log_level,
+        "status-seconds": dashboard.status_interval_seconds,
         "prometheus-bin": monitoring.prometheus_binary, "prometheus-port": monitoring.prometheus_port,
         "prometheus-bind": monitoring.prometheus_bind_address,
         "grafana-home": monitoring.grafana_home, "grafana-port": monitoring.grafana_port,
@@ -133,38 +146,93 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
     sources = {**dashboard.sources, **configuration.monitoring.sources}
     for name, value in values.items():
         LOGGER.info("  %s=%s [%s]", name, value, sources[name])
-    properties_source = "command line" if "-monitoring-properties" in configuration.arguments else (
-        "environment SBK_DASHBOARD_MONITORING_PROPERTIES"
-        if os.environ.get("SBK_DASHBOARD_MONITORING_PROPERTIES") else "default"
+    LOGGER.info(
+        "  monitoring-properties=%s [%s]",
+        configuration.downloads.source,
+        configuration.downloads.selection_source,
     )
-    LOGGER.info("  monitoring-properties=%s [%s]", configuration.downloads.source, properties_source)
     LOGGER.info("  monitoring-download-directory=%s [properties file]", configuration.downloads.download_directory)
     LOGGER.info("  monitoring-install-directory=%s [properties file]", configuration.downloads.install_directory)
+    LOGGER.info("  monitoring-max-download-bytes=%s [properties file]", configuration.downloads.max_download_bytes)
     operational = {
-        "http-workers": (dashboard.http_workers, "SBK_DASHBOARD_HTTP_WORKERS"),
-        "http-queue-capacity": (dashboard.http_queue_capacity, "SBK_DASHBOARD_HTTP_QUEUE"),
-        "request-timeout-seconds": (dashboard.request_timeout_seconds, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
-        "health-response-limit-bytes": (dashboard.health_response_limit_bytes, "SBK_DASHBOARD_HEALTH_RESPONSE_MB"),
-        "supervisor-seconds": (dashboard.supervisor_interval_seconds, "SBK_DASHBOARD_SUPERVISOR_SECONDS"),
-        "process-log-size-mb": (dashboard.process_log_size_mb, "SBK_DASHBOARD_PROCESS_LOG_MB"),
-        "process-log-backups": (dashboard.process_log_backups, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS"),
-        "max-targets": (dashboard.max_targets, "SBK_DASHBOARD_MAX_TARGETS"),
-        "target-health-timeout-seconds": (
-            dashboard.target_health_timeout_seconds,
-            "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS",
-        ),
-        "prometheus-startup-timeout-seconds": (
-            dashboard.prometheus_startup_timeout_seconds,
-            "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS",
-        ),
-        "grafana-startup-timeout-seconds": (
-            dashboard.grafana_startup_timeout_seconds,
-            "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS",
-        ),
+        "http-workers": dashboard.http_workers,
+        "http-queue-capacity": dashboard.http_queue_capacity,
+        "request-timeout-seconds": dashboard.request_timeout_seconds,
+        "health-response-limit-bytes": dashboard.health_response_limit_bytes,
+        "supervisor-seconds": dashboard.supervisor_interval_seconds,
+        "process-log-size-mb": dashboard.process_log_size_mb,
+        "process-log-backups": dashboard.process_log_backups,
+        "max-targets": dashboard.max_targets,
+        "target-health-timeout-seconds": dashboard.target_health_timeout_seconds,
+        "prometheus-startup-timeout-seconds": dashboard.prometheus_startup_timeout_seconds,
+        "grafana-startup-timeout-seconds": dashboard.grafana_startup_timeout_seconds,
     }
-    for name, (value, environment) in operational.items():
-        source = f"environment {environment}" if os.environ.get(environment) else "default"
-        LOGGER.info("  %s=%s [%s]", name, value, source)
+    for name, value in operational.items():
+        LOGGER.info("  %s=%s [%s]", name, value, dashboard.sources[name])
+
+
+def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) -> None:
+    """Log one concise, non-blocking status snapshot."""
+    try:
+        summary = monitoring.summary()
+        clients = server.client_activity()
+        LOGGER.info(
+            "Status: server=%s stack=%s prometheus=%s grafana=%s endpoints=%s up=%s down=%s pending=%s "
+            "unknown=%s clients_recent=%s landing_clients_2m=%s grafana_opens_5m=%s",
+            server.lifecycle.state.value,
+            summary.stack_state,
+            "up" if summary.prometheus_healthy else "down",
+            "up" if summary.grafana_healthy else "down",
+            summary.endpoints,
+            summary.up,
+            summary.down,
+            summary.pending,
+            summary.unknown,
+            clients.total,
+            clients.landing,
+            clients.grafana_opens,
+        )
+    except Exception as error:  # a diagnostic heartbeat must never terminate the production server
+        LOGGER.warning("Unable to produce periodic status: %s", error)
+
+
+def open_landing_page(
+    url: str,
+    environment: Mapping[str, str] | None = None,
+    platform_name: str | None = None,
+    os_name: str | None = None,
+    opener: Callable[..., bool] | None = None,
+) -> bool:
+    """Open *url* in a desktop browser, without disturbing SSH or headless sessions."""
+    selected_environment = os.environ if environment is None else environment
+    if any(selected_environment.get(name) for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")):
+        LOGGER.info("Automatic browser launch skipped: SSH session detected")
+        return False
+    if selected_environment.get("CI"):
+        LOGGER.info("Automatic browser launch skipped: CI environment detected")
+        return False
+    selected_platform = sys.platform if platform_name is None else platform_name
+    selected_os = os.name if os_name is None else os_name
+    if selected_os == "nt" and selected_environment.get("SESSIONNAME", "").casefold() == "services":
+        LOGGER.info("Automatic browser launch skipped: non-interactive Windows service session detected")
+        return False
+    graphical_session = selected_os == "nt" or selected_platform == "darwin" or any(
+        selected_environment.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY")
+    )
+    if not graphical_session:
+        LOGGER.info("Automatic browser launch skipped: no graphical desktop session detected")
+        return False
+    selected_opener = webbrowser.open if opener is None else opener
+    try:
+        opened = selected_opener(url, new=2, autoraise=True)
+    except Exception as error:  # browser backends are external and must never stop the server
+        LOGGER.warning("Unable to open landing page automatically: %s", error)
+        return False
+    if opened:
+        LOGGER.info("Opened landing page in the default web browser: %s", url)
+    else:
+        LOGGER.warning("No graphical web browser accepted the landing page: %s", url)
+    return opened
 
 
 def dashboard_links(port: int, bind_address: str = "0.0.0.0") -> list[str]:

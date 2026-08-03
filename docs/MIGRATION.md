@@ -40,3 +40,38 @@ Prometheus and Grafana console logs remain in bounded rotating files under the m
 
 Grafana's default startup deadline is now 120 seconds; Prometheus remains 45 seconds. Persistent JSON remains
 backward compatible and needs no data migration.
+
+The Python server emits one concise INFO-level runtime status every 60 seconds by default. Use
+`-status-seconds <1-86400>` or `SBK_DASHBOARD_STATUS_SECONDS` to change the interval. This is operational output only;
+it adds no persisted field and requires no data migration.
+
+Owned Prometheus and Grafana processes now run beneath lightweight lifecycle guardians. This adds no service option
+or persisted-data migration. Service managers may retain their existing stop timeout and process-group policy; normal
+shutdown remains graceful, while hard termination of only the main PID now triggers guardian cleanup. Attached
+`-continue true` services remain externally owned and are never guarded or terminated by sbk-dashboard.
+
+The landing page now displays total, up, and down endpoint counters derived from the existing target inventory API.
+This is a browser-only presentation change with no new endpoint, option, or persisted-data migration.
+
+Registered endpoints missing from a successful Prometheus target response now transition from initial `pending` to
+`down`. Earlier versions left this case pending indefinitely, causing the landing-page Down counter to omit stale
+session endpoints. This status correction requires no configuration or data migration.
+
+Landing-page JavaScript and CSS URLs now include a content fingerprint, and all assets require browser revalidation.
+Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
+compatible control script and stylesheet automatically.
+
+Periodic status now reports bounded recent browser activity: `clients_recent`, `landing_clients_2m`, and
+`grafana_opens_5m`. This adds only an in-memory control-plane heartbeat endpoint and opaque per-tab browser IDs; it
+does not change persisted data, command options, native Prometheus/Grafana configuration, or direct-server routing.
+Direct Grafana bookmarks and Prometheus API users remain outside these counts.
+
+Interactive local startup now makes one best-effort request to open the management landing page in a new browser tab.
+SSH, CI, non-interactive Windows service, and headless Unix sessions are detected and skipped automatically. Browser
+startup failure is non-fatal and adds no command-line option or persisted state.
+
+Endpoint registry loading now revalidates normalized host names, metrics paths, field bounds, and the stable
+host-and-port-derived endpoint ID before generating discovery or dashboard files. Registries produced by supported
+sbk-dashboard releases remain compatible. Manually modified entries with inconsistent IDs or invalid fields must be
+corrected before startup. Native archive downloads are now capped by the `download.max.bytes` monitoring property;
+the packaged default is 2 GiB.

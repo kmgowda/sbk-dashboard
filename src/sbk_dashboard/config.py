@@ -13,11 +13,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from sbk_dashboard.network import normalize_host
+from sbk_dashboard.version import VERSION
 
 DEFAULT_PORT = 9721
 DEFAULT_PROMETHEUS_PORT = 9090
 DEFAULT_GRAFANA_PORT = 3000
 DEFAULT_RETENTION_DAYS = 7
+DEFAULT_STATUS_INTERVAL_SECONDS = 60
+DEFAULT_MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _select(option: str | None, environment: dict[str, str], variable: str, default: str) -> tuple[str, str]:
@@ -113,6 +116,7 @@ class DashboardConfig:
     target_health_timeout_seconds: int = 4
     prometheus_startup_timeout_seconds: int = 45
     grafana_startup_timeout_seconds: int = 120
+    status_interval_seconds: int = DEFAULT_STATUS_INTERVAL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -148,6 +152,8 @@ class DownloadConfig:
     grafana: ToolArchive
     platform: RuntimePlatform
     source: str
+    max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES
+    selection_source: str = "default"
 
 
 @dataclass(frozen=True)
@@ -164,6 +170,7 @@ def parser() -> argparse.ArgumentParser:
         description="SBK/SBM dashboard control server with managed Prometheus and Grafana",
         epilog="Prometheus and Grafana run as child processes; Docker is not required.",
     )
+    result.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
     result.add_argument("-port", default=str(DEFAULT_PORT), metavar="port", help="dashboard HTTP port (default: 9721)")
     result.add_argument("-bind", metavar="address", help="management bind address (default: 0.0.0.0)")
     result.add_argument("-auth", default="false", metavar="true|false", help="false only; reserved for future use")
@@ -180,6 +187,11 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
     result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")
+    result.add_argument(
+        "-status-seconds",
+        metavar="seconds",
+        help="periodic short-status interval seconds (default: 60)",
+    )
     result.add_argument("-monitoring-properties", metavar="file", help="native download properties file")
     return result
 
@@ -203,6 +215,15 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
     scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
+    status_interval, status_interval_source = _select(
+        namespace.status_seconds,
+        environment,
+        "SBK_DASHBOARD_STATUS_SECONDS",
+        str(DEFAULT_STATUS_INTERVAL_SECONDS),
+    )
+    selected_status_interval = _positive(status_interval, "status interval")
+    if selected_status_interval > 86_400:
+        raise ValueError("status interval must be between 1 and 86400 seconds")
     http_workers = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_WORKERS", 8, 1, 128)
     http_queue = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_QUEUE", 64, 0, 10_000)
     request_timeout = _bounded_environment(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS", 15, 1, 300)
@@ -227,7 +248,24 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,
-         "bind": bind_source, "log-level": log_level_source},
+         "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source,
+         "http-workers": _environment_source(environment, "SBK_DASHBOARD_HTTP_WORKERS"),
+         "http-queue-capacity": _environment_source(environment, "SBK_DASHBOARD_HTTP_QUEUE"),
+         "request-timeout-seconds": _environment_source(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
+         "health-response-limit-bytes": _environment_source(environment, "SBK_DASHBOARD_HEALTH_RESPONSE_MB"),
+         "supervisor-seconds": _environment_source(environment, "SBK_DASHBOARD_SUPERVISOR_SECONDS"),
+         "process-log-size-mb": _environment_source(environment, "SBK_DASHBOARD_PROCESS_LOG_MB"),
+         "process-log-backups": _environment_source(environment, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS"),
+         "max-targets": _environment_source(environment, "SBK_DASHBOARD_MAX_TARGETS"),
+         "target-health-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS"
+         ),
+         "prometheus-startup-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS"
+         ),
+         "grafana-startup-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS"
+         )},
         http_workers,
         http_queue,
         request_timeout,
@@ -241,6 +279,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         target_health_timeout,
         prometheus_startup_timeout,
         grafana_startup_timeout,
+        selected_status_interval,
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")
@@ -294,6 +333,10 @@ def _bounded_environment(
     if not minimum <= selected <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return selected
+
+
+def _environment_source(environment: dict[str, str], name: str) -> str:
+    return f"environment {name}" if environment.get(name, "").strip() else "default"
 
 
 def _bind_address(value: str, name: str) -> str:
@@ -388,7 +431,23 @@ def load_download_config(option: str | None, data_directory: Path, environment: 
 
     downloads = Path(expand(required("download.directory"))).expanduser().resolve()
     installs = Path(expand(required("install.directory"))).expanduser().resolve()
-    return DownloadConfig(downloads, installs, archive("prometheus"), archive("grafana"), selected_platform, source)
+    raw_max_download_bytes = expand(properties.get("download.max.bytes", str(DEFAULT_MAX_DOWNLOAD_BYTES))).strip()
+    try:
+        max_download_bytes = int(raw_max_download_bytes)
+    except ValueError as error:
+        raise ValueError("download.max.bytes must be a number") from error
+    if max_download_bytes < 1:
+        raise ValueError("download.max.bytes must be positive")
+    return DownloadConfig(
+        downloads,
+        installs,
+        archive("prometheus"),
+        archive("grafana"),
+        selected_platform,
+        source,
+        max_download_bytes,
+        "command line" if option else _environment_source(environment, "SBK_DASHBOARD_MONITORING_PROPERTIES"),
+    )
 
 
 def _safe_relative(value: str, tool: str) -> Path:

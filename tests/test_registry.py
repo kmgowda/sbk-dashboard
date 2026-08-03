@@ -91,6 +91,35 @@ class TargetRegistryTest(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "Unable to load endpoint registry"):
                     TargetRegistry(self.directory)
 
+    def test_revalidates_all_security_sensitive_persisted_fields(self):
+        path = self.directory / "targets.json"
+        TargetRegistry(self.directory).register("One", "host.example", 9718, "/metrics")
+        original = json.loads(path.read_text(encoding="utf-8"))[0]
+        invalid_values = (
+            {"host": "host:80"},
+            {"metricsPath": "../metrics"},
+            {"metricsPath": "/metrics?query=true"},
+            {"id": "../../escaped"},
+            {"id": "0" * 16},
+            {"name": ""},
+            {"name": "x" * 101},
+            {"createdAt": False},
+            {"kind": "unknown"},
+        )
+        for replacement in invalid_values:
+            with self.subTest(replacement=replacement):
+                path.write_text(json.dumps([{**original, **replacement}]), encoding="utf-8")
+                with self.assertRaisesRegex(OSError, "Unable to load endpoint registry"):
+                    TargetRegistry(self.directory)
+
+    def test_persisted_host_is_normalized_before_identity_validation(self):
+        path = self.directory / "targets.json"
+        target = TargetRegistry(self.directory).register("One", "host.example", 9718, "/metrics")
+        persisted = target.persisted()
+        persisted["host"] = "HOST.EXAMPLE."
+        path.write_text(json.dumps([persisted]), encoding="utf-8")
+        self.assertEqual(target, TargetRegistry(self.directory).find(target.id))
+
 
 if __name__ == "__main__":
     unittest.main()

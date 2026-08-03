@@ -21,6 +21,7 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual("0.0.0.0", config.monitoring.grafana_bind_address)
         self.assertEqual(45, config.dashboard.prometheus_startup_timeout_seconds)
         self.assertEqual(120, config.dashboard.grafana_startup_timeout_seconds)
+        self.assertEqual(60, config.dashboard.status_interval_seconds)
 
     def test_command_line_overrides_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -28,9 +29,11 @@ class ConfigurationTest(unittest.TestCase):
             environment_directory = Path(temporary) / "environment"
             config = parse_configuration(
                 ["-data", str(cli_directory), "-retention", "30", "-prometheus-port", "9191", "-continue", "true",
-                 "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug"],
+                 "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug",
+                 "-status-seconds", "15"],
                 {"SBK_DASHBOARD_DATA_DIR": str(environment_directory),
-                 "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14", "SBK_DASHBOARD_BIND": "0.0.0.0"},
+                 "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14", "SBK_DASHBOARD_BIND": "0.0.0.0",
+                 "SBK_DASHBOARD_STATUS_SECONDS": "30"},
             )
             self.assertEqual(cli_directory.resolve(), config.dashboard.data_directory)
             self.assertEqual(30, config.dashboard.retention_days)
@@ -39,6 +42,8 @@ class ConfigurationTest(unittest.TestCase):
             self.assertEqual("127.0.0.1", config.dashboard.bind_address)
             self.assertEqual("::1", config.monitoring.prometheus_bind_address)
             self.assertEqual("DEBUG", config.dashboard.log_level)
+            self.assertEqual(15, config.dashboard.status_interval_seconds)
+            self.assertEqual("command line", config.dashboard.sources["status-seconds"])
 
     def test_environment_overrides_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -47,11 +52,16 @@ class ConfigurationTest(unittest.TestCase):
                 "SBK_DASHBOARD_DISK_RETENTION_DAYS": "11",
                 "SBK_DASHBOARD_SCRAPE_SECONDS": "9",
                 "SBK_DASHBOARD_GRAFANA_URL": "https://grafana.example/base",
+                "SBK_DASHBOARD_STATUS_SECONDS": "75",
             })
             self.assertEqual(Path(temporary).resolve(), config.dashboard.data_directory)
             self.assertEqual(11, config.dashboard.retention_days)
             self.assertEqual(9, config.dashboard.scrape_interval_seconds)
             self.assertEqual("https://grafana.example/base", config.monitoring.grafana_public_url)
+            self.assertEqual(75, config.dashboard.status_interval_seconds)
+            self.assertEqual(
+                "environment SBK_DASHBOARD_STATUS_SECONDS", config.dashboard.sources["status-seconds"]
+            )
 
     def test_production_limits_are_configurable_and_bounded(self):
         config = parse_configuration([], {
@@ -84,7 +94,8 @@ class ConfigurationTest(unittest.TestCase):
     def test_rejects_invalid_values(self):
         for arguments in (["-port", "0"], ["-retention", "0"], ["-continue", "maybe"],
                           ["-grafana-url", "ftp://host"], ["-bind", "http://bad"],
-                          ["-prometheus-bind", "bad host"], ["-log-level", "verbose"]):
+                          ["-prometheus-bind", "bad host"], ["-log-level", "verbose"],
+                          ["-status-seconds", "0"], ["-status-seconds", "86401"]):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 parse_configuration(list(arguments), {})
 
@@ -125,6 +136,32 @@ class ConfigurationTest(unittest.TestCase):
             )
             config = load_download_config(str(path), Path(temporary), {}, RuntimePlatform("linux", "x86_64"))
             self.assertEqual("https://example.test/prom.tar.gz", config.prometheus.url)
+
+    def test_download_limit_and_properties_source_are_loaded_from_explicit_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "override.properties"
+            path.write_text("download.max.bytes=123456\n", encoding="utf-8")
+            config = load_download_config(
+                None,
+                Path(temporary),
+                {"SBK_DASHBOARD_MONITORING_PROPERTIES": str(path)},
+                RuntimePlatform("linux", "x86_64"),
+            )
+            self.assertEqual(123456, config.max_download_bytes)
+            self.assertEqual(
+                "environment SBK_DASHBOARD_MONITORING_PROPERTIES", config.selection_source
+            )
+
+    def test_download_limit_must_be_positive_numeric_property(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "override.properties"
+            for value in ("0", "not-a-number"):
+                with self.subTest(value=value):
+                    path.write_text(f"download.max.bytes={value}\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "download.max.bytes"):
+                        load_download_config(
+                            str(path), Path(temporary), {}, RuntimePlatform("linux", "x86_64")
+                        )
 
 
 if __name__ == "__main__":

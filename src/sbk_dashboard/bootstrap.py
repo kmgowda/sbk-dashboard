@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 from sbk_dashboard.config import (
+    DEFAULT_MAX_DOWNLOAD_BYTES,
     DownloadConfig,
     MonitoringConfig,
     RuntimePlatform,
@@ -64,7 +65,7 @@ class NativeToolBootstrap:
             LOGGER.warning("Cached %s archive checksum is invalid; downloading it again", name)
             downloaded.unlink()
         if not downloaded.is_file():
-            self._download(name, archive.url, downloaded)
+            self._download(name, archive.url, downloaded, config.max_download_bytes)
         if self._checksum(downloaded) != archive.sha256:
             raise OSError(f"{name} download SHA-256 verification failed: {downloaded}")
         LOGGER.info("%s download verified successfully", name)
@@ -91,7 +92,9 @@ class NativeToolBootstrap:
         return destination
 
     @staticmethod
-    def _download(name: str, url: str, destination: Path) -> None:
+    def _download(
+        name: str, url: str, destination: Path, max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES
+    ) -> None:
         LOGGER.info("Downloading %s from %s", name, url)
         LOGGER.info("Download destination: %s", destination)
         temporary = destination.with_name(destination.name + ".part")
@@ -105,6 +108,8 @@ class NativeToolBootstrap:
                     raise OSError(f"{name} download returned an invalid Content-Length") from error
                 if total < 0:
                     raise OSError(f"{name} download returned an invalid negative Content-Length")
+                if total > max_download_bytes:
+                    raise OSError(f"{name} download exceeds the configured maximum size")
                 downloaded = 0
                 last_update = 0.0
                 while True:
@@ -113,6 +118,8 @@ class NativeToolBootstrap:
                         break
                     output.write(chunk)
                     downloaded += len(chunk)
+                    if downloaded > max_download_bytes:
+                        raise OSError(f"{name} download exceeds the configured maximum size")
                     now = time.monotonic()
                     if now - last_update >= 0.25 or (total and downloaded >= total):
                         NativeToolBootstrap._progress(name, downloaded, total)

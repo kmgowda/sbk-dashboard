@@ -16,13 +16,18 @@ bounded Python HTTP/API server
    |-- dynamic Prometheus file discovery
    |-- endpoint-scoped copies of the canonical Grafana dashboard
    `-- lifecycle facade/supervisor
-          |-- owned or attached Prometheus native process --> remote SBK/SBM /metrics
-          `-- owned or attached Grafana native process    --> Prometheus datasource
+          |-- owned Prometheus guardian --> native process --> remote SBK/SBM /metrics
+          |-- owned Grafana guardian    --> native process --> Prometheus datasource
+          `-- attached native services are observed without guardians
 ```
 
 The Python process must stay small and predictable. Prometheus owns scraping/TSDB retention, and Grafana owns query
 and rendering behavior. Endpoint isolation is achieved with labels and scoped PromQL, not with one native stack per
 endpoint.
+
+`processes.py` owns lifecycle state, process groups, trees, and bounded native logs. The separate `guardian.py`
+entry point is the lightweight child-process parent-death monitor; keep it independently runnable because it must
+clean native descendants even after the control plane is forcefully terminated.
 
 ## Request and persistence flow
 
@@ -120,6 +125,7 @@ Important defaults:
 | Client timeout | 15 seconds |
 | Max endpoints | 10,000 |
 | Native log generation/backups | 10 MiB / 3 |
+| Periodic short status | 60 seconds |
 | Target-health timeout | 4 seconds |
 | Prometheus/Grafana startup | 45 / 120 seconds |
 
@@ -139,6 +145,12 @@ See `README.md` and `config.py` for the complete environment-variable table and 
 
 Bind settings are independent: do not make Prometheus public merely because the management UI or Grafana is public.
 Listener binding and browser-visible Grafana URL resolution are separate contracts.
+
+### Change the release version
+
+Update only `src/sbk_dashboard/version.py`. The `Major.Year.Month.Minor` value flows into setuptools package
+metadata through `pyproject.toml`, normal startup output, and `sbk-dashboard -v`. Validate all three surfaces and
+build both wheel and source distributions; do not add another version literal to application or packaging code.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
 
@@ -173,9 +185,10 @@ registration and deletion serialized through reconciliation and preserve compens
 3. Avoid side effects in constructors and ensure partial `start()` failure unwinds.
 4. Keep process identity recording after launch and removal after termination.
 5. Drain pipes continuously with bounded reads/log rotation.
-6. Test clean stop, repeated stop, startup exit, unhealthy restart, crash restart, descendant cleanup, retry backoff,
-   attached non-termination, and unrelated port-owner refusal.
-7. Run a live kill/recovery test against native Prometheus and Grafana.
+6. Keep the guarded native PID/creation-time handshake intact; it closes the hard-parent-death launch race.
+7. Test clean stop, repeated stop, startup exit, unhealthy restart, guardian death, hard parent death, descendant
+   cleanup, retry backoff, attached non-termination, and unrelated port-owner refusal.
+8. Run a live kill/recovery test against native Prometheus and Grafana.
 
 ### Change HTTP concurrency
 

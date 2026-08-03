@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 import socket
 import threading
+import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
@@ -20,7 +25,64 @@ from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_TRACKED_CLIENTS = 10_000
+LANDING_ACTIVITY_SECONDS = 120.0
+GRAFANA_ACTIVITY_SECONDS = 300.0
+CLIENT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{16,64}")
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ClientActivitySummary:
+    """Bounded recent-browser snapshot for the periodic operational status."""
+
+    total: int
+    landing: int
+    grafana_opens: int
+
+
+class RecentClientActivity:
+    """Track opaque browser IDs in fixed-size, expiring LRU sets."""
+
+    def __init__(self, capacity: int = MAX_TRACKED_CLIENTS) -> None:
+        if capacity < 1:
+            raise ValueError("Client activity capacity must be positive")
+        self._capacity = capacity
+        self._values: dict[str, OrderedDict[str, float]] = {
+            "landing": OrderedDict(),
+            "grafana": OrderedDict(),
+        }
+        self._lock = threading.Lock()
+
+    def record(self, surface: str, client_id: str, now: float | None = None) -> None:
+        if surface not in self._values:
+            raise ValueError("Activity surface must be landing or grafana")
+        if not CLIENT_ID_PATTERN.fullmatch(client_id):
+            raise ValueError("Client ID must contain 16 to 64 URL-safe characters")
+        observed = time.monotonic() if now is None else now
+        with self._lock:
+            values = self._values[surface]
+            values[client_id] = observed
+            values.move_to_end(client_id)
+            while len(values) > self._capacity:
+                values.popitem(last=False)
+
+    def summary(self, now: float | None = None) -> ClientActivitySummary:
+        observed = time.monotonic() if now is None else now
+        with self._lock:
+            self._expire(self._values["landing"], observed - LANDING_ACTIVITY_SECONDS)
+            self._expire(self._values["grafana"], observed - GRAFANA_ACTIVITY_SECONDS)
+            landing = set(self._values["landing"])
+            grafana = set(self._values["grafana"])
+            return ClientActivitySummary(len(landing | grafana), len(landing), len(grafana))
+
+    @staticmethod
+    def _expire(values: OrderedDict[str, float], deadline: float) -> None:
+        while values:
+            _, timestamp = next(iter(values.items()))
+            if timestamp > deadline:
+                return
+            values.popitem(last=False)
 
 
 class DashboardHttpServer:
@@ -30,6 +92,7 @@ class DashboardHttpServer:
         self.lifecycle = LifecycleController()
         self._close_lock = threading.Lock()
         self._mutation_lock = threading.Lock()
+        self._client_activity = RecentClientActivity()
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -68,6 +131,8 @@ class DashboardHttpServer:
         self.lifecycle.transition(LifecycleState.RUNNING)
 
     def close(self) -> None:
+        if self._server.called_from_worker():
+            raise RuntimeError("DashboardHttpServer.close() must not be called from an HTTP worker thread")
         with self._close_lock:
             state = self.lifecycle.state
             if state == LifecycleState.STOPPED:
@@ -85,6 +150,9 @@ class DashboardHttpServer:
             self._server.close_pool()
             self.lifecycle.transition(LifecycleState.STOPPED)
 
+    def client_activity(self) -> ClientActivitySummary:
+        return self._client_activity.summary()
+
     def _handle(self, request: BaseHTTPRequestHandler) -> None:
         path = urlparse(request.path).path
         try:
@@ -94,6 +162,8 @@ class DashboardHttpServer:
                 self._json(request, 200 if healthy else 503,
                            {"status": "ok" if healthy else "degraded", "authentication": False,
                             "targets": len(self.registry.list())})
+            elif path.startswith("/api/activity/"):
+                self._activity(request, path[len("/api/activity/"):])
             elif path == "/api/targets":
                 self._targets(request)
             elif path.startswith("/api/targets/"):
@@ -110,6 +180,17 @@ class DashboardHttpServer:
         except Exception as error:  # defensive HTTP boundary
             LOGGER.exception("Unexpected request failure: %s", error)
             self._json(request, 500, {"error": "Unexpected server error"})
+
+    def _activity(self, request: BaseHTTPRequestHandler, surface: str) -> None:
+        self._require(request, "POST")
+        body = self._read_json(request)
+        client_id = body.get("clientId")
+        if not isinstance(client_id, str):
+            raise ValueError("Client ID must be a string")
+        self._client_activity.record(surface, client_id)
+        request.send_response(HTTPStatus.NO_CONTENT)
+        request.send_header("Cache-Control", "no-store")
+        request.end_headers()
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
         if request.command == "GET":
@@ -179,9 +260,16 @@ class DashboardHttpServer:
         if name is None:
             self._json(request, 404, {"error": "Not found"})
             return
-        resource = files("sbk_dashboard").joinpath(f"resources/web/{name}")
+        resource_root = files("sbk_dashboard").joinpath("resources/web")
+        resource = resource_root.joinpath(name)
         try:
             body = resource.read_bytes()
+            if name == "index.html":
+                fingerprint = hashlib.sha256(
+                    resource_root.joinpath("app.css").read_bytes()
+                    + resource_root.joinpath("app.js").read_bytes()
+                ).hexdigest()[:12]
+                body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
             return
@@ -190,7 +278,9 @@ class DashboardHttpServer:
         )
         request.send_response(200)
         request.send_header("Content-Type", f"{content_type}; charset=utf-8")
-        request.send_header("Cache-Control", "no-cache" if name.endswith(".html") else "public, max-age=3600")
+        # Asset URLs are stable across releases. Require revalidation so a newly
+        # deployed HTML document can never run with an older cached script/style.
+        request.send_header("Cache-Control", "no-cache")
         request.send_header("Content-Length", str(len(body)))
         request.end_headers()
         request.wfile.write(body)
@@ -285,6 +375,10 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         self._request_timeout = request_timeout
         self._capacity = threading.BoundedSemaphore(workers + queue_capacity)
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="sbk-http-worker")
+
+    @staticmethod
+    def called_from_worker() -> bool:
+        return threading.current_thread().name.startswith("sbk-http-worker")
 
     def server_bind(self) -> None:
         if self.address_family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):

@@ -8,9 +8,13 @@ This implementation is non-containerized. Prometheus and Grafana are official na
 libraries—and the Python server manages their verified installation, configuration, readiness, reconciliation,
 health, and shutdown.
 
+The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
+`src/sbk_dashboard/version.py` is the single source used by package metadata, startup logging, and `-v` output.
+
 ## Features
 
-- Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints.
+- Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints, with live total, up, and
+  down endpoint counts on the landing page.
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
@@ -23,6 +27,10 @@ health, and shutdown.
 - Least-privilege service binding: Prometheus is loopback-only by default, with independent management and Grafana
   bind controls.
 - Timestamped, leveled control-plane logging suitable for journald, launchd, and Windows service wrappers.
+- Concise periodic runtime status with a configurable interval and a 60-second default.
+- Automatic landing-page launch in a local graphical browser, with SSH, CI, service, and headless-session detection.
+- Bounded recent-client telemetry for active landing-page browser sessions and Grafana dashboards opened from the
+  landing page.
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
@@ -113,19 +121,46 @@ Defaults:
 - Prometheus: `http://127.0.0.1:9090/` (loopback only)
 - Grafana: `http://localhost:3000/`
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
+- Endpoint form display name: `SBK Dashboard`
+- Endpoint form host/IP: `127.0.0.1`
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
 - Prometheus retention: 7 days
 - Scrape interval: 5 seconds
 - Existing-process continuation: disabled
+- Short-status interval: 60 seconds
 
-Startup prints the Python version and executable, environment type, supplied arguments, selected native platform,
+Startup prints the SBK Dashboard version, Python version and executable, environment type, supplied arguments,
+selected native platform,
 all effective options and their sources, and dashboard links reachable through the configured address family. An
 IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
 discovered IPv6 addresses.
 
+After the HTTP server is ready, sbk-dashboard opens the first local dashboard link in the default graphical browser.
+It requests a new tab, so an already-running browser normally keeps its existing windows and adds the landing page.
+The browser ultimately controls tab/window policy. Automatic launch is skipped for SSH sessions (including X11
+forwarding), CI, non-interactive Windows service sessions, and Unix environments without `DISPLAY` or
+`WAYLAND_DISPLAY`. Failure to locate or start a browser produces a warning and does not stop the server.
+
 Host inputs are canonical IP literals or DNS names. Malformed numeric IPv4 attempts, invalid IPv6, embedded ports,
 zone identifiers, and unspecified remote targets are rejected before they can reach Prometheus configuration.
+
+An endpoint is `pending` only until the next successful Prometheus target refresh. A registered endpoint that
+Prometheus reports as unhealthy—or does not report after that refresh—is `down`; it returns to `up` automatically
+after a successful scrape.
+
+The landing page uses a content fingerprint in its JavaScript and stylesheet URLs and also requires browsers to
+revalidate those resources. This prevents an upgrade from combining new HTML with an older cached script and
+displaying stale endpoint counters.
+
+The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
+opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,
+and clicking **Open dashboard** records that browser in a five-minute Grafana-open window. IDs and timestamps are
+bounded to 10,000 entries per category, remain only in memory, and are discarded after expiry or restart.
+
+These fields do not modify or proxy native Prometheus/Grafana traffic. Direct Grafana bookmarks and direct
+Prometheus API users bypass the Python server and are therefore not counted. Exact native-server client identity
+would require a reverse proxy or native access-log processing, which is intentionally outside this design.
 
 ### Production example
 
@@ -141,7 +176,8 @@ sbk-dashboard \
   -grafana-home /opt/grafana \
   -grafana-port 3000 \
   -grafana-bind 0.0.0.0 \
-  -grafana-url http://dashboard.example.com:3000
+  -grafana-url http://dashboard.example.com:3000 \
+  -status-seconds 60
 ```
 
 When `-grafana-url` is not supplied, every generated dashboard link follows the hostname or IP address used to open
@@ -157,6 +193,7 @@ from Grafana's local listen address.
 
 ```text
 -h, --help                    Show help and exit
+-v, --version                 Print the SBK Dashboard version and exit
 -port <port>                  Management HTTP port (default 9721)
 -bind <address>               Management bind address (default 0.0.0.0)
 -auth <true|false>            Must be false in this release
@@ -171,6 +208,7 @@ from Grafana's local listen address.
 -grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
+-status-seconds <seconds>     Periodic short-status interval (default 60; range 1-86400)
 -monitoring-properties <file> Download URLs, checksums, and install directories
 ```
 
@@ -190,6 +228,7 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_GRAFANA_BIND` | Fallback for `-grafana-bind`; default `0.0.0.0` |
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
 | `SBK_DASHBOARD_LOG_LEVEL` | Fallback for `-log-level`; default `INFO` |
+| `SBK_DASHBOARD_STATUS_SECONDS` | Fallback for `-status-seconds`; default 60, maximum 86,400 |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
 | `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
 | `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |
@@ -220,14 +259,18 @@ layouts, and executable names for:
 - `windows-x86_64` and `windows-arm64`
 
 Missing tools are downloaded to `${data.directory}/downloads`, checksum-verified, safely extracted, and installed
-under `${data.directory}/tools`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special
-entries are rejected.
+under `${data.directory}/tools`. Each response is bounded by `download.max.bytes`, including downloads without a
+`Content-Length`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special entries are
+rejected. When the official `promtool` is available beside Prometheus, each generated `prometheus.yml` is validated
+with `promtool check config` before the native services start.
 
 Override only the required values in an external file:
 
 ```properties
 download.directory=/srv/sbk-dashboard/downloads
 install.directory=/srv/sbk-dashboard/tools
+# Maximum bytes accepted for each downloaded archive (default: 2 GiB).
+download.max.bytes=2147483648
 prometheus.download.url=https://mirror.example/prometheus.tar.gz
 prometheus.download.file=prometheus.tar.gz
 prometheus.download.sha256=<64 lowercase hexadecimal characters>
@@ -254,6 +297,18 @@ sbk-dashboard -continue true
 Attached services are not stopped at dashboard shutdown. They must already use configuration compatible with this
 data directory's Prometheus discovery and Grafana provisioning paths.
 
+Every Prometheus or Grafana process launched by sbk-dashboard runs beneath a lightweight lifecycle guardian. Normal
+`SIGINT`/`SIGTERM` shutdown still performs reverse-order graceful and then forceful process-tree cleanup. If the main
+Python process is terminated with `SIGKILL`, `TerminateProcess`, or an equivalent non-catchable termination, each
+guardian detects the missing parent by PID and creation time, terminates its native process tree, and exits. Guardians
+are not created for attached `-continue true` services, so externally owned processes remain untouched.
+
+Port checks resolve DNS bind names to every IPv4/IPv6 result and check wildcard binds through the host's bounded
+local-interface list before attempting a real `bind()` and `listen()`. On Windows an exclusive bind remains the
+default ownership test. A reusable fallback is allowed only when `psutil` confirms that every matching socket is in
+`TIME_WAIT`; active, unidentified, or non-`TIME_WAIT` owners remain unavailable. This permits fast restart without
+weakening the rule that unrelated listeners are never replaced.
+
 Owned services are supervised every five seconds. An exited child is restarted immediately; a running service that
 fails three consecutive health probes is replaced. Repeated launch failures use exponential backoff capped at 60
 seconds, preventing a crash loop from consuming CPU or filling logs. Attached `-continue true` services are observed
@@ -271,13 +326,18 @@ avoid spurious Grafana failures on slower hosts while keeping Prometheus failure
 - Registration/configuration replacements synchronize both file contents and their parent directory on POSIX so an
   atomic rename is durable across a crash. Windows retains atomic replacement with native filesystem semantics.
 - Prometheus and Grafana console output is continuously drained in 64 KiB chunks and rotated at 10 MiB with three
-  backups by default. No subprocess output pipe is allowed to accumulate in memory.
+  backups by default. A transient open, write, or rotation error is retried with bounded exponential backoff while
+  output continues to be drained and discarded; recovery is logged. No subprocess output pipe is allowed to
+  accumulate in memory.
 - Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
   and `failed` states. Shutdown is idempotent and reports incomplete child termination.
 - Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
   descendants; Windows uses a new process group plus recursive process-tree termination.
+- One small guardian process per owned native service closes the cleanup gap where the control plane cannot run a
+  signal handler. It retains no samples or endpoint state and exits with its native child.
 - A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
-  joined at shutdown; subprocess log-pump threads exit at EOF and are joined.
+  joined at shutdown; subprocess log-pump threads exit at EOF and are joined. Shutdown reports an error instead of
+  declaring success if a log-pump worker does not stop after its pipe is closed.
 
 For unattended 24/7 use, run `sbk-dashboard` under the host service manager—such as systemd, launchd, or Windows
 Service Control Manager—with automatic restart enabled for failure of the Python control process itself. The internal
@@ -355,13 +415,15 @@ python -m pip install -e ".[dev]"
 ruff check src tests
 mypy src
 python -m pytest
-coverage run -m pytest
+COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
+coverage combine
 coverage report
 python -m build --no-isolation
 ```
 
 Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,
-log rotation, configuration precedence, all six native platform definitions, safe TAR.GZ and ZIP extraction,
+log rotation and transient recovery, IPv4/IPv6/DNS/TIME_WAIT port checks, configuration precedence, all six native
+platform definitions, safe TAR.GZ and ZIP extraction,
 endpoint persistence and compatibility, dashboard cloning and complete PromQL scoping, discovery generation,
 management APIs, health attachment, process ownership, and package resources. Native Linux validation is described
 in [testing documentation](docs/TESTING.md).

@@ -9,11 +9,13 @@ python -m pip install -e ".[dev]"
 ruff check src tests
 mypy src
 python -m pytest
-coverage run -m pytest
+COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
+coverage combine
 coverage report
 python -m build --no-isolation
 python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
 sbk-dashboard -h
+sbk-dashboard -v
 ```
 
 The standard-library suite is also runnable without pytest. Promoting `ResourceWarning` to an error checks leaked
@@ -32,9 +34,38 @@ It also sends a live oversized request with a negative `Content-Length`, rejects
 rejects non-numeric download lengths as I/O failures, rejects boolean API ports, verifies POSIX probes enable address
 reuse for `TIME_WAIT` while requiring a successful `listen()`, and ensures corrupted persisted boolean or out-of-range
 endpoint ports cannot be loaded.
-An active TCP listener is rejected by a bounded connect preflight before platform-specific reusable bind semantics.
-Native lifecycle regressions also verify that an unavailable log destination still drains output beyond pipe capacity
-and that captured descendants are force-cleaned when their parent disappears during external-process termination.
+An active TCP listener is rejected by bounded connect preflights over local wildcard interfaces before
+platform-specific reusable bind semantics. Port tests use distinct socket doubles for the connect and bind phases,
+cover AAAA-only DNS bind names, and permit Windows reuse only for confirmed `TIME_WAIT` sockets. Native lifecycle
+regressions also verify that an unavailable log destination still drains output beyond pipe capacity, a transient
+write failure recovers after bounded backoff, a stuck log pump is reported while ownership cleanup still executes,
+captured descendants are force-cleaned when their parent disappears during external-process termination, startup
+failure removes guardian state, a killed guardian cannot orphan its native child, and hard parent death terminates
+both the guarded native process and guardian. Guardian-handshake tests also reproduce a transient Windows
+`PermissionError`, verify that a subsequent read succeeds, and ensure persistent access denial times out with useful
+diagnostics.
+Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
+range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
+non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,
+macOS, and Windows environments; SSH, CI, Windows service, and headless suppression; startup URL selection; and
+non-fatal launcher errors.
+
+Web asset regressions verify that the landing page exposes total, up, and down counters and that each inventory
+refresh derives the health counts from exact `up` and `down` states. Pending and unknown states count only toward the
+total. The counters remain visible in the responsive single-column layout.
+
+Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
+verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery
+to `up` and exact summary counts in both states.
+
+Reconciliation-generation regressions block a Prometheus status response while replacing the target set and verify
+that the obsolete response cannot remove the new endpoint's `pending` state or restore a deleted endpoint. Command
+tests assert the configured `--storage.tsdb.retention.time=<days>d` value. When `promtool` is installed beside
+Prometheus, startup runs `promtool check config` before either native service is started.
+
+The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs and
+`Cache-Control: no-cache` on both resources. This protects upgrades from the regression where new counter markup was
+rendered while a cached older script updated only the Total value.
 
 ## Manual Linux end-to-end test
 
@@ -87,9 +118,24 @@ Grafana and verify the dedicated URL recovers. Attached `-continue true` process
 Stop with `Ctrl+C`, restart with the same data directory, and confirm registrations, mappings, dashboard files, and
 Prometheus history remain. Prometheus and Grafana child PIDs started by that invocation must no longer be alive.
 
+Repeat with a unique temporary data directory, note the main, guardian, Prometheus, and Grafana PIDs, and force-kill
+only the main sbk-dashboard PID (`kill -9` on Linux/macOS or direct process termination on Windows). Within the bounded
+guardian cleanup period, both native process trees and both guardians must exit and both ports must stop listening.
+Do not run this check against an attached `-continue true` stack, whose external services must remain running.
+
 Startup logs must include a timestamp and level, and must report effective bind addresses, startup deadlines,
 target-health timeout, and the source of every CLI-backed setting. Run once with `-log-level DEBUG` and once with
 `SBK_DASHBOARD_LOG_LEVEL=WARNING` to verify precedence and filtering.
+
+Run once with `-status-seconds 5` and leave the application active for at least 12 seconds. Confirm at least two
+`Status:` records appear, each containing server/stack state, Prometheus and Grafana health, and endpoint totals for
+`up`, `down`, `pending`, and `unknown`, plus `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. Stop the
+application and confirm no additional status appears after shutdown.
+
+Client-activity regressions validate URL-safe opaque IDs, invalid surface/method rejection, same-browser de-duplication
+across landing and Grafana categories, per-category capacity eviction, exact two-/five-minute expiry, and the
+30-second browser heartbeat/dashboard-click hooks. Native Prometheus and Grafana configuration and routing remain
+unchanged; direct native-server clients are deliberately not asserted as observable.
 
 ## venv and Conda checks
 
@@ -106,3 +152,20 @@ conda run -p /tmp/sbk-dashboard-conda sbk-dashboard -h
 ```
 
 On Windows, substitute `Scripts\\python.exe` and `Scripts\\sbk-dashboard.exe` for the venv paths.
+
+## Native Windows extraction smoke test
+
+The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows ZIP
+or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
+
+```powershell
+py -3 -m venv $env:TEMP\sbk-dashboard-win-venv
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\python.exe -m pip install -e ".[dev]"
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\python.exe -m unittest tests.test_bootstrap -v
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\sbk-dashboard.exe -data $env:TEMP\sbk-dashboard-win-data -h
+```
+
+For a full bootstrap smoke test, start without installed native tools using a disposable data directory, verify the
+pinned Windows ZIPs install beneath that directory, and confirm `prometheus.exe`, `promtool.exe`, and Grafana start.
+Stop the dashboard and verify all child processes exit before deleting only those two disposable directories. This
+native Windows validation remains required before claiming Windows runtime certification.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sbk-dashboard"
-version = "1.0.0"
+dynamic = ["version"]
 description = "SBK/SBM Grafana dashboard control server"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,11 +30,15 @@ sbk-dashboard = "sbk_dashboard.main:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.dynamic]
+version = {attr = "sbk_dashboard.version.VERSION"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 sbk_dashboard = [
+  "resources/banner.txt",
   "resources/monitoring-download.properties",
   "resources/grafana/dashboards/sbk-dashboard.json",
   "resources/web/*.html",
@@ -45,10 +49,13 @@ sbk_dashboard = [
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.coverage.run]
 branch = true
-source = ["sbk_dashboard"]
+concurrency = ["multiprocessing"]
+parallel = true
+source = ["src/sbk_dashboard"]
 
 [tool.coverage.report]
 show_missing = true

@@ -105,12 +105,14 @@ runtime data as source material.
 | Path | Responsibility |
 |---|---|
 | `src/sbk_dashboard/main.py` | Composition root, bootstrap, signals, startup output, shutdown |
+| `src/sbk_dashboard/version.py` | Single source of truth for package and runtime version |
 | `src/sbk_dashboard/config.py` | CLI/environment/default precedence, validation, platform/download definitions |
 | `src/sbk_dashboard/network.py` | Shared canonical IP literal and conservative DNS-name validation |
 | `src/sbk_dashboard/web.py` | Bounded HTTP server, REST API, assets, request-host URL resolution |
 | `src/sbk_dashboard/registry.py` | Endpoint validation, identity, limits, atomic registration persistence |
 | `src/sbk_dashboard/monitoring.py` | Monitoring facade, configuration, reconciliation, supervision, target status |
 | `src/sbk_dashboard/processes.py` | Lifecycle state machine, ownership registry, health strategy, process trees/logs |
+| `src/sbk_dashboard/guardian.py` | Parent-death monitoring and orphaned native-process tree cleanup |
 | `src/sbk_dashboard/provisioning.py` | Prometheus discovery and endpoint-scoped Grafana dashboard generation |
 | `src/sbk_dashboard/bootstrap.py` | Native download, verification, extraction, and installation |
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
@@ -147,7 +149,8 @@ Run the complete pre-commit validation for non-trivial changes:
 
 ```bash
 coverage erase
-coverage run -m pytest -q
+COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest -q
+coverage combine
 coverage report
 python -m build --no-isolation
 ```

@@ -1,3 +1,5 @@
 """SBK Dashboard control server."""
 
-__version__ = "1.0.0"
+from sbk_dashboard.version import VERSION
+
+__version__ = VERSION
