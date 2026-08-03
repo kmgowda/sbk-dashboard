@@ -86,7 +86,7 @@ class WebTest(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/app.css") as response:
             self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()
-            self.assertIn(b"font-size: clamp(40px, 6vw, 72px);", stylesheet)
+            self.assertIn(b"font-size: clamp(34px, 4.5vw, 54px);", stylesheet)
             self.assertIn(b".hero-stat { width: min(100%, 420px); }", stylesheet)
             self.assertNotIn(b".hero-stat { display: none; }", stylesheet)
         with urllib.request.urlopen(self.base + "/api/health") as response:
