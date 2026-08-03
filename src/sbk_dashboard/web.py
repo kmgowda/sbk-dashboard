@@ -131,6 +131,8 @@ class DashboardHttpServer:
         self.lifecycle.transition(LifecycleState.RUNNING)
 
     def close(self) -> None:
+        if self._server.called_from_worker():
+            raise RuntimeError("DashboardHttpServer.close() must not be called from an HTTP worker thread")
         with self._close_lock:
             state = self.lifecycle.state
             if state == LifecycleState.STOPPED:
@@ -373,6 +375,10 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         self._request_timeout = request_timeout
         self._capacity = threading.BoundedSemaphore(workers + queue_capacity)
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="sbk-http-worker")
+
+    @staticmethod
+    def called_from_worker() -> bool:
+        return threading.current_thread().name.startswith("sbk-http-worker")
 
     def server_bind(self) -> None:
         if self.address_family == socket.AF_INET6 and hasattr(socket, "IPV6_V6ONLY"):

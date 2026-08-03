@@ -32,7 +32,10 @@ class MainTest(unittest.TestCase):
         self.assertIn("reserved for a future release", error.getvalue())
 
     def test_runtime_and_effective_configuration_output(self):
-        configuration = parse_configuration(["-port", "19721"], {})
+        configuration = parse_configuration(
+            ["-port", "19721"],
+            {"SBK_DASHBOARD_HTTP_WORKERS": "12", "SBK_DASHBOARD_MONITORING_PROPERTIES": ""},
+        )
         with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
             print_runtime([])
             print_effective(configuration, configuration.monitoring)
@@ -41,6 +44,8 @@ class MainTest(unittest.TestCase):
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)
+        self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
+        self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
 
     def test_dashboard_links_always_include_loopback(self):
         links = dashboard_links(9721)

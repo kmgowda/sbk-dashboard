@@ -143,6 +143,22 @@ class BootstrapTest(unittest.TestCase):
         self.assertFalse(destination.exists())
         self.assertFalse(destination.with_name(destination.name + ".part").exists())
 
+    def test_download_rejects_declared_or_streamed_content_over_configured_limit(self):
+        destination = self.directory / "tool.tar.gz"
+        for content_length in ("11", "0"):
+            response = io.BytesIO(b"01234567890")
+            response.headers = {"Content-Length": content_length}
+            with (
+                self.subTest(content_length=content_length),
+                patch("sbk_dashboard.bootstrap.urllib.request.urlopen", return_value=response),
+                self.assertRaisesRegex(OSError, "configured maximum size"),
+            ):
+                NativeToolBootstrap._download(
+                    "Tool", "https://example.test/tool.tar.gz", destination, max_download_bytes=10
+                )
+            self.assertFalse(destination.exists())
+            self.assertFalse(destination.with_name(destination.name + ".part").exists())
+
     def test_invalid_cached_archive_is_downloaded_again(self):
         downloads = self.directory / "downloads"
         installs = self.directory / "tools"
@@ -167,7 +183,7 @@ class BootstrapTest(unittest.TestCase):
             downloads, installs, definition, definition, RuntimePlatform("linux", "x86_64"), "test"
         )
 
-        def download(_name, _url, destination):
+        def download(_name, _url, destination, _max_download_bytes):
             destination.write_bytes(valid_archive.read_bytes())
 
         with patch.object(NativeToolBootstrap, "_download", side_effect=download) as downloaded:

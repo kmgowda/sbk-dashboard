@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sbk_dashboard.files import atomic_json
-from sbk_dashboard.models import BenchmarkTarget
+from sbk_dashboard.models import BenchmarkTarget, endpoint_id, normalize_metrics_path
 from sbk_dashboard.network import normalize_host
 
 
@@ -50,7 +49,7 @@ class TargetRegistry:
         normalized_host = self._validate_host(host)
         normalized_port = self._validate_port(port)
         normalized_path = self._validate_path(metrics_path)
-        target_id = hashlib.sha256(f"{normalized_host}:{normalized_port}".encode()).hexdigest()[:16]
+        target_id = endpoint_id(normalized_host, normalized_port)
         normalized_name = name.strip() if name and name.strip() else f"{normalized_host}:{normalized_port}"
         if len(normalized_name) > 100:
             raise ValueError("Name must not exceed 100 characters")
@@ -111,9 +110,4 @@ class TargetRegistry:
 
     @staticmethod
     def _validate_path(metrics_path: str | None) -> str:
-        if metrics_path is not None and not isinstance(metrics_path, str):
-            raise ValueError("Metrics path must be an absolute HTTP path")
-        value = metrics_path.strip() if metrics_path and metrics_path.strip() else "/metrics"
-        if not value.startswith("/") or any(character in value for character in "?# "):
-            raise ValueError("Metrics path must be an absolute HTTP path")
-        return value
+        return normalize_metrics_path(metrics_path)

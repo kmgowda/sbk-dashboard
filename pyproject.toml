@@ -45,10 +45,13 @@ sbk_dashboard = [
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.coverage.run]
 branch = true
-source = ["sbk_dashboard"]
+concurrency = ["multiprocessing"]
+parallel = true
+source = ["src/sbk_dashboard"]
 
 [tool.coverage.report]
 show_missing = true

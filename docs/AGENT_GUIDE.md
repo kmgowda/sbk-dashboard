@@ -25,6 +25,10 @@ The Python process must stay small and predictable. Prometheus owns scraping/TSD
 and rendering behavior. Endpoint isolation is achieved with labels and scoped PromQL, not with one native stack per
 endpoint.
 
+`processes.py` owns lifecycle state, process groups, trees, and bounded native logs. The separate `guardian.py`
+entry point is the lightweight child-process parent-death monitor; keep it independently runnable because it must
+clean native descendants even after the control plane is forcefully terminated.
+
 ## Request and persistence flow
 
 ### Startup

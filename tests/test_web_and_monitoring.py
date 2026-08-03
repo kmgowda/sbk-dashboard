@@ -10,8 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
-from sbk_dashboard.config import DashboardConfig, MonitoringConfig
+from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform
 from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import LifecycleState, PortProcessManager
@@ -229,6 +230,11 @@ class WebTest(unittest.TestCase):
         self.assertEqual(400, caught.exception.code)
         self.assertEqual([], self.registry.list())
 
+    def test_http_server_rejects_close_from_its_worker_pool(self):
+        future = self.server._server._executor.submit(self.server.close)
+        with self.assertRaisesRegex(RuntimeError, "must not be called from an HTTP worker"):
+            future.result(2)
+
     def test_registration_is_rolled_back_for_runtime_reconciliation_failure(self):
         self.monitoring.reconcile_error = RuntimeError("monitoring stopped")
         request = urllib.request.Request(
@@ -352,6 +358,54 @@ class MonitoringContinueTest(unittest.TestCase):
         self.assertEqual("up", stack.status(target.id).state)
         self.assertEqual((1, 1, 0, 0, 0), _status_counts(stack))
 
+    def test_refresh_does_not_publish_across_reconciliation_generation(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, True, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            Path("unused"), data / "unused", self.prometheus.server_port,
+            self.grafana.server_port, f"http://localhost:{self.grafana.server_port}", {},
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        old = BenchmarkTarget("old", "Old", "127.0.0.1", 9718, "/metrics", "SBK", "now")
+        new = BenchmarkTarget("new", "New", "127.0.0.1", 9719, "/metrics", "SBK", "now")
+        stack.reconcile([old])
+        entered = threading.Event()
+        release = threading.Event()
+        body = json.dumps({
+            "data": {"activeTargets": [{
+                "labels": {"sbk_endpoint_id": old.id}, "health": "up", "lastScrape": "now",
+            }]}
+        }).encode()
+
+        class DelayedResponse:
+            status = 200
+            headers = {"Content-Length": str(len(body))}
+
+            def __enter__(self):
+                entered.set()
+                self.assert_released = release.wait(2)
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self, _limit):
+                return body
+
+        with mock.patch("sbk_dashboard.monitoring.urllib.request.urlopen", return_value=DelayedResponse()):
+            refresh = threading.Thread(target=stack.refresh_statuses)
+            refresh.start()
+            self.assertTrue(entered.wait(1))
+            stack.reconcile([new])
+            release.set()
+            refresh.join(2)
+
+        self.assertFalse(refresh.is_alive())
+        self.assertEqual("pending", stack.status(new.id).state)
+        self.assertEqual("pending", stack.status(old.id).state)
+        self.assertNotIn(old.id, stack._statuses)
+        self.assertEqual((1, 0, 0, 1, 0), _status_counts(stack))
+
     def test_default_prometheus_command_binds_only_to_loopback(self):
         data = Path(self.temporary.name)
         binary = data / "prometheus"
@@ -361,6 +415,37 @@ class MonitoringContinueTest(unittest.TestCase):
         monitoring = MonitoringConfig(binary, data / "unused", 19090, 3000, "http://localhost:3000", {})
         command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
         self.assertIn("--web.listen-address=127.0.0.1:19090", command)
+        self.assertIn("--storage.tsdb.retention.time=7d", command)
+
+    def test_promtool_validates_generated_configuration_and_rejects_failure(self):
+        data = Path(self.temporary.name)
+        prometheus = data / "prometheus"
+        promtool = data / "promtool"
+        for executable_path in (prometheus, promtool):
+            executable_path.write_text("tool", encoding="utf-8")
+            executable_path.chmod(0o755)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            prometheus, data / "unused", 19090, 3000, "http://localhost:3000", {}
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        stack._prepare_configuration()
+        with (
+            mock.patch(
+                "sbk_dashboard.monitoring.RuntimePlatform.current",
+                return_value=RuntimePlatform("linux", "x86_64"),
+            ),
+            mock.patch("sbk_dashboard.monitoring.subprocess.run") as run,
+        ):
+            run.return_value.returncode = 0
+            stack._validate_prometheus_configuration()
+            self.assertEqual(
+                [str(promtool), "check", "config", str(data / "monitoring/prometheus/prometheus.yml")],
+                run.call_args.args[0],
+            )
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(OSError, "promtool rejected"):
+                stack._validate_prometheus_configuration()
 
     def test_status_summary_is_bounded_to_published_snapshots(self):
         data = Path(self.temporary.name)

@@ -347,13 +347,23 @@ class PortProcessManager:
             interfaces = {}
         for interface_addresses in interfaces.values():
             for address in interface_addresses:
-                if address.family != endpoint.family or address.address in seen:
+                if address.family != endpoint.family:
                     continue
-                seen.add(address.address)
+                raw_address = address.address.split("%", 1)[0]
+                try:
+                    parsed_address = ipaddress.ip_address(raw_address)
+                except ValueError:
+                    continue
+                if parsed_address.is_link_local:
+                    continue
+                normalized_address = str(parsed_address)
+                if normalized_address in seen:
+                    continue
+                seen.add(normalized_address)
                 socket_address: SocketAddress = (
-                    (address.address, endpoint.address[1], 0, 0)
+                    (normalized_address, endpoint.address[1], 0, 0)
                     if endpoint.family == socket.AF_INET6
-                    else (address.address, endpoint.address[1])
+                    else (normalized_address, endpoint.address[1])
                 )
                 addresses.append(socket_address)
                 if len(addresses) >= MAX_LOCAL_PROBE_ADDRESSES:
@@ -476,7 +486,12 @@ class RotatingProcessLog:
                             output = self._path.open("ab", buffering=0)
                             size = 0
                         count = min(self._size_bytes - size, len(chunk) - offset)
-                        output.write(chunk[offset : offset + count])
+                        written = 0
+                        while written < count:
+                            result = output.write(chunk[offset + written : offset + count])
+                            if not isinstance(result, int) or result <= 0:
+                                raise OSError("Native process log write made no progress")
+                            written += result
                         size += count
                         offset += count
                 except (OSError, ValueError) as error:
@@ -882,6 +897,12 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
             with suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
         else:
+            with suppress(psutil.Error):
+                current_descendants = psutil.Process(process.pid).children(recursive=True)
+                descendants = _unique_processes([*descendants, *current_descendants])
+            for child in reversed(descendants):
+                with suppress(psutil.Error):
+                    child.kill()
             process.kill()
         try:
             process.wait(STOP_TIMEOUT_SECONDS)
@@ -908,12 +929,22 @@ def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
     _, alive = psutil.wait_procs(candidates, timeout=STOP_TIMEOUT_SECONDS)
     if alive:
         LOGGER.warning("%s pid %s did not stop gracefully; forcing termination", name, process.pid)
+        with suppress(psutil.Error):
+            alive = _unique_processes([*alive, *process.children(recursive=True)])
         for item in alive:
             with suppress(psutil.NoSuchProcess):
                 item.kill()
         _, alive = psutil.wait_procs(alive, timeout=STOP_TIMEOUT_SECONDS)
     if alive:
         raise OSError(f"Unable to stop existing {name} process {process.pid}")
+
+
+def _unique_processes(processes: list[psutil.Process]) -> list[psutil.Process]:
+    unique: dict[int, psutil.Process] = {}
+    for process in processes:
+        with suppress(psutil.Error):
+            unique[process.pid] = process
+    return list(unique.values())
 
 
 def _finish_descendants(descendants: list[psutil.Process]) -> None:

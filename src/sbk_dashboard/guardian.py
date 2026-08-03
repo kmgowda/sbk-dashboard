@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 from pathlib import Path
 
@@ -14,6 +15,17 @@ from sbk_dashboard.processes import _terminate_psutil_tree
 
 PARENT_POLL_SECONDS = 0.25
 LOGGER = logging.getLogger(__name__)
+
+
+def _start_coverage_if_requested() -> None:
+    """Enable optional subprocess coverage without adding a runtime dependency."""
+    if not os.environ.get("COVERAGE_PROCESS_START"):
+        return
+    try:
+        from coverage import process_startup
+    except ImportError:
+        return
+    process_startup()
 
 
 def _parent_alive(pid: int, started: float) -> bool:
@@ -69,6 +81,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(arguments: list[str] | None = None) -> int:
+    _start_coverage_if_requested()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

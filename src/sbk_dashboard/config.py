@@ -19,6 +19,7 @@ DEFAULT_PROMETHEUS_PORT = 9090
 DEFAULT_GRAFANA_PORT = 3000
 DEFAULT_RETENTION_DAYS = 7
 DEFAULT_STATUS_INTERVAL_SECONDS = 60
+DEFAULT_MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _select(option: str | None, environment: dict[str, str], variable: str, default: str) -> tuple[str, str]:
@@ -150,6 +151,8 @@ class DownloadConfig:
     grafana: ToolArchive
     platform: RuntimePlatform
     source: str
+    max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_BYTES
+    selection_source: str = "default"
 
 
 @dataclass(frozen=True)
@@ -243,7 +246,24 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,
-         "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source},
+         "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source,
+         "http-workers": _environment_source(environment, "SBK_DASHBOARD_HTTP_WORKERS"),
+         "http-queue-capacity": _environment_source(environment, "SBK_DASHBOARD_HTTP_QUEUE"),
+         "request-timeout-seconds": _environment_source(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
+         "health-response-limit-bytes": _environment_source(environment, "SBK_DASHBOARD_HEALTH_RESPONSE_MB"),
+         "supervisor-seconds": _environment_source(environment, "SBK_DASHBOARD_SUPERVISOR_SECONDS"),
+         "process-log-size-mb": _environment_source(environment, "SBK_DASHBOARD_PROCESS_LOG_MB"),
+         "process-log-backups": _environment_source(environment, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS"),
+         "max-targets": _environment_source(environment, "SBK_DASHBOARD_MAX_TARGETS"),
+         "target-health-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS"
+         ),
+         "prometheus-startup-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS"
+         ),
+         "grafana-startup-timeout-seconds": _environment_source(
+             environment, "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS"
+         )},
         http_workers,
         http_queue,
         request_timeout,
@@ -311,6 +331,10 @@ def _bounded_environment(
     if not minimum <= selected <= maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return selected
+
+
+def _environment_source(environment: dict[str, str], name: str) -> str:
+    return f"environment {name}" if environment.get(name, "").strip() else "default"
 
 
 def _bind_address(value: str, name: str) -> str:
@@ -405,7 +429,23 @@ def load_download_config(option: str | None, data_directory: Path, environment: 
 
     downloads = Path(expand(required("download.directory"))).expanduser().resolve()
     installs = Path(expand(required("install.directory"))).expanduser().resolve()
-    return DownloadConfig(downloads, installs, archive("prometheus"), archive("grafana"), selected_platform, source)
+    raw_max_download_bytes = expand(properties.get("download.max.bytes", str(DEFAULT_MAX_DOWNLOAD_BYTES))).strip()
+    try:
+        max_download_bytes = int(raw_max_download_bytes)
+    except ValueError as error:
+        raise ValueError("download.max.bytes must be a number") from error
+    if max_download_bytes < 1:
+        raise ValueError("download.max.bytes must be positive")
+    return DownloadConfig(
+        downloads,
+        installs,
+        archive("prometheus"),
+        archive("grafana"),
+        selected_platform,
+        source,
+        max_download_bytes,
+        "command line" if option else _environment_source(environment, "SBK_DASHBOARD_MONITORING_PROPERTIES"),
+    )
 
 
 def _safe_relative(value: str, tool: str) -> Path:

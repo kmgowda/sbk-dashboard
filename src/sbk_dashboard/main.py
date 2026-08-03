@@ -135,38 +135,29 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
     sources = {**dashboard.sources, **configuration.monitoring.sources}
     for name, value in values.items():
         LOGGER.info("  %s=%s [%s]", name, value, sources[name])
-    properties_source = "command line" if "-monitoring-properties" in configuration.arguments else (
-        "environment SBK_DASHBOARD_MONITORING_PROPERTIES"
-        if os.environ.get("SBK_DASHBOARD_MONITORING_PROPERTIES") else "default"
+    LOGGER.info(
+        "  monitoring-properties=%s [%s]",
+        configuration.downloads.source,
+        configuration.downloads.selection_source,
     )
-    LOGGER.info("  monitoring-properties=%s [%s]", configuration.downloads.source, properties_source)
     LOGGER.info("  monitoring-download-directory=%s [properties file]", configuration.downloads.download_directory)
     LOGGER.info("  monitoring-install-directory=%s [properties file]", configuration.downloads.install_directory)
+    LOGGER.info("  monitoring-max-download-bytes=%s [properties file]", configuration.downloads.max_download_bytes)
     operational = {
-        "http-workers": (dashboard.http_workers, "SBK_DASHBOARD_HTTP_WORKERS"),
-        "http-queue-capacity": (dashboard.http_queue_capacity, "SBK_DASHBOARD_HTTP_QUEUE"),
-        "request-timeout-seconds": (dashboard.request_timeout_seconds, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
-        "health-response-limit-bytes": (dashboard.health_response_limit_bytes, "SBK_DASHBOARD_HEALTH_RESPONSE_MB"),
-        "supervisor-seconds": (dashboard.supervisor_interval_seconds, "SBK_DASHBOARD_SUPERVISOR_SECONDS"),
-        "process-log-size-mb": (dashboard.process_log_size_mb, "SBK_DASHBOARD_PROCESS_LOG_MB"),
-        "process-log-backups": (dashboard.process_log_backups, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS"),
-        "max-targets": (dashboard.max_targets, "SBK_DASHBOARD_MAX_TARGETS"),
-        "target-health-timeout-seconds": (
-            dashboard.target_health_timeout_seconds,
-            "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS",
-        ),
-        "prometheus-startup-timeout-seconds": (
-            dashboard.prometheus_startup_timeout_seconds,
-            "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS",
-        ),
-        "grafana-startup-timeout-seconds": (
-            dashboard.grafana_startup_timeout_seconds,
-            "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS",
-        ),
+        "http-workers": dashboard.http_workers,
+        "http-queue-capacity": dashboard.http_queue_capacity,
+        "request-timeout-seconds": dashboard.request_timeout_seconds,
+        "health-response-limit-bytes": dashboard.health_response_limit_bytes,
+        "supervisor-seconds": dashboard.supervisor_interval_seconds,
+        "process-log-size-mb": dashboard.process_log_size_mb,
+        "process-log-backups": dashboard.process_log_backups,
+        "max-targets": dashboard.max_targets,
+        "target-health-timeout-seconds": dashboard.target_health_timeout_seconds,
+        "prometheus-startup-timeout-seconds": dashboard.prometheus_startup_timeout_seconds,
+        "grafana-startup-timeout-seconds": dashboard.grafana_startup_timeout_seconds,
     }
-    for name, (value, environment) in operational.items():
-        source = f"environment {environment}" if os.environ.get(environment) else "default"
-        LOGGER.info("  %s=%s [%s]", name, value, source)
+    for name, value in operational.items():
+        LOGGER.info("  %s=%s [%s]", name, value, dashboard.sources[name])
 
 
 def log_status(server: DashboardHttpServer, monitoring: ManagedMonitoringStack) -> None:

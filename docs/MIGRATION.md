@@ -65,3 +65,9 @@ Periodic status now reports bounded recent browser activity: `clients_recent`, `
 `grafana_opens_5m`. This adds only an in-memory control-plane heartbeat endpoint and opaque per-tab browser IDs; it
 does not change persisted data, command options, native Prometheus/Grafana configuration, or direct-server routing.
 Direct Grafana bookmarks and Prometheus API users remain outside these counts.
+
+Endpoint registry loading now revalidates normalized host names, metrics paths, field bounds, and the stable
+host-and-port-derived endpoint ID before generating discovery or dashboard files. Registries produced by supported
+sbk-dashboard releases remain compatible. Manually modified entries with inconsistent IDs or invalid fields must be
+corrected before startup. Native archive downloads are now capped by the `download.max.bytes` monitoring property;
+the packaged default is 2 GiB.

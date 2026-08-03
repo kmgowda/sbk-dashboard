@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import asdict, dataclass
+
+from sbk_dashboard.network import normalize_host
+
+
+def endpoint_id(host: str, port: int) -> str:
+    """Return the stable identity for one normalized endpoint."""
+    return hashlib.sha256(f"{host}:{port}".encode()).hexdigest()[:16]
+
+
+def normalize_metrics_path(value: object) -> str:
+    """Validate and normalize an endpoint metrics path."""
+    if value is not None and not isinstance(value, str):
+        raise ValueError("Metrics path must be an absolute HTTP path")
+    selected = value.strip() if isinstance(value, str) and value.strip() else "/metrics"
+    if not selected.startswith("/") or any(character in selected for character in "?# "):
+        raise ValueError("Metrics path must be an absolute HTTP path")
+    return selected
 
 
 @dataclass(frozen=True)
@@ -36,15 +54,36 @@ class BenchmarkTarget:
 
     @classmethod
     def from_persisted(cls, value: dict[str, object]) -> BenchmarkTarget:
+        raw_host = value["host"]
+        if not isinstance(raw_host, str):
+            raise TypeError("Persisted endpoint host must be a string")
+        host = normalize_host(raw_host, "Persisted endpoint host", allow_unspecified=False)
         raw_port = value["port"]
         if isinstance(raw_port, bool) or not isinstance(raw_port, (str, int)):
             raise TypeError("Persisted endpoint port must be numeric")
         port = int(raw_port)
         if not 1 <= port <= 65535:
             raise ValueError("Persisted endpoint port must be between 1 and 65535")
+        raw_id = value["id"]
+        if not isinstance(raw_id, str) or raw_id != endpoint_id(host, port):
+            raise ValueError("Persisted endpoint identifier does not match its normalized host and port")
+        raw_name = value["name"]
+        if not isinstance(raw_name, str) or not raw_name.strip() or len(raw_name) > 100:
+            raise ValueError("Persisted endpoint name must contain between 1 and 100 characters")
+        raw_created_at = value["createdAt"]
+        if not isinstance(raw_created_at, str) or not raw_created_at.strip():
+            raise ValueError("Persisted endpoint creation time must be a non-empty string")
+        raw_kind = value.get("kind", "SBK")
+        if not isinstance(raw_kind, str) or raw_kind not in {"SBK", "SBM"}:
+            raise ValueError("Persisted endpoint kind must be SBK or SBM")
         return cls(
-            str(value["id"]), str(value["name"]), str(value["host"]), port,
-            str(value.get("metricsPath", "/metrics")), str(value.get("kind", "SBK")), str(value["createdAt"]),
+            raw_id,
+            raw_name,
+            host,
+            port,
+            normalize_metrics_path(value.get("metricsPath", "/metrics")),
+            raw_kind,
+            raw_created_at,
         )
 
 

@@ -314,6 +314,30 @@ class LifecycleTest(unittest.TestCase):
         loopback.connect_ex.assert_called_once_with(("127.0.0.1", 19090))
         public.connect_ex.assert_called_once_with(("192.0.2.10", 19090))
 
+    def test_ipv6_wildcard_probe_skips_link_local_zone_addresses(self):
+        loopback_context, loopback = self._socket_context()
+        public_context, public = self._socket_context()
+        probe_context, probe = self._socket_context()
+        loopback.connect_ex.return_value = 1
+        public.connect_ex.return_value = 1
+        local_addresses = {
+            "test": [
+                SimpleNamespace(family=socket.AF_INET6, address="fe80::1%ens192"),
+                SimpleNamespace(family=socket.AF_INET6, address="2001:0db8::8"),
+            ],
+        }
+        with (
+            patch("sbk_dashboard.processes.psutil.net_if_addrs", return_value=local_addresses),
+            patch(
+                "sbk_dashboard.processes.socket.socket",
+                side_effect=[loopback_context, public_context, probe_context],
+            ),
+        ):
+            self.assertTrue(PortProcessManager.available(19090, "::"))
+        loopback.connect_ex.assert_called_once_with(("::1", 19090, 0, 0))
+        public.connect_ex.assert_called_once_with(("2001:db8::8", 19090, 0, 0))
+        probe.bind.assert_called_once_with(("::", 19090, 0, 0))
+
     def test_inspect_survives_process_disappearing_between_pid_and_exe(self):
         listener = SimpleNamespace(status=psutil.CONN_LISTEN, laddr=SimpleNamespace(port=19090), pid=1)
         process = MagicMock()
@@ -351,6 +375,7 @@ class LifecycleTest(unittest.TestCase):
         failed_output = MagicMock()
         failed_output.write.side_effect = OSError("disk temporarily unavailable")
         recovered_output = MagicMock()
+        recovered_output.write.return_value = len(b"retained")
         pump = RotatingProcessLog(process, Path("native.log"), 1024, 1)
         with (
             patch.object(pump, "_open_output", side_effect=[(failed_output, 0), (recovered_output, 0)]),
@@ -360,6 +385,17 @@ class LifecycleTest(unittest.TestCase):
             pump._run()
         recovered_output.write.assert_called_once_with(b"retained")
         self.assertTrue(any("logging recovered" in message for message in captured.output))
+
+    def test_log_pump_retries_partial_file_writes_without_losing_bytes(self):
+        source = MagicMock()
+        source.read.side_effect = [b"abcde", b""]
+        process = SimpleNamespace(stdout=source)
+        output = MagicMock()
+        output.write.side_effect = [2, 3]
+        pump = RotatingProcessLog(process, Path("native.log"), 1024, 1)
+        with patch.object(pump, "_open_output", return_value=(output, 0)):
+            pump._run()
+        self.assertEqual([call(b"abcde"), call(b"cde")], output.write.call_args_list)
 
     def test_log_pump_close_reports_worker_that_does_not_stop(self):
         stdout = MagicMock()
@@ -426,6 +462,22 @@ class TerminationTest(unittest.TestCase):
         child.terminate.assert_called_once()
         child.kill.assert_called_once()
         self.assertEqual([child], wait_procs.call_args_list[0].args[0])
+
+    def test_terminate_psutil_tree_reenumerates_children_before_forced_kill(self):
+        from sbk_dashboard.processes import _terminate_psutil_tree
+
+        parent = MagicMock()
+        parent.pid = 10
+        first = MagicMock()
+        first.pid = 11
+        late = MagicMock()
+        late.pid = 12
+        parent.children.side_effect = [[first], [first, late]]
+        with patch("sbk_dashboard.processes.psutil.wait_procs") as wait_procs:
+            wait_procs.side_effect = [([], [parent, first]), ([], [])]
+            _terminate_psutil_tree(parent, "Test")
+        first.kill.assert_called_once()
+        late.kill.assert_called_once()
 
 
 class BoundedHttpServerTest(unittest.TestCase):

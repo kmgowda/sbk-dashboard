@@ -137,6 +137,32 @@ class ConfigurationTest(unittest.TestCase):
             config = load_download_config(str(path), Path(temporary), {}, RuntimePlatform("linux", "x86_64"))
             self.assertEqual("https://example.test/prom.tar.gz", config.prometheus.url)
 
+    def test_download_limit_and_properties_source_are_loaded_from_explicit_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "override.properties"
+            path.write_text("download.max.bytes=123456\n", encoding="utf-8")
+            config = load_download_config(
+                None,
+                Path(temporary),
+                {"SBK_DASHBOARD_MONITORING_PROPERTIES": str(path)},
+                RuntimePlatform("linux", "x86_64"),
+            )
+            self.assertEqual(123456, config.max_download_bytes)
+            self.assertEqual(
+                "environment SBK_DASHBOARD_MONITORING_PROPERTIES", config.selection_source
+            )
+
+    def test_download_limit_must_be_positive_numeric_property(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "override.properties"
+            for value in ("0", "not-a-number"):
+                with self.subTest(value=value):
+                    path.write_text(f"download.max.bytes={value}\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "download.max.bytes"):
+                        load_download_config(
+                            str(path), Path(temporary), {}, RuntimePlatform("linux", "x86_64")
+                        )
+
 
 if __name__ == "__main__":
     unittest.main()

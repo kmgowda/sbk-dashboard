@@ -9,7 +9,8 @@ python -m pip install -e ".[dev]"
 ruff check src tests
 mypy src
 python -m pytest
-coverage run -m pytest
+COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
+coverage combine
 coverage report
 python -m build --no-isolation
 python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
@@ -51,6 +52,11 @@ total. The counters remain visible in the responsive single-column layout.
 Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
 verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery
 to `up` and exact summary counts in both states.
+
+Reconciliation-generation regressions block a Prometheus status response while replacing the target set and verify
+that the obsolete response cannot remove the new endpoint's `pending` state or restore a deleted endpoint. Command
+tests assert the configured `--storage.tsdb.retention.time=<days>d` value. When `promtool` is installed beside
+Prometheus, startup runs `promtool check config` before either native service is started.
 
 The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs and
 `Cache-Control: no-cache` on both resources. This protects upgrades from the regression where new counter markup was
@@ -141,3 +147,20 @@ conda run -p /tmp/sbk-dashboard-conda sbk-dashboard -h
 ```
 
 On Windows, substitute `Scripts\\python.exe` and `Scripts\\sbk-dashboard.exe` for the venv paths.
+
+## Native Windows extraction smoke test
+
+The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows ZIP
+or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
+
+```powershell
+py -3 -m venv $env:TEMP\sbk-dashboard-win-venv
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\python.exe -m pip install -e ".[dev]"
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\python.exe -m unittest tests.test_bootstrap -v
+& $env:TEMP\sbk-dashboard-win-venv\Scripts\sbk-dashboard.exe -data $env:TEMP\sbk-dashboard-win-data -h
+```
+
+For a full bootstrap smoke test, start without installed native tools using a disposable data directory, verify the
+pinned Windows ZIPs install beneath that directory, and confirm `prometheus.exe`, `promtool.exe`, and Grafana start.
+Stop the dashboard and verify all child processes exit before deleting only those two disposable directories. This
+native Windows validation remains required before claiming Windows runtime certification.

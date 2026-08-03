@@ -247,14 +247,18 @@ layouts, and executable names for:
 - `windows-x86_64` and `windows-arm64`
 
 Missing tools are downloaded to `${data.directory}/downloads`, checksum-verified, safely extracted, and installed
-under `${data.directory}/tools`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special
-entries are rejected.
+under `${data.directory}/tools`. Each response is bounded by `download.max.bytes`, including downloads without a
+`Content-Length`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special entries are
+rejected. When the official `promtool` is available beside Prometheus, each generated `prometheus.yml` is validated
+with `promtool check config` before the native services start.
 
 Override only the required values in an external file:
 
 ```properties
 download.directory=/srv/sbk-dashboard/downloads
 install.directory=/srv/sbk-dashboard/tools
+# Maximum bytes accepted for each downloaded archive (default: 2 GiB).
+download.max.bytes=2147483648
 prometheus.download.url=https://mirror.example/prometheus.tar.gz
 prometheus.download.file=prometheus.tar.gz
 prometheus.download.sha256=<64 lowercase hexadecimal characters>
@@ -399,7 +403,8 @@ python -m pip install -e ".[dev]"
 ruff check src tests
 mypy src
 python -m pytest
-coverage run -m pytest
+COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
+coverage combine
 coverage report
 python -m build --no-isolation
 ```

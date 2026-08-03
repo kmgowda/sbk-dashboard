@@ -65,6 +65,9 @@ The Python control plane persists registrations and generated configuration usin
 atomic replacement. On POSIX it also synchronizes the parent directory after replacement so the renamed directory
 entry is crash-durable. It does not store samples itself.
 
+Persisted endpoint fields are revalidated on every load. The normalized host and port must reproduce the stored
+stable endpoint ID before that ID can be used in Prometheus labels, Grafana UIDs, or generated filenames.
+
 Prometheus stores all samples under `monitoring/prometheus/data`. The `-retention` value is passed as
 `--storage.tsdb.retention.time=<days>d`; Prometheus performs block cleanup in the background. Its default is seven
 days. A remote endpoint being down does not erase previously ingested samples.
@@ -76,6 +79,10 @@ Corrupt or missing historical TSDB data is handled by Prometheus's own startup a
 scrape error becomes a non-fatal `down` state and does not prevent the management server or other dashboards from
 operating. Failure of Prometheus itself to start is fatal because the dashboard would have no metrics engine.
 
+Generated Prometheus configuration is checked with the adjacent official `promtool` before native services start
+when that executable is available. Downloaded tool archives are checksum-pinned and bounded by the configured
+`download.max.bytes` value even when a server omits `Content-Length`.
+
 ## Concurrency
 
 - The HTTP Active Object uses a fixed worker pool (eight by default) and a bounded admission semaphore/queue (64 by
@@ -84,7 +91,8 @@ operating. Failure of Prometheus itself to start is fatal because the dashboard 
   responses at 4 MiB by default.
 - Registry mutations, status snapshots, discovery writes, and provisioning reconciliations are protected by locks.
 - Status publication uses immutable tuple/dictionary replacement, so readers never observe partially reconciled
-  state. The map is capped by the configured endpoint limit.
+  state. Each reconciliation advances a generation; a Prometheus response captured for an older generation is
+  discarded rather than overwriting a new endpoint's pending state. The map is capped by the endpoint limit.
 - One supervisor thread checks both native services and refreshes target state. It sleeps on a shutdown event, so
   shutdown interrupts the wait without polling delay.
 - Recent browser activity uses two fixed-capacity LRU maps under one short-held lock. Landing heartbeats expire after
@@ -133,7 +141,8 @@ supervisor, joins it, and then stops Grafana and Prometheus in reverse dependenc
 Each owned native process is launched by a dedicated lightweight Python guardian in its own POSIX session or Windows
 process group. The native PID, executable, creation time, and port are persisted to defend against PID reuse. Normal
 termination addresses the guardian group and captured native descendant tree, first gracefully and then forcibly
-after a bounded timeout.
+after a bounded timeout. Descendants are enumerated again immediately before forced termination to reduce the
+Windows child-spawn race where process-group signals are unavailable.
 
 The guardian independently validates the control-plane PID and creation time four times per second. If the main
 process disappears without running cleanup—including `SIGKILL` on POSIX or direct process termination on Windows—it
@@ -154,6 +163,8 @@ probes resolve configured hostnames through `getaddrinfo`, check each resulting 
 set of local interface addresses for wildcard listeners before requiring a successful bind and listen. POSIX probes
 enable address reuse so `TIME_WAIT` does not block restart. Windows first requires exclusive ownership and permits a
 reusable fallback only when `psutil` reports exclusively `TIME_WAIT` sockets for the port and family.
+IPv6 link-local interface addresses are excluded from wildcard connect preflights because an unscoped zone address
+is not a portable socket endpoint; the authoritative bind/listen probe still covers wildcard listener conflicts.
 
 ## Object-oriented design
 

@@ -29,6 +29,9 @@ jobs:
       - run: python -W error::ResourceWarning -m unittest discover -s tests -q
       - run: coverage erase
       - run: coverage run -m pytest -q
+        env:
+          COVERAGE_PROCESS_START: pyproject.toml
+      - run: coverage combine
       - run: coverage report
       - run: python -m build --no-isolation
       - run: git diff --check
