@@ -10,7 +10,8 @@ health, and shutdown.
 
 ## Features
 
-- Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints.
+- Browser UI and JSON API for adding and removing hostname/IP-address plus port endpoints, with live total, up, and
+  down endpoint counts on the landing page.
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.

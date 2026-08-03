@@ -48,6 +48,10 @@ hostname or IP address from the direct HTTP `Host` header and combines it with t
 UID. Consequently a main page opened through a public IP, loopback address, DNS name, or IPv6 literal links to Grafana
 through that same address. `-grafana-url` is an authoritative static override for reverse-proxy and TLS deployments.
 
+The landing page derives its total, up, and down endpoint counters from the same bounded `/api/targets` response used
+for the endpoint inventory. Counts refresh with the inventory every ten seconds and after registration, deletion, or
+manual refresh. Pending and unknown endpoints remain included in the total but are not misclassified as down.
+
 ## Persistence and retention
 
 The Python control plane persists registrations and generated configuration using temporary files, `fsync`, and

@@ -58,9 +58,21 @@ class WebTest(unittest.TestCase):
             page = response.read()
             self.assertIn(b'value="SBK Dashboard"', page)
             self.assertIn(b'value="127.0.0.1"', page)
+            self.assertIn(b'id="target-count"', page)
+            self.assertIn(b'id="up-count"', page)
+            self.assertIn(b'id="down-count"', page)
+            self.assertIn(b'aria-label="Endpoint status summary" aria-live="polite"', page)
             self.assertNotIn(b"NVMe endurance run", page)
         with urllib.request.urlopen(self.base + "/app.js") as response:
-            self.assertIn(b"form.reset();", response.read())
+            script = response.read()
+            self.assertIn(b"form.reset();", script)
+            self.assertIn(b"updateEndpointSummary(targets);", script)
+            self.assertIn(b"target.status.state === 'up'", script)
+            self.assertIn(b"target.status.state === 'down'", script)
+        with urllib.request.urlopen(self.base + "/app.css") as response:
+            stylesheet = response.read()
+            self.assertIn(b".hero-stat { width: min(100%, 420px); }", stylesheet)
+            self.assertNotIn(b".hero-stat { display: none; }", stylesheet)
         with urllib.request.urlopen(self.base + "/api/health") as response:
             self.assertEqual("ok", json.load(response)["status"])
         request = urllib.request.Request(self.base + "/api/targets", method="POST", data=json.dumps({

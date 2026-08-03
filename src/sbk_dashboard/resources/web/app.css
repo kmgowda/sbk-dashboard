@@ -49,9 +49,19 @@ body::before {
 h1 { margin: 18px 0 22px; font-size: clamp(44px, 7vw, 86px); line-height: .98; letter-spacing: -.055em; font-weight: 680; }
 h1 em { color: transparent; font-style: normal; -webkit-text-stroke: 1px #6991b5; }
 .hero-copy { max-width: 660px; color: #9aacc0; line-height: 1.72; font-size: 16px; }
-.hero-stat { min-width: 205px; padding: 26px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(24, 50, 76, .65), rgba(9, 22, 37, .4)); border-radius: 18px; }
-.hero-stat > span { font: 600 58px/1 ui-monospace, monospace; color: var(--cyan); }
-.hero-stat p { margin: 8px 0 20px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+.hero-stat { min-width: 250px; padding: 24px 26px; border: 1px solid var(--line); background: linear-gradient(145deg, rgba(24, 50, 76, .65), rgba(9, 22, 37, .4)); border-radius: 18px; }
+.endpoint-total { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.endpoint-total > span { font: 600 58px/1 ui-monospace, monospace; color: var(--cyan); }
+.hero-stat p { margin: 7px 0 0; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.endpoint-health { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 17px 0 19px; }
+.endpoint-health > div + div { padding-left: 20px; border-left: 1px solid var(--line); }
+.endpoint-health span { font: 600 25px/1 ui-monospace, monospace; }
+.endpoint-health p { display: flex; align-items: center; gap: 6px; }
+.endpoint-health i { width: 6px; height: 6px; border-radius: 50%; }
+.up-count span { color: var(--cyan); }
+.up-count i { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+.down-count span { color: var(--orange); }
+.down-count i { background: var(--orange); }
 .pulse-line { height: 24px; display: flex; gap: 5px; align-items: end; }
 .pulse-line b { flex: 1; height: 25%; background: var(--cyan); opacity: .38; animation: pulse 1.8s ease-in-out infinite alternate; }
 .pulse-line b:nth-child(2), .pulse-line b:nth-child(6) { height: 70%; animation-delay: -.4s; }
@@ -132,7 +142,7 @@ td { padding: 11px; border-top: 1px solid var(--line); color: #a8b8c9; font-fami
 
 @media (max-width: 850px) {
     .hero { grid-template-columns: 1fr; padding-top: 50px; }
-    .hero-stat { display: none; }
+    .hero-stat { width: min(100%, 420px); }
     .workspace { grid-template-columns: 1fr; }
     .register-panel { border-right: 0; border-bottom: 1px solid var(--line); }
 }

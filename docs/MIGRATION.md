@@ -49,3 +49,6 @@ Owned Prometheus and Grafana processes now run beneath lightweight lifecycle gua
 or persisted-data migration. Service managers may retain their existing stop timeout and process-group policy; normal
 shutdown remains graceful, while hard termination of only the main PID now triggers guardian cleanup. Attached
 `-continue true` services remain externally owned and are never guarded or terminated by sbk-dashboard.
+
+The landing page now displays total, up, and down endpoint counters derived from the existing target inventory API.
+This is a browser-only presentation change with no new endpoint, option, or persisted-data migration.

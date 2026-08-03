@@ -44,6 +44,10 @@ Configuration and composition-root regressions verify the 60-second status defau
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure.
 
+Web asset regressions verify that the landing page exposes total, up, and down counters and that each inventory
+refresh derives the health counts from exact `up` and `down` states. Pending and unknown states count only toward the
+total. The counters remain visible in the responsive single-column layout.
+
 ## Manual Linux end-to-end test
 
 Use a temporary data directory and non-default ports when another monitoring stack is running:

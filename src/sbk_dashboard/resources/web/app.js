@@ -3,6 +3,8 @@ const message = document.querySelector('#form-message');
 const targetList = document.querySelector('#targets');
 const emptyState = document.querySelector('#empty-state');
 const targetCount = document.querySelector('#target-count');
+const upCount = document.querySelector('#up-count');
+const downCount = document.querySelector('#down-count');
 
 function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -35,13 +37,25 @@ function renderTarget(target) {
     return card;
 }
 
+function updateEndpointSummary(targets) {
+    let up = 0;
+    let down = 0;
+    for (const target of targets) {
+        if (target.status.state === 'up') up += 1;
+        if (target.status.state === 'down') down += 1;
+    }
+    targetCount.textContent = targets.length;
+    upCount.textContent = up;
+    downCount.textContent = down;
+}
+
 async function loadTargets() {
     try {
         const response = await fetch('/api/targets', {cache: 'no-store'});
         if (!response.ok) throw new Error('Unable to load endpoints');
         const targets = await response.json();
         targetList.replaceChildren(...targets.map(renderTarget));
-        targetCount.textContent = targets.length;
+        updateEndpointSummary(targets);
         emptyState.hidden = targets.length !== 0;
     } catch (error) {
         message.textContent = error.message;

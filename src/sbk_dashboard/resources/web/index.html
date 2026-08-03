@@ -26,9 +26,21 @@
             <p class="hero-copy">Register Prometheus metric endpoints. Each one receives an isolated,
                 live dedicated dashboard for throughput, latency, connections, and workload health.</p>
         </div>
-        <div class="hero-stat">
-            <span id="target-count">0</span>
-            <p>managed endpoints</p>
+        <div class="hero-stat" aria-label="Endpoint status summary" aria-live="polite">
+            <div class="endpoint-total">
+                <span id="target-count">0</span>
+                <p>Total endpoints</p>
+            </div>
+            <div class="endpoint-health">
+                <div class="up-count">
+                    <span id="up-count">0</span>
+                    <p><i aria-hidden="true"></i>Up</p>
+                </div>
+                <div class="down-count">
+                    <span id="down-count">0</span>
+                    <p><i aria-hidden="true"></i>Down</p>
+                </div>
+            </div>
             <div class="pulse-line"><b></b><b></b><b></b><b></b><b></b><b></b><b></b></div>
         </div>
     </section>
