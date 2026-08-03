@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import socket
@@ -179,9 +180,16 @@ class DashboardHttpServer:
         if name is None:
             self._json(request, 404, {"error": "Not found"})
             return
-        resource = files("sbk_dashboard").joinpath(f"resources/web/{name}")
+        resource_root = files("sbk_dashboard").joinpath("resources/web")
+        resource = resource_root.joinpath(name)
         try:
             body = resource.read_bytes()
+            if name == "index.html":
+                fingerprint = hashlib.sha256(
+                    resource_root.joinpath("app.css").read_bytes()
+                    + resource_root.joinpath("app.js").read_bytes()
+                ).hexdigest()[:12]
+                body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
             return
@@ -190,7 +198,9 @@ class DashboardHttpServer:
         )
         request.send_response(200)
         request.send_header("Content-Type", f"{content_type}; charset=utf-8")
-        request.send_header("Cache-Control", "no-cache" if name.endswith(".html") else "public, max-age=3600")
+        # Asset URLs are stable across releases. Require revalidation so a newly
+        # deployed HTML document can never run with an older cached script/style.
+        request.send_header("Cache-Control", "no-cache")
         request.send_header("Content-Length", str(len(body)))
         request.end_headers()
         request.wfile.write(body)

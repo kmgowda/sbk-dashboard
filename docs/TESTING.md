@@ -48,6 +48,14 @@ Web asset regressions verify that the landing page exposes total, up, and down c
 refresh derives the health counts from exact `up` and `down` states. Pending and unknown states count only toward the
 total. The counters remain visible in the responsive single-column layout.
 
+Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
+verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery
+to `up` and exact summary counts in both states.
+
+The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs and
+`Cache-Control: no-cache` on both resources. This protects upgrades from the regression where new counter markup was
+rendered while a cached older script updated only the Total value.
+
 ## Manual Linux end-to-end test
 
 Use a temporary data directory and non-default ports when another monitoring stack is running:

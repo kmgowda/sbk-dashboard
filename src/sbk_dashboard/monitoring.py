@@ -221,7 +221,7 @@ class ManagedMonitoringStack:
                     observed = active.get(target.id)
                     if observed is None:
                         next_statuses[target.id] = TargetStatus(
-                            "pending", _now(), "Prometheus is discovering the endpoint"
+                            "down", _now(), "Prometheus does not report the registered endpoint"
                         )
                     else:
                         health = observed.get("health", "unknown")

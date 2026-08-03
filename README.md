@@ -132,6 +132,14 @@ discovered IPv6 addresses.
 Host inputs are canonical IP literals or DNS names. Malformed numeric IPv4 attempts, invalid IPv6, embedded ports,
 zone identifiers, and unspecified remote targets are rejected before they can reach Prometheus configuration.
 
+An endpoint is `pending` only until the next successful Prometheus target refresh. A registered endpoint that
+Prometheus reports as unhealthy—or does not report after that refresh—is `down`; it returns to `up` automatically
+after a successful scrape.
+
+The landing page uses a content fingerprint in its JavaScript and stylesheet URLs and also requires browsers to
+revalidate those resources. This prevents an upgrade from combining new HTML with an older cached script and
+displaying stale endpoint counters.
+
 ### Production example
 
 ```bash

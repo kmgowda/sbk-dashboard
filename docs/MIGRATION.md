@@ -52,3 +52,11 @@ shutdown remains graceful, while hard termination of only the main PID now trigg
 
 The landing page now displays total, up, and down endpoint counters derived from the existing target inventory API.
 This is a browser-only presentation change with no new endpoint, option, or persisted-data migration.
+
+Registered endpoints missing from a successful Prometheus target response now transition from initial `pending` to
+`down`. Earlier versions left this case pending indefinitely, causing the landing-page Down counter to omit stale
+session endpoints. This status correction requires no configuration or data migration.
+
+Landing-page JavaScript and CSS URLs now include a content fingerprint, and all assets require browser revalidation.
+Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
+compatible control script and stylesheet automatically.

@@ -50,7 +50,14 @@ through that same address. `-grafana-url` is an authoritative static override fo
 
 The landing page derives its total, up, and down endpoint counters from the same bounded `/api/targets` response used
 for the endpoint inventory. Counts refresh with the inventory every ten seconds and after registration, deletion, or
-manual refresh. Pending and unknown endpoints remain included in the total but are not misclassified as down.
+manual refresh. A newly reconciled endpoint is pending until a successful Prometheus target refresh. If that response
+does not contain the registered endpoint, the endpoint is down rather than remaining pending indefinitely. Pending
+and unknown endpoints remain included in the total but are not misclassified as down.
+
+The HTML response inserts a bounded SHA-256 content fingerprint into its JavaScript and stylesheet URLs, and every
+HTML, JavaScript, and stylesheet response uses `Cache-Control: no-cache`. The new URL bypasses an earlier unexpired
+cached asset immediately, while revalidation protects subsequent loads. A deployment therefore cannot combine a new
+document with an older control script, which would leave newly introduced UI state at its static initial value.
 
 ## Persistence and retention
 

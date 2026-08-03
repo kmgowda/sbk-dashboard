@@ -1,4 +1,5 @@
 import json
+import re
 import socket
 import tempfile
 import threading
@@ -63,13 +64,19 @@ class WebTest(unittest.TestCase):
             self.assertIn(b'id="down-count"', page)
             self.assertIn(b'aria-label="Endpoint status summary" aria-live="polite"', page)
             self.assertNotIn(b"NVMe endurance run", page)
+            self.assertNotIn(b"__ASSET_VERSION__", page)
+            versions = re.findall(rb'(?:app\.css|app\.js)\?v=([0-9a-f]{12})', page)
+            self.assertEqual(2, len(versions))
+            self.assertEqual(versions[0], versions[1])
         with urllib.request.urlopen(self.base + "/app.js") as response:
+            self.assertEqual("no-cache", response.headers["Cache-Control"])
             script = response.read()
             self.assertIn(b"form.reset();", script)
             self.assertIn(b"updateEndpointSummary(targets);", script)
             self.assertIn(b"target.status.state === 'up'", script)
             self.assertIn(b"target.status.state === 'down'", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
+            self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()
             self.assertIn(b".hero-stat { width: min(100%, 420px); }", stylesheet)
             self.assertNotIn(b".hero-stat { display: none; }", stylesheet)
@@ -185,7 +192,11 @@ class WebTest(unittest.TestCase):
 class MonitoringContinueTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.prometheus = self._service({"/-/ready": b"ready", "/api/v1/targets": b'{"data":{"activeTargets":[]}}'})
+        self.prometheus_routes = {
+            "/-/ready": b"ready",
+            "/api/v1/targets": b'{"data":{"activeTargets":[]}}',
+        }
+        self.prometheus = self._service(self.prometheus_routes)
         self.grafana = self._service({"/api/health": b'{"database":"ok"}'})
 
     def tearDown(self):
@@ -234,6 +245,47 @@ class MonitoringContinueTest(unittest.TestCase):
             "https://grafana.example/base/d/sbk-target/",
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
+
+    def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, True, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            Path("unused"),
+            data / "unused",
+            self.prometheus.server_port,
+            self.grafana.server_port,
+            f"http://localhost:{self.grafana.server_port}",
+            {},
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        target = BenchmarkTarget(
+            "old-session", "Old session", "127.0.0.1", 9718, "/metrics", "SBK", "now"
+        )
+        stack.reconcile([target])
+        self.assertEqual("pending", stack.status(target.id).state)
+
+        stack.refresh_statuses()
+        self.assertEqual("down", stack.status(target.id).state)
+        self.assertIn("does not report", stack.status(target.id).detail)
+        self.assertEqual((1, 0, 1, 0, 0), _status_counts(stack))
+
+        self.prometheus_routes["/api/v1/targets"] = json.dumps(
+            {
+                "data": {
+                    "activeTargets": [
+                        {
+                            "labels": {"sbk_endpoint_id": target.id},
+                            "health": "up",
+                            "lastScrape": "2026-08-03T10:00:00Z",
+                            "lastError": "",
+                        }
+                    ]
+                }
+            }
+        ).encode()
+        stack.refresh_statuses()
+        self.assertEqual("up", stack.status(target.id).state)
+        self.assertEqual((1, 1, 0, 0, 0), _status_counts(stack))
 
     def test_default_prometheus_command_binds_only_to_loopback(self):
         data = Path(self.temporary.name)
@@ -297,6 +349,11 @@ class MonitoringContinueTest(unittest.TestCase):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         return server
+
+
+def _status_counts(stack: ManagedMonitoringStack) -> tuple[int, int, int, int, int]:
+    summary = stack.summary()
+    return summary.endpoints, summary.up, summary.down, summary.pending, summary.unknown
 
 
 if __name__ == "__main__":
