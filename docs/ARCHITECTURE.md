@@ -1,5 +1,9 @@
 # Architecture
 
+This document defines system boundaries and design decisions. For operator procedures see
+[`USAGE.md`](USAGE.md); for module-level call paths, locks, generated files, and failure handling see
+[`INTERNALS.md`](INTERNALS.md).
+
 ## Runtime boundary
 
 `sbk-dashboard` is a Python control plane around two official native servers. Prometheus and Grafana are not Python
@@ -28,6 +32,55 @@ modules and are never embedded in the Python interpreter.
 
 There is one Prometheus process and one Grafana process per `sbk-dashboard` instance. There is not one native process
 per endpoint. This is significantly less expensive and lets Prometheus query data across endpoints when required.
+
+## Control-plane lifecycle
+
+Startup is dependency ordered. The management port is not opened until the native monitoring stack is ready:
+
+```text
+arguments/environment
+        |
+        v
+parse + validate configuration
+        |
+        v
+resolve/download native tools
+        |
+        v
+load registry -> generate configuration -> reconcile dashboards
+        |
+        v
+validate Prometheus config -> apply port ownership policy
+        |
+        v
+start Prometheus -> start Grafana -> start supervisor
+        |
+        v
+start bounded management HTTP server -> optionally open browser
+```
+
+Endpoint registration is a serialized compensating transaction:
+
+```text
+validate request
+      |
+      v
+atomically persist targets.json
+      |
+      v
+rewrite discovery + dashboard clones + mappings + status snapshot
+      |
+      +-- success --> HTTP 201
+      |
+      `-- failure --> restore previous registry + best-effort reconcile + HTTP 500
+```
+
+Deletion uses the same transaction in reverse. Request-specific Grafana hostnames are computed only while rendering
+the response and are never persisted into endpoint identity or mappings.
+
+Shutdown first closes management admission and its worker pool. It then signals and joins the supervisor, stops
+Grafana before Prometheus, closes log pumps, removes owned PID records, and restores signal handlers. Attached
+`-continue true` services are deliberately excluded from termination.
 
 ## Endpoint isolation
 

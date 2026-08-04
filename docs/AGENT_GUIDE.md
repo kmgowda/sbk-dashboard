@@ -2,6 +2,8 @@
 
 This guide gives software agents enough context to make safe, reviewable changes without rediscovering the project
 on every task. The normative rules are in [`AGENTS.md`](../AGENTS.md); this document explains how to apply them.
+Use [`USAGE.md`](USAGE.md) for operator workflows, [`ARCHITECTURE.md`](ARCHITECTURE.md) for design decisions, and
+[`INTERNALS.md`](INTERNALS.md) for module-level ownership and call paths.
 
 ## Mental model
 
@@ -285,6 +287,8 @@ Review changes in this order:
 - `README.md`: end-user install, run, options, examples, operations.
 - `docs/ARCHITECTURE.md`: design decisions and invariants.
 - `docs/TESTING.md`: executable validation procedures.
+- `docs/USAGE.md`: operator installation, environment, endpoint, backup, upgrade, and troubleshooting procedures.
+- `docs/INTERNALS.md`: implementation-level call paths, locks, processes, persistence formats, and failure boundaries.
 - `docs/MIGRATION.md`: compatibility and upgrade behavior.
 - `AGENTS.md`: concise normative instructions for all agents.
 - `docs/AGENT_GUIDE.md`: detailed implementation navigation and recipes.

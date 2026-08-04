@@ -57,6 +57,16 @@ Browser
 The Python process is the control plane. Metrics ingestion, storage, PromQL, dashboard provisioning, and rendering
 remain in the official Prometheus and Grafana servers. See [the architecture document](docs/ARCHITECTURE.md).
 
+Documentation map:
+
+- [Usage guide](docs/USAGE.md): environment activation/deactivation, daily operation, endpoints, backup, upgrades,
+  and troubleshooting.
+- [Architecture](docs/ARCHITECTURE.md): system boundaries, lifecycle, concurrency, persistence, and design decisions.
+- [Implementation internals](docs/INTERNALS.md): code-level startup, request, reconciliation, supervision, and
+  shutdown paths.
+- [Docker deployment](docs/DOCKER.md): container networking, persistence, security, and release images.
+- [Testing](docs/TESTING.md): automated validation and real SBK procedures.
+
 ## Requirements
 
 - Python 3.10 or newer
@@ -124,6 +134,19 @@ sbk-dashboard -h
 
 For an editable development installation, use `python -m pip install -e ".[dev]"`.
 
+Stop a foreground `sbk-dashboard` with `Ctrl+C` before leaving the environment. Deactivating a venv changes the
+current shell only; it does not stop an application that is still running in another terminal or as a service.
+
+Leave the venv on Linux, macOS, Command Prompt, or PowerShell:
+
+```text
+deactivate
+```
+
+Reactivate it later with `. .venv/bin/activate` on Linux/macOS,
+`.venv\Scripts\activate.bat` in Command Prompt, or `.\.venv\Scripts\Activate.ps1` in PowerShell. Deactivation does
+not remove the environment or the persistent dashboard data directory.
+
 ## Install with Conda
 
 Create the declared environment:
@@ -145,11 +168,33 @@ python -m pip install .
 Using `pip` inside the activated Conda environment installs the console command and package resources in that
 environment without requiring a system-wide Python installation.
 
+Stop a foreground `sbk-dashboard` with `Ctrl+C`, then leave the Conda environment:
+
+```bash
+conda deactivate
+```
+
+If environments were activated on top of one another, run `conda deactivate` again until the desired parent or
+base environment is shown. Reactivate this project later with `conda activate sbk-dashboard`. Deactivation does not
+remove the environment; removing it is a separate, deliberate operation:
+
+```bash
+conda deactivate
+conda env remove --name sbk-dashboard
+```
+
+Removing a venv or Conda environment uninstalls its Python package copy but does not remove `~/.sbk-dashboard`, a
+custom `-data` directory, or a Docker volume. See the [usage guide](docs/USAGE.md) before deleting persistent data.
+
 ## Start
 
 ```bash
 sbk-dashboard
 ```
+
+Run it in the foreground for interactive use and stop it cleanly with `Ctrl+C`. The shutdown path stops HTTP
+admission first, then Grafana and Prometheus in reverse dependency order. For unattended operation, use the host
+service manager rather than a detached shell command. See [usage and operations](docs/USAGE.md).
 
 Defaults:
 
@@ -446,6 +491,8 @@ Software agents and automated coding tools should begin with [`AGENTS.md`](AGENT
 runtime flows, change recipes, debugging guidance, validation layers, and review priorities are in
 [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). Tool-specific discovery files delegate to those canonical documents so
 Codex, Devin, Windsurf, Cursor, Copilot, Claude, Gemini, and other agents follow the same engineering contract.
+Code-level component ownership and call paths are documented separately in
+[`docs/INTERNALS.md`](docs/INTERNALS.md).
 
 ```bash
 python -m pip install -e ".[dev]"
