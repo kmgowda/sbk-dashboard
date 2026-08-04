@@ -7,7 +7,7 @@ non-trivial change.
 
 ## Mission and boundaries
 
-`sbk-dashboard` is a non-containerized Python 3 control plane for official native Prometheus and Grafana servers. It
+`sbk-dashboard` is a Python 3 control plane for official native Prometheus and Grafana servers. It
 accepts remote SBK/SBM Prometheus endpoints and creates one isolated Grafana dashboard per unique `host:port`.
 
 Preserve these product boundaries:
@@ -15,7 +15,8 @@ Preserve these product boundaries:
 - Python 3.10 or newer; the package must work in a standard environment, venv, and Conda.
 - One Python control plane, one managed Prometheus server, and one managed Grafana server per application instance.
 - Prometheus and Grafana are native child processes, not Python libraries and not embedded runtimes.
-- Docker, Podman, Kubernetes, and Compose are outside the current runtime design.
+- Direct Python/Conda deployment and the supported Linux Docker/Compose package use the same one-control-plane,
+  two-native-child-process architecture. Container packaging must not replace, embed, or split those services.
 - Authentication remains disabled. `-auth true` must fail until authentication is deliberately implemented.
 - The exact canonical SBK dashboard is packaged from
   `/root/projects/SBK/grafana/dashboards/sbk-dashboard.json` and then cloned/scoped per endpoint.
@@ -33,7 +34,8 @@ Use this order to build context without scanning generated artifacts:
 2. `docs/ARCHITECTURE.md` for invariants, concurrency, persistence, and process ownership.
 3. `docs/TESTING.md` for automated and real-SBK validation.
 4. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
-5. The relevant source module and its matching test module.
+5. `docs/DOCKER.md` when changing container packaging, networking, security, or delivery.
+6. The relevant source module and its matching test module.
 
 Do not use `.coverage`, `.pytest_cache/`, `.ruff_cache/`, `build/`, `dist/`, `*.egg-info/`, downloaded tools, or
 runtime data as source material.
@@ -99,6 +101,10 @@ runtime data as source material.
   activation commands when alternatives are also documented.
 - Downloaded archives require HTTPS, pinned SHA-256, traversal-safe extraction, partial-file cleanup, and atomic
   installation.
+- Container bases require an official supported distribution, complete language patch version, and reviewed
+  multi-architecture digest. Container CI uses an explicit stable runner label rather than a moving `-latest` label.
+- Preserve outbound DNS, IPv4, and IPv6 endpoint scraping through the Compose bridge; IPv6 operation still depends
+  on Docker-host and upstream routing.
 
 ## Source map
 
@@ -118,6 +124,8 @@ runtime data as source material.
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
+| `Dockerfile`, `compose.yaml` | Non-root Linux image and host-port/persistent-volume deployment |
+| `tests/container_smoke.py` | Live container, dashboard, persistence, and lifecycle validation |
 | `tests/` | Unit, integration, platform, lifecycle, backpressure, and resource tests |
 
 ## Development commands

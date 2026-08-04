@@ -217,9 +217,26 @@ Use the least expensive layer that proves the change, then add the higher layers
 5. **Real SBK:** Java 25 SBK `PrometheusLogger`, real series ingestion, 53 panels, restart persistence.
 6. **Native cross-platform smoke:** repeat installation/start/stop on Linux, macOS, and Windows rather than simulating
    all OS behavior on Linux.
+7. **Container smoke:** build the Linux AMD64 image, validate ports, registration, generated Grafana URL/dashboard,
+   restart persistence, and orphan-free shutdown; separately build Linux ARM64 with Buildx/QEMU.
 
 When a test requires external downloads, prefer already installed verified tools. Do not weaken checksum validation
 to make a test convenient.
+
+### Change container delivery
+
+1. Preserve the single-container native-child-process architecture and non-root UID/GID 10001.
+2. Keep Prometheus internal; publish only management 9721 and Grafana 3000.
+3. Keep `/var/lib/sbk-dashboard` on a persistent volume and never bake runtime state into an image layer.
+4. Synchronize application/native versions and pinned SHA-256 values with `version.py` and packaged properties.
+   Keep the official Python base on a supported Debian stable generation, pin its complete patch tag and
+   multi-architecture digest, and update that digest deliberately with full AMD64/ARM64 validation. CI must pass the
+   version from `version.py` as `APPLICATION_VERSION`; the Dockerfile default remains a tested local-build fallback.
+5. Validate both Dockerfile/Compose contracts and `tests/container_smoke.py`; run the real-SBK mode for lifecycle,
+   metrics, 53-panel provisioning, and restart persistence changes.
+6. Build both `linux/amd64` and `linux/arm64`; test literal IPv4 and IPv6 scrape addresses on an IPv6-enabled bridge,
+   and do not claim native ARM execution from a QEMU build-only check.
+7. Update `docs/DOCKER.md`, and remove only the exact disposable containers/volumes/files created by validation.
 
 ## Debugging guide
 

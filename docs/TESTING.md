@@ -28,6 +28,61 @@ PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
 those operating systems because native executables cannot be meaningfully launched through Linux simulation.
 
+## Container validation
+
+The static contract tests verify non-root execution, persistent data, public ports 9721/3000, internal Prometheus,
+native version/checksum synchronization, Compose hardening, and build-context exclusions:
+
+```bash
+PYTHONPATH=src python -m unittest tests.test_container -v
+docker compose config --quiet
+```
+
+Build and run the live Linux smoke test:
+
+```bash
+docker build --tag sbk-dashboard:test .
+python tests/container_smoke.py --image sbk-dashboard:test
+```
+
+It starts a uniquely named IPv6-enabled bridge, two synthetic remote exporters, a disposable dashboard container,
+and a volume. The exporters are registered by their literal container IPv4 and IPv6 addresses, proving that
+Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
+host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
+clean shutdown, absence of recorded native PIDs, and registration/dashboard persistence across a full restart. Its
+`finally` cleanup removes only those uniquely named containers, network, and volume.
+
+For real SBK integration, expose a non-default host exporter port for at least 120 seconds:
+
+```bash
+/root/projects/SBK/build/install/sbk/bin/sbk \
+  -class file -file /tmp/sbk-dashboard-container-test.bin \
+  -writers 1 -size 4096 -seconds 120 -records 100000 \
+  -out PrometheusLogger -context 19718/metrics
+```
+
+In another terminal run:
+
+```bash
+python tests/container_smoke.py \
+  --image sbk-dashboard:test \
+  --target-host host.docker.internal \
+  --target-port 19718 \
+  --expect-target-up
+```
+
+This mode additionally requires the target to become `up`, verifies endpoint-scoped real `SBK_*` series in the
+container's internal Prometheus, counts exactly 53 panels in the generated dashboard, and repeats those assertions
+after a full container restart. Stop SBK and remove only `/tmp/sbk-dashboard-container-test.bin` afterward.
+
+CI uses the stable `ubuntu-24.04` runner, builds/runs Linux AMD64, and builds Linux ARM64 under QEMU. A successful
+QEMU build is not a native ARM runtime claim. Docker Desktop behavior on macOS/Windows and native ARM execution still
+require their respective smoke tests.
+
+Container contract tests also keep the Dockerfile Grafana build number, archive checksums, download-size cap,
+application version build arguments, stable Linux runner labels, and best-effort pull-request cache export aligned
+with packaged configuration.
+
 Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
 wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
 It also sends a live oversized request with a negative `Content-Length`, rejects negative native-download lengths,

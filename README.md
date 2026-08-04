@@ -4,9 +4,9 @@
 Prometheus server and one native Grafana server, dynamically registers remote PrometheusLogger endpoints, and
 provisions one isolated copy of the canonical SBK dashboard for every unique `host:port`.
 
-This implementation is non-containerized. Prometheus and Grafana are official native child processes—not Python
-libraries—and the Python server manages their verified installation, configuration, readiness, reconciliation,
-health, and shutdown.
+Prometheus and Grafana are official native child processes—not Python libraries—and the Python server manages their
+verified installation, configuration, readiness, reconciliation, health, and shutdown. The application can run
+directly in Python/Conda or as a Linux container; container packaging does not change that process architecture.
 
 The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
 `src/sbk_dashboard/version.py` is the single source used by package metadata, startup logging, and `-v` output.
@@ -34,6 +34,8 @@ The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
 - Process-group/descendant shutdown and bounded rotating native console logs.
 - Linux, macOS, and Windows support on x86-64 and ARM64.
 - Standard Python virtual-environment and Conda installation workflows.
+- Non-root Linux container image for AMD64 and ARM64, with an immutable Python 3.12/Debian stable base, pinned native
+  tools, IPv4/IPv6 endpoint routing, persistent state, health checks, and host-published management/Grafana ports.
 
 ## Architecture
 
@@ -62,6 +64,41 @@ remain in the official Prometheus and Grafana servers. See [the architecture doc
 - Network access on the first run if Prometheus or Grafana is not installed
 
 The only runtime Python dependency is `psutil`, used for cross-platform process and listener ownership checks.
+
+## Start with Docker Compose
+
+Docker Compose is the shortest container workflow:
+
+```bash
+docker compose up --build --detach
+```
+
+Open `http://localhost:9721/` in the host browser. Dashboard links opened from that page use
+`http://localhost:3000/`. Compose publishes both ports, persists registrations, Prometheus history, and Grafana
+state in the `sbk-dashboard-data` named volume, and restarts the service unless it is explicitly stopped.
+
+A container cannot launch a graphical application on its host, so browser auto-open is intentionally skipped in
+this headless environment. Port publication makes the landing page and generated dashboards immediately accessible
+from an existing host browser. Public-IP and DNS access work the same way when host firewall rules allow ports 9721
+and 3000.
+
+When SBK runs on the Docker host, register `host.docker.internal` and its exporter port instead of `127.0.0.1`;
+Compose installs the portable host-gateway mapping. A remote SBK endpoint should be registered with its normal DNS
+name, IPv4 address, or IPv6 address. The Compose network enables IPv6, but the Docker host and upstream network must
+also provide IPv6 routing. Prometheus port 9090 is deliberately not published.
+
+For a released image without a source checkout:
+
+```bash
+docker run --detach --name sbk-dashboard --restart unless-stopped \
+  --publish 9721:9721 --publish 3000:3000 \
+  --add-host host.docker.internal:host-gateway \
+  --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
+  ghcr.io/kmgowda/sbk-dashboard:1.26.8.1
+```
+
+See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,
+troubleshooting, and validation.
 
 ## Install with venv
 

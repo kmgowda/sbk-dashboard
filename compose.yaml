@@ -1,0 +1,29 @@
+name: sbk-dashboard
+
+services:
+  sbk-dashboard:
+    image: sbk-dashboard:1.26.8.1
+    build:
+      context: .
+      args:
+        VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}
+    ports:
+      - "9721:9721"
+      - "3000:3000"
+    volumes:
+      - sbk-dashboard-data:/var/lib/sbk-dashboard
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  sbk-dashboard-data:
+
+networks:
+  default:
+    enable_ipv6: true
