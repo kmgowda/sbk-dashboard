@@ -79,6 +79,10 @@ CI uses the stable `ubuntu-24.04` runner, builds/runs Linux AMD64, and builds Li
 QEMU build is not a native ARM runtime claim. Docker Desktop behavior on macOS/Windows and native ARM execution still
 require their respective smoke tests.
 
+Container contract tests also keep the Dockerfile Grafana build number, archive checksums, download-size cap,
+application version build arguments, stable Linux runner labels, and best-effort pull-request cache export aligned
+with packaged configuration.
+
 Regression coverage includes malformed IP-like target and bind values, configured-family port probes, IPv4/IPv6
 wildcard link filtering, and persistent create/delete rollback when monitoring reconciliation raises an exception.
 It also sends a live oversized request with a negative `Content-Length`, rejects negative native-download lengths,

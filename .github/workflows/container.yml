@@ -31,6 +31,18 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Resolve application version
+        id: version
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from sbk_dashboard.version import VERSION
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"value={VERSION}\n")
+          PY
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Build runnable AMD64 image
@@ -40,9 +52,11 @@ jobs:
           load: true
           platforms: linux/amd64
           tags: sbk-dashboard:ci
-          build-args: VCS_REF=${{ github.sha }}
+          build-args: |
+            APPLICATION_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=sbk-dashboard-amd64
-          cache-to: type=gha,mode=max,scope=sbk-dashboard-amd64
+          cache-to: type=gha,mode=max,scope=sbk-dashboard-amd64,ignore-error=true
       - name: Validate runtime, ports, dashboards, persistence, and shutdown
         run: python tests/container_smoke.py --image sbk-dashboard:ci
       - name: Build ARM64 image
@@ -50,9 +64,11 @@ jobs:
         with:
           context: .
           platforms: linux/arm64
-          build-args: VCS_REF=${{ github.sha }}
+          build-args: |
+            APPLICATION_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=sbk-dashboard-arm64
-          cache-to: type=gha,mode=max,scope=sbk-dashboard-arm64
+          cache-to: type=gha,mode=max,scope=sbk-dashboard-arm64,ignore-error=true
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -69,6 +85,7 @@ jobs:
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Verify release tag matches the package version
+        id: version
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -79,6 +96,8 @@ jobs:
           release = os.environ["RELEASE_TAG"].removeprefix("v")
           if release != VERSION:
               raise SystemExit(f"release tag {release!r} does not match package version {VERSION!r}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"value={VERSION}\n")
           PY
       - name: Generate OCI metadata
         id: metadata
@@ -103,7 +122,9 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           annotations: ${{ steps.metadata.outputs.annotations }}
-          build-args: VCS_REF=${{ github.sha }}
+          build-args: |
+            APPLICATION_VERSION=${{ steps.version.outputs.value }}
+            VCS_REF=${{ github.sha }}
           cache-from: |
             type=gha,scope=sbk-dashboard-amd64
             type=gha,scope=sbk-dashboard-arm64

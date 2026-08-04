@@ -15,6 +15,7 @@ ARG PROMETHEUS_AMD64_SHA256=41c50d97bb6a181623fc89d3fe61d0cc68ee69cc93da9091b8bb
 ARG PROMETHEUS_ARM64_SHA256=f6fc81c7955b6e1ddd532c62b55896f7e7a61d997a3817ac3534114f2dd33ab1
 ARG GRAFANA_VERSION=12.4.1
 ARG GRAFANA_BUILD=22846628243
+ARG NATIVE_DOWNLOAD_MAX_BYTES=2147483648
 ARG GRAFANA_AMD64_SHA256=55d6d71c813dd7426fe0b8d3a237e8d4ee4bf8a806ff90494207e146473ceb41
 ARG GRAFANA_ARM64_SHA256=7338a20b4757e5e37a25fb42855828f7627bc830c293d77da1cf6279103044ac
 RUN apt-get update \
@@ -30,9 +31,11 @@ RUN set -eux; \
     prometheus_archive="prometheus-${PROMETHEUS_VERSION}.linux-${native_arch}.tar.gz"; \
     grafana_archive="grafana_${GRAFANA_VERSION}_${GRAFANA_BUILD}_linux_${native_arch}.tar.gz"; \
     curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      --max-filesize "${NATIVE_DOWNLOAD_MAX_BYTES}" \
       --output "/tmp/${prometheus_archive}" \
       "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/${prometheus_archive}"; \
     curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      --max-filesize "${NATIVE_DOWNLOAD_MAX_BYTES}" \
       --output "/tmp/${grafana_archive}" \
       "https://dl.grafana.com/grafana/release/${GRAFANA_VERSION}/${grafana_archive}"; \
     echo "${prometheus_sha}  /tmp/${prometheus_archive}" | sha256sum --check --strict; \

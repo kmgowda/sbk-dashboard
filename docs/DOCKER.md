@@ -49,7 +49,8 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 Use a pinned release in production instead of `latest`. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
-digest so AMD64 and ARM64 builds resolve the same reviewed manifest.
+digest so AMD64 and ARM64 builds resolve the same reviewed manifest. Native archive downloads are checksum-verified,
+time-bounded, retried, and capped at the same 2 GiB per-download maximum as automatic native installation.
 
 ## Register endpoints
 

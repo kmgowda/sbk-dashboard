@@ -34,7 +34,8 @@ Use this order to build context without scanning generated artifacts:
 2. `docs/ARCHITECTURE.md` for invariants, concurrency, persistence, and process ownership.
 3. `docs/TESTING.md` for automated and real-SBK validation.
 4. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
-5. The relevant source module and its matching test module.
+5. `docs/DOCKER.md` when changing container packaging, networking, security, or delivery.
+6. The relevant source module and its matching test module.
 
 Do not use `.coverage`, `.pytest_cache/`, `.ruff_cache/`, `build/`, `dist/`, `*.egg-info/`, downloaded tools, or
 runtime data as source material.

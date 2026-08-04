@@ -17,6 +17,7 @@ class ContainerContractTest(unittest.TestCase):
         cls.dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         cls.compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/container.yml").read_text(encoding="utf-8")
+        cls.ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         cls.properties = (
             ROOT / "src/sbk_dashboard/resources/monitoring-download.properties"
         ).read_text(encoding="utf-8")
@@ -66,6 +67,16 @@ class ContainerContractTest(unittest.TestCase):
             f"ARG GRAFANA_VERSION={self._url_version('grafana.linux-x86_64.download.url', 'grafana')}",
             self.dockerfile,
         )
+        grafana_builds = {
+            self._grafana_build("grafana.linux-x86_64.download.url"),
+            self._grafana_build("grafana.linux-arm64.download.url"),
+        }
+        self.assertEqual(1, len(grafana_builds))
+        self.assertEqual(grafana_builds.pop(), self._argument("GRAFANA_BUILD"))
+        self.assertEqual(
+            self._property("download.max.bytes"), self._argument("NATIVE_DOWNLOAD_MAX_BYTES")
+        )
+        self.assertEqual(2, self.dockerfile.count('--max-filesize "${NATIVE_DOWNLOAD_MAX_BYTES}"'))
 
     def test_build_context_excludes_generated_and_runtime_data(self):
         ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
@@ -81,6 +92,14 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("Verify release tag matches the package version", self.workflow)
         self.assertEqual(2, self.workflow.count("runs-on: ubuntu-24.04"))
         self.assertNotIn("ubuntu-latest", self.workflow)
+        self.assertIn("runs-on: ubuntu-24.04", self.ci_workflow)
+        self.assertNotIn("runs-on: ubuntu-latest", self.ci_workflow)
+        self.assertEqual(2, self.workflow.count("cache-to: type=gha,mode=max,scope="))
+        self.assertEqual(2, self.workflow.count("ignore-error=true"))
+        self.assertEqual(
+            3,
+            self.workflow.count("APPLICATION_VERSION=${{ steps.version.outputs.value }}"),
+        )
 
     def _argument(self, name):
         match = re.search(rf"^ARG {re.escape(name)}=([^\s]+)$", self.dockerfile, re.MULTILINE)
@@ -97,6 +116,12 @@ class ContainerContractTest(unittest.TestCase):
         match = re.search(rf"/{re.escape(tool)}[-_/](?:release/)?v?(\d+\.\d+\.\d+)", url)
         if match is None:
             match = re.search(r"/v?(\d+\.\d+\.\d+)/", url)
+        self.assertIsNotNone(match, url)
+        return match.group(1)
+
+    def _grafana_build(self, name):
+        url = self._property(name)
+        match = re.search(r"grafana_\d+\.\d+\.\d+_(\d+)_linux_", url)
         self.assertIsNotNone(match, url)
         return match.group(1)
 

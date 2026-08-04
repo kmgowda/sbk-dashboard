@@ -230,7 +230,8 @@ to make a test convenient.
 3. Keep `/var/lib/sbk-dashboard` on a persistent volume and never bake runtime state into an image layer.
 4. Synchronize application/native versions and pinned SHA-256 values with `version.py` and packaged properties.
    Keep the official Python base on a supported Debian stable generation, pin its complete patch tag and
-   multi-architecture digest, and update that digest deliberately with full AMD64/ARM64 validation.
+   multi-architecture digest, and update that digest deliberately with full AMD64/ARM64 validation. CI must pass the
+   version from `version.py` as `APPLICATION_VERSION`; the Dockerfile default remains a tested local-build fallback.
 5. Validate both Dockerfile/Compose contracts and `tests/container_smoke.py`; run the real-SBK mode for lifecycle,
    metrics, 53-panel provisioning, and restart persistence changes.
 6. Build both `linux/amd64` and `linux/arm64`; test literal IPv4 and IPv6 scrape addresses on an IPv6-enabled bridge,
