@@ -32,10 +32,12 @@ Use this order to build context without scanning generated artifacts:
 
 1. `README.md` for user behavior, installation, CLI, and operations.
 2. `docs/ARCHITECTURE.md` for invariants, concurrency, persistence, and process ownership.
-3. `docs/TESTING.md` for automated and real-SBK validation.
-4. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
-5. `docs/DOCKER.md` when changing container packaging, networking, security, or delivery.
-6. The relevant source module and its matching test module.
+3. `docs/INTERNALS.md` for module-level call paths, locks, generated files, and failure boundaries.
+4. `docs/TESTING.md` for automated and real-SBK validation.
+5. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
+6. `docs/USAGE.md` when changing installation, environment, endpoint, upgrade, or operator behavior.
+7. `docs/DOCKER.md` when changing container packaging, networking, security, or delivery.
+8. The relevant source module and its matching test module.
 
 Do not use `.coverage`, `.pytest_cache/`, `.ruff_cache/`, `build/`, `dist/`, `*.egg-info/`, downloaded tools, or
 runtime data as source material.
@@ -125,6 +127,8 @@ runtime data as source material.
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
 | `Dockerfile`, `compose.yaml` | Non-root Linux image and host-port/persistent-volume deployment |
+| `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
+| `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |
 | `tests/container_smoke.py` | Live container, dashboard, persistence, and lifecycle validation |
 | `tests/` | Unit, integration, platform, lifecycle, backpressure, and resource tests |
 
