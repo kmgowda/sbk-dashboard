@@ -165,29 +165,11 @@ docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.1 .
 python tests/container_smoke.py --image sbk-dashboard:1.26.8.1
 ```
 
-Build both published architectures with Buildx:
+Build both published architectures with Buildx without publishing them:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 --tag sbk-dashboard:multiarch .
 ```
-
-To publish a validated release manually, authenticate using a Docker Hub access token when prompted and push both
-the immutable version tag and the convenience `latest` tag:
-
-```bash
-docker login --username kmgowda
-docker buildx build \
-  --platform linux/amd64,linux/arm64 \
-  --build-arg APPLICATION_VERSION=1.26.8.1 \
-  --build-arg VCS_REF=<commit-sha> \
-  --tag kmgowda/sbk-dashboard:1.26.8.1 \
-  --tag kmgowda/sbk-dashboard:latest \
-  --push \
-  .
-```
-
-Use a Docker Hub access token rather than the account password. Confirm the AMD64 and ARM64 manifests exist before
-announcing the release.
 
 The live smoke test validates host port access, registration, a generated Grafana dashboard, persistent state over
 a full restart, graceful exit, and absence of surviving native child PIDs. The real-SBK mode is documented in
@@ -198,10 +180,85 @@ mounts, allowing cold downloads to run in parallel.
 Changing the Python source does not invalidate either native stage; changing only one native version does not
 invalidate the other tool's extraction. Cached archives never enter the final runtime image.
 
-Tagged release publishing requires the repository Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
-The token must have permission to push `kmgowda/sbk-dashboard`; do not store Docker Hub credentials in Compose,
-workflow source, or the image. A tag such as `v1.26.8.1` publishes both `1.26.8.1` and `latest` multi-architecture
-tags after validation succeeds.
+## Publish images to Docker Hub
+
+The public repository is `kmgowda/sbk-dashboard`. Create that repository in Docker Hub before the first publish and
+keep it public so normal `docker compose pull` users do not need registry credentials. Create a Docker Hub access
+token with write permission; use the token for CLI and CI authentication instead of the account password.
+
+Publish only from a clean release commit after the automated tests and local AMD64 smoke test pass. Confirm Buildx
+has an active builder before starting the multi-architecture build:
+
+```bash
+docker buildx version
+docker buildx inspect --bootstrap
+git status --short
+```
+
+### Publish manually
+
+Log in interactively. Enter the Docker Hub access token at the password prompt:
+
+```bash
+docker login --username kmgowda
+```
+
+Set the release version and source revision, then build and push one manifest containing both supported Linux
+architectures:
+
+```bash
+VERSION=1.26.8.1
+VCS_REF=$(git rev-parse HEAD)
+IMAGE=kmgowda/sbk-dashboard
+
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --build-arg APPLICATION_VERSION="$VERSION" \
+  --build-arg VCS_REF="$VCS_REF" \
+  --tag "$IMAGE:$VERSION" \
+  --tag "$IMAGE:latest" \
+  --provenance=mode=max \
+  --sbom=true \
+  --push \
+  .
+```
+
+The immutable version tag is the production reference used by Compose. Update `latest` only for a stable release;
+do not use it as the version recorded in `compose.yaml`.
+
+Verify that Docker Hub exposes both platform manifests and that Compose resolves the versioned image:
+
+```bash
+docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.1
+SBK_DASHBOARD_IMAGE=kmgowda/sbk-dashboard:1.26.8.1 docker compose pull
+```
+
+The manifest inspection must list `linux/amd64` and `linux/arm64`. After verification, remove the local login when
+the host is not a dedicated publisher:
+
+```bash
+docker logout
+```
+
+### Publish from GitHub Actions
+
+The tagged-release job in `.github/workflows/container.yml` performs the same multi-architecture build and publishes
+the version and `latest` tags after container validation succeeds. Add these GitHub repository Actions secrets:
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | Docker Hub account name with write access to `kmgowda/sbk-dashboard` |
+| `DOCKERHUB_TOKEN` | Docker Hub access token with write permission; never use the account password |
+
+Create and push a version tag that exactly matches `src/sbk_dashboard/version.py`:
+
+```bash
+git tag -a v1.26.8.1 -m "SBK Dashboard 1.26.8.1"
+git push origin v1.26.8.1
+```
+
+The workflow rejects a mismatched tag before registry login. Never store Docker Hub credentials in Compose,
+workflow source, the Dockerfile, an image layer, or a committed environment file.
 
 ## Troubleshooting
 

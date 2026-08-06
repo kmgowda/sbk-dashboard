@@ -31,6 +31,9 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("host.docker.internal", docker)
         self.assertIn("docker compose pull", docker)
         self.assertIn("compose.dev.yaml", docker)
+        self.assertIn("docker buildx imagetools inspect", docker)
+        self.assertIn("DOCKERHUB_USERNAME", docker)
+        self.assertIn("DOCKERHUB_TOKEN", docker)
 
     def test_cross_platform_ci_uses_an_explicit_macos_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

@@ -128,7 +128,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 ```
 
 See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,
-troubleshooting, and validation.
+troubleshooting, validation, and the complete Docker Hub publishing procedure for image maintainers.
 
 ## Install with venv
 
