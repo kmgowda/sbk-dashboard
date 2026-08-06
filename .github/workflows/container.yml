@@ -7,6 +7,7 @@ on:
       - ".dockerignore"
       - "Dockerfile"
       - "compose.yaml"
+      - "compose.dev.yaml"
       - "pyproject.toml"
       - "src/**"
       - "tests/container_smoke.py"
@@ -45,6 +46,11 @@ jobs:
           PY
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
+      - name: Validate production and development Compose definitions
+        run: |
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+          python tests/compose_contract.py
       - name: Build runnable AMD64 image
         uses: docker/build-push-action@v7
         with:

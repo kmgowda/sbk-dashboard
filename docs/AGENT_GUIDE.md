@@ -240,6 +240,8 @@ to make a test convenient.
 6. Build both `linux/amd64` and `linux/arm64`; test literal IPv4 and IPv6 scrape addresses on an IPv6-enabled bridge,
    and do not claim native ARM execution from a QEMU build-only check.
 7. Update `docs/DOCKER.md`, and remove only the exact disposable containers/volumes/files created by validation.
+8. Keep production `compose.yaml` image-only. Put local source builds in `compose.dev.yaml`; neither file may change
+   the one-control-plane/two-native-child runtime topology.
 
 ## Debugging guide
 

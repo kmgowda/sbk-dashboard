@@ -291,6 +291,12 @@ Python control plane, two guardians, one native Prometheus process, and one nati
 process retains configuration, reconciliation, supervision, and cleanup ownership. Prometheus remains loopback-only
 inside the container; only management port 9721 and Grafana port 3000 are published to the host.
 
+Production Compose selects the prebuilt, pinned GHCR image and never builds or downloads native distributions at
+container startup. `compose.dev.yaml` is an explicit source-build override that changes only image acquisition. Both
+paths execute the same Dockerfile runtime stage, entry point, process topology, configuration, volume, and network
+policy. Independent cached Prometheus and Grafana build stages reduce build latency without splitting runtime
+services or transferring lifecycle ownership away from the Python process.
+
 The image runs as UID/GID 10001, uses a digest-pinned official Python 3.12 slim image on the current Debian stable
 generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools, and stores the entire data root in
 `/var/lib/sbk-dashboard`. A persistent volume therefore preserves endpoint registrations,

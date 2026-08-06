@@ -83,9 +83,10 @@ dashboard UIDs, retention, or the native child-process design. To move an existi
 cleanly and copy its data root into a Docker volume or a UID/GID 10001-writable bind mount at
 `/var/lib/sbk-dashboard`. Publish host ports 9721 and 3000; do not publish internal Prometheus port 9090.
 
-For a new source deployment, run `docker compose build --progress=plain` once and then
-`docker compose up --detach --no-build`; this creates and retains the named data volume without rebuilding on routine
-starts. Recreating or upgrading the container against that same volume preserves registrations, generated
+The production `compose.yaml` now consumes the pinned GHCR release image and has no source-build section. Run
+`docker compose pull` followed by `docker compose up --detach`; this creates and retains the named data volume while
+avoiding Prometheus/Grafana archive downloads during startup. Source developers must add `compose.dev.yaml`
+explicitly. Recreating or upgrading the container against the same volume preserves registrations, generated
 dashboards, Grafana state, and Prometheus history. `docker compose down` preserves the volume;
 `docker compose down --volumes` permanently removes it and must not be used during a normal upgrade.
 

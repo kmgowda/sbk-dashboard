@@ -2,11 +2,8 @@ name: sbk-dashboard
 
 services:
   sbk-dashboard:
-    image: sbk-dashboard:1.26.8.1
-    build:
-      context: .
-      args:
-        VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}
+    image: ${SBK_DASHBOARD_IMAGE:-ghcr.io/kmgowda/sbk-dashboard:1.26.8.1}
+    pull_policy: missing
     ports:
       - "9721:9721"
       - "3000:3000"

@@ -126,10 +126,11 @@ runtime data as source material.
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
-| `Dockerfile`, `compose.yaml` | Non-root Linux image and host-port/persistent-volume deployment |
+| `Dockerfile`, `compose.yaml`, `compose.dev.yaml` | Non-root release image, production deployment, development build override |
 | `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |
 | `tests/container_smoke.py` | Live container, dashboard, persistence, and lifecycle validation |
+| `tests/compose_contract.py` | Resolved production/development Compose runtime-equivalence validation |
 | `tests/` | Unit, integration, platform, lifecycle, backpressure, and resource tests |
 
 ## Development commands

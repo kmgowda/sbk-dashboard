@@ -15,6 +15,9 @@ upgrades, and common operational checks. See [`ARCHITECTURE.md`](ARCHITECTURE.md
 All three modes run the same control plane and one Prometheus/Grafana pair. Docker is packaging, not a distributed
 service topology.
 
+Production Compose pulls the prebuilt pinned image, so starting the service does not compile Python or separately
+download Prometheus/Grafana. `compose.dev.yaml` is used only when deliberately building the same image from source.
+
 ## Python venv lifecycle
 
 Create, activate, install, and run on Linux or macOS:
@@ -125,6 +128,10 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 `http://localhost:9721/`.
 
 ## Add an endpoint
+
+For the complete benchmark-side workflow—including selecting SBK's `PrometheusLogger`, changing `-context`, Docker
+host addressing, distributed SBM/SBK-GEM exporters, and scrape verification—see
+[`SBK.md`](SBK.md).
 
 The landing-page form accepts:
 

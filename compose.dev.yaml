@@ -1,0 +1,8 @@
+services:
+  sbk-dashboard:
+    image: sbk-dashboard:1.26.8.1
+    pull_policy: never
+    build:
+      context: .
+      args:
+        VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}

@@ -27,6 +27,9 @@ PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
 those operating systems because native executables cannot be meaningfully launched through Linux simulation.
+The cross-platform unit workflow uses the explicit `macos-15-intel` runner instead of the moving `macos-latest`
+label so runner OS and architecture changes cannot silently alter the required check. Platform-resolution tests
+still cover macOS x86-64 and ARM64; native Apple Silicon remains a separate smoke-test requirement.
 
 ## Container validation
 
@@ -37,7 +40,13 @@ Compose hardening, and build-context exclusions:
 ```bash
 PYTHONPATH=src python -m unittest tests.test_container -v
 docker compose config --quiet
+docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+python tests/compose_contract.py
 ```
+
+The first resolved configuration must contain the pinned GHCR image and no build definition. The merged development
+configuration must retain the same ports, volume, network, security, and lifecycle settings while adding only the
+local image/build policy.
 
 Build and run the live Linux smoke test:
 

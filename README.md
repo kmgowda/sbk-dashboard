@@ -61,6 +61,8 @@ Documentation map:
 
 - [Usage guide](docs/USAGE.md): environment activation/deactivation, daily operation, endpoints, backup, upgrades,
   and troubleshooting.
+- [SBK and PrometheusLogger guide](docs/SBK.md): direct and distributed benchmark exporters, registration,
+  networking, verification, and troubleshooting.
 - [Architecture](docs/ARCHITECTURE.md): system boundaries, lifecycle, concurrency, persistence, and design decisions.
 - [Implementation internals](docs/INTERNALS.md): code-level startup, request, reconciliation, supervision, and
   shutdown paths.
@@ -80,15 +82,25 @@ The only runtime Python dependency is `psutil`, used for cross-platform process 
 Docker Compose is the shortest container workflow:
 
 ```bash
-docker compose build --progress=plain
-docker compose up --detach --no-build
+docker compose pull
+docker compose up --detach
 ```
 
-The first command is a one-time cold build: it pulls the pinned Python base, downloads and verifies the complete
-Prometheus and Grafana distributions, builds the Python wheel, and assembles the image. Its duration depends mainly
-on network and disk speed. Once the image exists, use `docker compose up --detach --no-build`, `docker compose stop`,
-and `docker compose start` so routine restarts do not rebuild it. A pinned released image avoids the source-build
-step, although its first pull still downloads the complete image.
+The production Compose definition pulls the pinned, multi-architecture image from GitHub Container Registry. That
+image already contains the Python package and checksum-verified Prometheus and Grafana distributions, so customer
+startup never builds source or downloads native archives separately. The first image pull depends on network speed;
+subsequent `docker compose start` operations use the local image and persistent volume.
+
+Developers who need a source build use the explicit override:
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml build --progress=plain
+docker compose -f compose.yaml -f compose.dev.yaml up --detach --no-build
+```
+
+The Dockerfile keeps Prometheus and Grafana in independent cached build stages, allowing cold downloads to run in
+parallel. A tool upgrade invalidates only that tool's extraction stage, and BuildKit can reuse a previously verified
+archive without placing it in the final image.
 
 Open `http://localhost:9721/` in the host browser. Dashboard links opened from that page use
 `http://localhost:3000/`. Compose publishes both ports, persists registrations, Prometheus history, and Grafana
@@ -437,10 +449,10 @@ failure.
 
 ## Run SBK and register it
 
-Start SBK with `PrometheusLogger`:
+SBK Dashboard scrapes the HTTP exporter owned by SBK's `PrometheusLogger`. Start the dashboard, then run SBK with
+the logger selected explicitly:
 
 ```bash
-cd /root/projects/SBK
 ./build/install/sbk/bin/sbk \
   -class file \
   -file /tmp/sbk-dashboard-example.dat \
@@ -448,8 +460,7 @@ cd /root/projects/SBK
   -size 4096 \
   -seconds 120 \
   -records 1000 \
-  -out PrometheusLogger \
-  -context 9718/metrics
+  -out PrometheusLogger
 ```
 
 Open `http://localhost:9721/` and add host `127.0.0.1`, port `9718`, path `/metrics`. The returned dashboard URL is
@@ -460,6 +471,11 @@ That `127.0.0.1` example applies to a directly installed sbk-dashboard. With Doc
 `host.docker.internal` default for an SBK process on the Docker host. Register while SBK is still running: SBK starts
 its PrometheusLogger HTTP endpoint when the benchmark opens and stops it when the benchmark closes. Prometheus
 retains successfully scraped history afterward, but the endpoint state becomes `down` once the exporter stops.
+
+Use `-context PORT/PATH` to change the exporter from its `9718/metrics` default. Direct SBK, Docker host access,
+remote exporters, multiple concurrent benchmarks, and SBM/SBK-GEM aggregation have different registration details.
+Follow the complete [SBK and PrometheusLogger guide](docs/SBK.md) for those workflows, verification commands,
+networking and security guidance, and troubleshooting.
 
 ### API
 
