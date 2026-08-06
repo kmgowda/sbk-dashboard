@@ -80,8 +80,15 @@ The only runtime Python dependency is `psutil`, used for cross-platform process 
 Docker Compose is the shortest container workflow:
 
 ```bash
-docker compose up --build --detach
+docker compose build --progress=plain
+docker compose up --detach --no-build
 ```
+
+The first command is a one-time cold build: it pulls the pinned Python base, downloads and verifies the complete
+Prometheus and Grafana distributions, builds the Python wheel, and assembles the image. Its duration depends mainly
+on network and disk speed. Once the image exists, use `docker compose up --detach --no-build`, `docker compose stop`,
+and `docker compose start` so routine restarts do not rebuild it. A pinned released image avoids the source-build
+step, although its first pull still downloads the complete image.
 
 Open `http://localhost:9721/` in the host browser. Dashboard links opened from that page use
 `http://localhost:3000/`. Compose publishes both ports, persists registrations, Prometheus history, and Grafana
@@ -92,10 +99,11 @@ this headless environment. Port publication makes the landing page and generated
 from an existing host browser. Public-IP and DNS access work the same way when host firewall rules allow ports 9721
 and 3000.
 
-When SBK runs on the Docker host, register `host.docker.internal` and its exporter port instead of `127.0.0.1`;
-Compose installs the portable host-gateway mapping. A remote SBK endpoint should be registered with its normal DNS
-name, IPv4 address, or IPv6 address. The Compose network enables IPv6, but the Docker host and upstream network must
-also provide IPv6 routing. Prometheus port 9090 is deliberately not published.
+In the container image, the endpoint form therefore defaults to `host.docker.internal`. Use that value when SBK
+runs on the Docker host; `127.0.0.1` would mean the sbk-dashboard container itself. Compose installs the portable
+host-gateway mapping. A remote SBK endpoint should instead be registered with its normal routable DNS name, IPv4
+address, or IPv6 address. The Compose network enables IPv6, but the Docker host and upstream network must also
+provide IPv6 routing. Prometheus port 9090 is deliberately not published.
 
 For a released image without a source checkout:
 
@@ -204,7 +212,7 @@ Defaults:
 - Grafana: `http://localhost:3000/`
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
 - Endpoint form display name: `SBK Dashboard`
-- Endpoint form host/IP: `127.0.0.1`
+- Endpoint form host/IP: `127.0.0.1` for native/Conda execution; `host.docker.internal` in the container image
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
 - Prometheus retention: 7 days
@@ -311,6 +319,7 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
 | `SBK_DASHBOARD_LOG_LEVEL` | Fallback for `-log-level`; default `INFO` |
 | `SBK_DASHBOARD_STATUS_SECONDS` | Fallback for `-status-seconds`; default 60, maximum 86,400 |
+| `SBK_DASHBOARD_DEFAULT_TARGET_HOST` | Endpoint-form default; native default `127.0.0.1`, image default `host.docker.internal` |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
 | `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
 | `SBK_DASHBOARD_HTTP_QUEUE` | Queued HTTP requests beyond active workers; default 64 |
@@ -446,6 +455,11 @@ cd /root/projects/SBK
 Open `http://localhost:9721/` and add host `127.0.0.1`, port `9718`, path `/metrics`. The returned dashboard URL is
 similar to `http://localhost:3000/d/sbk-f9720cad2e38eec6/`. Registering the same host on port `9719` produces a
 different endpoint ID, target label, dashboard JSON, mapping, and URL.
+
+That `127.0.0.1` example applies to a directly installed sbk-dashboard. With Docker/Compose, keep the form's
+`host.docker.internal` default for an SBK process on the Docker host. Register while SBK is still running: SBK starts
+its PrometheusLogger HTTP endpoint when the benchmark opens and stops it when the benchmark closes. Prometheus
+retains successfully scraped history afterward, but the endpoint state becomes `down` once the exporter stops.
 
 ### API
 

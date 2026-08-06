@@ -159,6 +159,10 @@ without network waits. Repeated identical refresh failures produce one warning u
 JSON bodies are limited to 64 KiB, including explicit rejection of negative `Content-Length`. Assets use a
 SHA-256-derived query fingerprint and `no-cache` revalidation. API responses use `no-store`.
 
+The shared `index.html` contains a default-target placeholder. `DashboardHttpServer` replaces it with the validated
+`DashboardConfig.default_target_host` while serving the page. Configuration defaults it to `127.0.0.1`; the Docker
+image selects `host.docker.internal` through `SBK_DASHBOARD_DEFAULT_TARGET_HOST` without maintaining a second UI.
+
 Recent browser activity stores only validated opaque per-tab IDs in two capacity-limited ordered maps. Landing
 heartbeats expire after two minutes and dashboard-open events after five. This telemetry neither proxies nor changes
 Grafana/Prometheus traffic and cannot observe direct native-server clients.

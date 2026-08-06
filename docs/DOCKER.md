@@ -9,9 +9,15 @@ independent service containers.
 From a source checkout:
 
 ```bash
-docker compose up --build --detach
+docker compose build --progress=plain
+docker compose up --detach --no-build
 docker compose ps
 ```
+
+The cold build downloads the complete pinned Prometheus and Grafana archives, verifies them, builds the Python
+package, and assembles the runtime image. This is normally the slow part; it is not application startup. After that
+first build, use `docker compose up --detach --no-build`, `docker compose stop`, and `docker compose start` for normal
+operation. Rebuild only after changing the application, Dockerfile, base image, or native-tool versions.
 
 Open these host URLs:
 
@@ -62,6 +68,10 @@ The address entered in the landing page is preserved and resolved or routed from
 | Docker host | `host.docker.internal` | `host.docker.internal:9718/metrics` |
 | Remote system | Routable DNS, IPv4, or IPv6 | `benchmark-01.example.com:9718/metrics` |
 
+The container image sets the form's default host to `host.docker.internal`; a direct Python/Conda installation
+defaults it to `127.0.0.1`. Do not use the container's `127.0.0.1` for an exporter on the Docker host, because it
+refers to the container network namespace.
+
 The supplied Compose and `docker run` commands install Docker's `host-gateway` mapping so a host SBK process is
 reachable on Linux and Docker Desktop. The host exporter must listen on an address reachable from the Docker bridge;
 an exporter bound exclusively to host `127.0.0.1` generally cannot be reached by a Linux container.
@@ -88,6 +98,7 @@ Environment variables documented in the README can be set with `--env` or Compos
 the following image defaults unless the replacement paths/addresses are valid inside the container:
 
 - `SBK_DASHBOARD_DATA_DIR=/var/lib/sbk-dashboard`
+- `SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal`
 - `SBK_DASHBOARD_PROMETHEUS_BIN=/opt/prometheus/prometheus`
 - `SBK_DASHBOARD_GRAFANA_HOME=/opt/grafana`
 - `SBK_DASHBOARD_PROMETHEUS_BIND=127.0.0.1`
@@ -153,5 +164,22 @@ a full restart, graceful exit, and absence of surviving native child PIDs. The r
   set an explicit `-grafana-url` when changing Grafana's host port.
 - If a Docker-host target is down, use `host.docker.internal`, confirm the exporter listens beyond host loopback,
   and test it from inside the container network.
+- Register the endpoint while SBK is running. PrometheusLogger closes its HTTP endpoint when the benchmark exits;
+  stored history remains available, but the registered endpoint correctly changes to `down`.
+- Test the exact scrape URL from the Prometheus network namespace:
+
+  ```bash
+  docker compose exec -T sbk-dashboard python -c \
+    'import urllib.request; r=urllib.request.urlopen("http://host.docker.internal:9718/metrics", timeout=5); print(r.status); print(r.read(300).decode())'
+  ```
+
+  For a remote exporter, replace `host.docker.internal` with its routable DNS name or IP. Connection refused means
+  the exporter is stopped or the port is wrong; a timeout normally means routing or firewall policy; HTTP 404 means
+  the metrics path is wrong. Prometheus' detailed `lastError` is available with:
+
+  ```bash
+  docker compose exec -T sbk-dashboard python -c \
+    'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:9090/api/v1/targets?state=active", timeout=5).read().decode())'
+  ```
 - If the generated Grafana hostname is wrong behind a proxy, set the authoritative `-grafana-url`.
 - If a bind-mounted data directory is read-only, make it writable by UID/GID 10001 or use the named volume.

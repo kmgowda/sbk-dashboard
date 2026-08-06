@@ -22,6 +22,7 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(45, config.dashboard.prometheus_startup_timeout_seconds)
         self.assertEqual(120, config.dashboard.grafana_startup_timeout_seconds)
         self.assertEqual(60, config.dashboard.status_interval_seconds)
+        self.assertEqual("127.0.0.1", config.dashboard.default_target_host)
 
     def test_command_line_overrides_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -53,12 +54,18 @@ class ConfigurationTest(unittest.TestCase):
                 "SBK_DASHBOARD_SCRAPE_SECONDS": "9",
                 "SBK_DASHBOARD_GRAFANA_URL": "https://grafana.example/base",
                 "SBK_DASHBOARD_STATUS_SECONDS": "75",
+                "SBK_DASHBOARD_DEFAULT_TARGET_HOST": "host.docker.internal",
             })
             self.assertEqual(Path(temporary).resolve(), config.dashboard.data_directory)
             self.assertEqual(11, config.dashboard.retention_days)
             self.assertEqual(9, config.dashboard.scrape_interval_seconds)
             self.assertEqual("https://grafana.example/base", config.monitoring.grafana_public_url)
             self.assertEqual(75, config.dashboard.status_interval_seconds)
+            self.assertEqual("host.docker.internal", config.dashboard.default_target_host)
+            self.assertEqual(
+                "environment SBK_DASHBOARD_DEFAULT_TARGET_HOST",
+                config.dashboard.sources["default-target-host"],
+            )
             self.assertEqual(
                 "environment SBK_DASHBOARD_STATUS_SECONDS", config.dashboard.sources["status-seconds"]
             )
@@ -98,6 +105,9 @@ class ConfigurationTest(unittest.TestCase):
                           ["-status-seconds", "0"], ["-status-seconds", "86401"]):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 parse_configuration(list(arguments), {})
+
+        with self.assertRaisesRegex(ValueError, "default target host"):
+            parse_configuration([], {"SBK_DASHBOARD_DEFAULT_TARGET_HOST": "host:9718"})
 
     def test_rejects_malformed_ipv4_like_bind_addresses(self):
         for address in ("0.0.0.0.0", "127.000.000.001", "::::", "host:80"):

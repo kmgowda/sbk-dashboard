@@ -69,6 +69,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)
+        self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
 

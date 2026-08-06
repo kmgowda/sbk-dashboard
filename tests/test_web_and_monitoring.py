@@ -1,3 +1,4 @@
+import io
 import json
 import re
 import socket
@@ -43,6 +44,25 @@ class FakeMonitoring:
         return f"http://{formatted}:3000/d/sbk-{target_id}/"
 
 
+class AssetRenderingTest(unittest.TestCase):
+    def test_index_renders_validated_native_and_container_defaults(self):
+        for host in ("127.0.0.1", "host.docker.internal"):
+            with self.subTest(host=host):
+                server = object.__new__(DashboardHttpServer)
+                server._default_target_host = host
+                request = SimpleNamespace(
+                    command="GET",
+                    wfile=io.BytesIO(),
+                    send_response=lambda _status: None,
+                    send_header=lambda _name, _value: None,
+                    end_headers=lambda: None,
+                )
+                server._asset(request, "/")
+                page = request.wfile.getvalue()
+                self.assertIn(f'value="{host}"'.encode(), page)
+                self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
+
+
 class WebTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -70,6 +90,7 @@ class WebTest(unittest.TestCase):
             self.assertIn(b'aria-label="Endpoint status summary" aria-live="polite"', page)
             self.assertNotIn(b"NVMe endurance run", page)
             self.assertNotIn(b"__ASSET_VERSION__", page)
+            self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
             versions = re.findall(rb'(?:app\.css|app\.js)\?v=([0-9a-f]{12})', page)
             self.assertEqual(2, len(versions))
             self.assertEqual(versions[0], versions[1])
@@ -131,6 +152,26 @@ class WebTest(unittest.TestCase):
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
         with urllib.request.urlopen(delete) as response:
             self.assertEqual(204, response.status)
+
+    def test_ui_uses_configured_container_default_target_host(self):
+        self.server.close()
+        self.monitoring.dashboard = DashboardConfig(
+            9721,
+            False,
+            False,
+            Path(self.temporary.name),
+            5,
+            7,
+            {},
+            default_target_host="host.docker.internal",
+        )
+        self.server = DashboardHttpServer(0, self.registry, self.monitoring)
+        self.server.start()
+        self.base = f"http://127.0.0.1:{self.server._server.server_port}"
+        with urllib.request.urlopen(self.base + "/") as response:
+            page = response.read()
+        self.assertIn(b'value="host.docker.internal"', page)
+        self.assertNotIn(b'value="127.0.0.1"', page)
 
     def test_rejects_wrong_method_and_unknown_asset(self):
         for request, status in ((urllib.request.Request(self.base + "/api/health", method="POST"), 405),

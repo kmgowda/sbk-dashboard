@@ -138,6 +138,7 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
         "retention-days": dashboard.retention_days, "scrape-seconds": dashboard.scrape_interval_seconds,
         "bind": dashboard.bind_address, "log-level": dashboard.log_level,
         "status-seconds": dashboard.status_interval_seconds,
+        "default-target-host": dashboard.default_target_host,
         "prometheus-bin": monitoring.prometheus_binary, "prometheus-port": monitoring.prometheus_port,
         "prometheus-bind": monitoring.prometheus_bind_address,
         "grafana-home": monitoring.grafana_home, "grafana-port": monitoring.grafana_port,

@@ -83,13 +83,15 @@ dashboard UIDs, retention, or the native child-process design. To move an existi
 cleanly and copy its data root into a Docker volume or a UID/GID 10001-writable bind mount at
 `/var/lib/sbk-dashboard`. Publish host ports 9721 and 3000; do not publish internal Prometheus port 9090.
 
-For a new deployment, `docker compose up --build --detach` creates and retains the named data volume. Recreating or
-upgrading the container against that same volume preserves registrations, generated dashboards, Grafana state, and
-Prometheus history. `docker compose down` preserves the volume; `docker compose down --volumes` permanently removes
-it and must not be used during a normal upgrade.
+For a new source deployment, run `docker compose build --progress=plain` once and then
+`docker compose up --detach --no-build`; this creates and retains the named data volume without rebuilding on routine
+starts. Recreating or upgrading the container against that same volume preserves registrations, generated
+dashboards, Grafana state, and Prometheus history. `docker compose down` preserves the volume;
+`docker compose down --volumes` permanently removes it and must not be used during a normal upgrade.
 
-Inside a container, `127.0.0.1` identifies the container itself. Register an exporter running on the Docker host as
-`host.docker.internal` (the supplied Compose file adds the host-gateway mapping), or use a routable DNS/IP address
+Inside a container, `127.0.0.1` identifies the container itself. The image now defaults the endpoint form to
+`host.docker.internal` (the supplied Compose file adds the host-gateway mapping), while native/Conda execution keeps
+the `127.0.0.1` default. Existing registrations and endpoint identities are unchanged. Use a routable DNS/IP address
 for a remote endpoint. See `docs/DOCKER.md` for the complete procedure.
 
 The production container base is now pinned to Python 3.12.13 on Debian Trixie by immutable multi-architecture

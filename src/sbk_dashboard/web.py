@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import logging
 import re
@@ -115,6 +116,7 @@ class DashboardHttpServer:
                 return
 
         config = monitoring.dashboard
+        self._default_target_host = config.default_target_host
         self._server = BoundedThreadPoolHttpServer(
             (config.bind_address, port),
             Handler,
@@ -270,6 +272,10 @@ class DashboardHttpServer:
                     + resource_root.joinpath("app.js").read_bytes()
                 ).hexdigest()[:12]
                 body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
+                body = body.replace(
+                    b"__DEFAULT_TARGET_HOST__",
+                    html.escape(self._default_target_host, quote=True).encode("utf-8"),
+                )
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
             return

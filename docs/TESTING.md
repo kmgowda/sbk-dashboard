@@ -31,7 +31,8 @@ those operating systems because native executables cannot be meaningfully launch
 ## Container validation
 
 The static contract tests verify non-root execution, persistent data, public ports 9721/3000, internal Prometheus,
-native version/checksum synchronization, Compose hardening, and build-context exclusions:
+the container-specific `host.docker.internal` endpoint-form default, native version/checksum synchronization,
+Compose hardening, and build-context exclusions:
 
 ```bash
 PYTHONPATH=src python -m unittest tests.test_container -v
@@ -107,7 +108,9 @@ non-fatal launcher errors.
 
 Web asset regressions verify that the landing page exposes total, up, and down counters and that each inventory
 refresh derives the health counts from exact `up` and `down` states. Pending and unknown states count only toward the
-total. The counters remain visible in the responsive single-column layout.
+total. The counters remain visible in the responsive single-column layout. They also verify that native
+configuration renders `127.0.0.1`, container configuration renders `host.docker.internal`, and neither HTML template
+placeholder reaches the browser.
 
 Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
 verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery

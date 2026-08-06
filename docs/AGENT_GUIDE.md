@@ -130,6 +130,7 @@ Important defaults:
 | Periodic short status | 60 seconds |
 | Target-health timeout | 4 seconds |
 | Prometheus/Grafana startup | 45 / 120 seconds |
+| Endpoint-form host | `127.0.0.1` natively; `host.docker.internal` in the image |
 
 See `README.md` and `config.py` for the complete environment-variable table and bounds.
 

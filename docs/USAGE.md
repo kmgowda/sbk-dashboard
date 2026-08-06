@@ -157,9 +157,12 @@ derivation insufficient.
 
 The endpoint address is resolved from the Prometheus process's network namespace:
 
-- a direct host installation can use `127.0.0.1` for SBK on the same host;
-- the supplied container uses `host.docker.internal` for an exporter on the Docker host; and
+- a direct host installation defaults the form to `127.0.0.1` for SBK on the same host;
+- the supplied container defaults the form to `host.docker.internal` for an exporter on the Docker host; and
 - a remote exporter uses its routable DNS, IPv4, or IPv6 address.
+
+`SBK_DASHBOARD_DEFAULT_TARGET_HOST` can override the form default for a custom deployment. It changes only the
+initial form value; every submitted endpoint is still validated and persisted normally.
 
 Authentication is not implemented. Restrict management port 9721 and Grafana port 3000 to trusted networks or put
 them behind an authenticated reverse proxy.

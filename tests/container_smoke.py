@@ -135,6 +135,8 @@ class ContainerSmoke:
         status, landing = request(f"http://127.0.0.1:{self.dashboard_port}/")
         if status != 200 or b"SBK DASHBOARD" not in landing:
             raise AssertionError("Landing page is not reachable from the Docker host")
+        if b'value="host.docker.internal"' not in landing:
+            raise AssertionError("Container landing page does not default to the Docker host gateway")
         bindings = json.loads(
             command(
                 "docker", "inspect", "--format", "{{json .NetworkSettings.Ports}}", self.name

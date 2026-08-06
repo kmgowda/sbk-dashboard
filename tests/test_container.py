@@ -35,6 +35,7 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn('ENTRYPOINT ["/usr/bin/tini", "--", "sbk-dashboard"]', self.dockerfile)
         self.assertIn("HEALTHCHECK", self.dockerfile)
         self.assertIn("http://127.0.0.1:9721/api/health", self.dockerfile)
+        self.assertIn("SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal", self.dockerfile)
 
     def test_compose_publishes_dashboard_ports_and_persists_state(self):
         self.assertIn('"9721:9721"', self.compose)

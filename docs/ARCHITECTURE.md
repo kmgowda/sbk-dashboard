@@ -298,7 +298,10 @@ generated mappings/dashboards, Prometheus TSDB history, Grafana state, and proce
 forwards termination and reaps children, while the existing guardians retain hard-parent-death protection.
 
 Compose adds `host.docker.internal:host-gateway`, allowing container Prometheus to scrape an SBK exporter on the
-Docker host, and enables IPv6 on its user-defined bridge. Remote exporters use normal routable DNS, IPv4, or IPv6
+Docker host, and the image supplies that hostname as the landing form default. Direct host execution retains
+`127.0.0.1` as its form default. The validated default is injected while serving the shared HTML asset, so container
+delivery does not fork the UI or registration behavior. Compose also enables IPv6 on its user-defined bridge.
+Remote exporters use normal routable DNS, IPv4, or IPv6
 addresses; outbound access follows the Docker host's routes and firewall policy. Request-derived Grafana URLs continue
 to use the hostname by which the browser reached port 9721 and retain Grafana port 3000, so localhost, public IP, and
 DNS access remain consistent without persisting client-specific routing.

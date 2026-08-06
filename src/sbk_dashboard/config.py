@@ -117,6 +117,7 @@ class DashboardConfig:
     prometheus_startup_timeout_seconds: int = 45
     grafana_startup_timeout_seconds: int = 120
     status_interval_seconds: int = DEFAULT_STATUS_INTERVAL_SECONDS
+    default_target_host: str = "127.0.0.1"
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,12 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     selected_status_interval = _positive(status_interval, "status interval")
     if selected_status_interval > 86_400:
         raise ValueError("status interval must be between 1 and 86400 seconds")
+    default_target_host, default_target_host_source = _select(
+        None,
+        environment,
+        "SBK_DASHBOARD_DEFAULT_TARGET_HOST",
+        "127.0.0.1",
+    )
     http_workers = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_WORKERS", 8, 1, 128)
     http_queue = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_QUEUE", 64, 0, 10_000)
     request_timeout = _bounded_environment(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS", 15, 1, 300)
@@ -249,6 +256,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,
          "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source,
+         "default-target-host": default_target_host_source,
          "http-workers": _environment_source(environment, "SBK_DASHBOARD_HTTP_WORKERS"),
          "http-queue-capacity": _environment_source(environment, "SBK_DASHBOARD_HTTP_QUEUE"),
          "request-timeout-seconds": _environment_source(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS"),
@@ -280,6 +288,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         prometheus_startup_timeout,
         grafana_startup_timeout,
         selected_status_interval,
+        normalize_host(default_target_host, "default target host", allow_unspecified=False),
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")

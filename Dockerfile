@@ -74,6 +74,7 @@ ENV HOME=/var/lib/sbk-dashboard \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     SBK_DASHBOARD_DATA_DIR=/var/lib/sbk-dashboard \
+    SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal \
     SBK_DASHBOARD_BIND=0.0.0.0 \
     SBK_DASHBOARD_PROMETHEUS_BIN=/opt/prometheus/prometheus \
     SBK_DASHBOARD_PROMETHEUS_BIND=127.0.0.1 \
