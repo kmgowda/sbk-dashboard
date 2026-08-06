@@ -67,6 +67,8 @@ Documentation map:
 - [Implementation internals](docs/INTERNALS.md): code-level startup, request, reconciliation, supervision, and
   shutdown paths.
 - [Docker deployment](docs/DOCKER.md): container networking, persistence, security, and release images.
+- [Docker Hub build and publishing](docs/DOCKER_HUB.md): copy-and-paste local build, versioned multi-architecture
+  publishing, verification, pull, run, and upgrade procedures.
 - [Testing](docs/TESTING.md): automated validation and real SBK procedures.
 
 ## Requirements

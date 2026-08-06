@@ -20,6 +20,7 @@ class DocumentationContractTest(unittest.TestCase):
         internals = (ROOT / "docs/INTERNALS.md").read_text(encoding="utf-8")
         architecture = (ROOT / "docs/ARCHITECTURE.md").read_text(encoding="utf-8")
         docker = (ROOT / "docs/DOCKER.md").read_text(encoding="utf-8")
+        docker_hub = (ROOT / "docs/DOCKER_HUB.md").read_text(encoding="utf-8")
         self.assertIn("conda deactivate", usage)
         self.assertIn("ARCHITECTURE.md", usage)
         self.assertIn("INTERNALS.md", usage)
@@ -31,9 +32,11 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("host.docker.internal", docker)
         self.assertIn("docker compose pull", docker)
         self.assertIn("compose.dev.yaml", docker)
-        self.assertIn("docker buildx imagetools inspect", docker)
-        self.assertIn("DOCKERHUB_USERNAME", docker)
-        self.assertIn("DOCKERHUB_TOKEN", docker)
+        self.assertIn("DOCKER_HUB.md", docker)
+        self.assertIn("docker buildx imagetools inspect", docker_hub)
+        self.assertIn("DOCKERHUB_USERNAME", docker_hub)
+        self.assertIn("DOCKERHUB_TOKEN", docker_hub)
+        self.assertIn("docker compose -f compose.yaml -f compose.dev.yaml build", docker_hub)
 
     def test_cross_platform_ci_uses_an_explicit_macos_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
