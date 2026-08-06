@@ -129,6 +129,10 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 
 ## Add an endpoint
 
+For the complete benchmark-side workflow—including selecting SBK's `PrometheusLogger`, changing `-context`, Docker
+host addressing, distributed SBM/SBK-GEM exporters, and scrape verification—see
+[`SBK.md`](SBK.md).
+
 The landing-page form accepts:
 
 | Field | Meaning |

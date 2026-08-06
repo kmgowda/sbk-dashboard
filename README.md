@@ -61,6 +61,8 @@ Documentation map:
 
 - [Usage guide](docs/USAGE.md): environment activation/deactivation, daily operation, endpoints, backup, upgrades,
   and troubleshooting.
+- [SBK and PrometheusLogger guide](docs/SBK.md): direct and distributed benchmark exporters, registration,
+  networking, verification, and troubleshooting.
 - [Architecture](docs/ARCHITECTURE.md): system boundaries, lifecycle, concurrency, persistence, and design decisions.
 - [Implementation internals](docs/INTERNALS.md): code-level startup, request, reconciliation, supervision, and
   shutdown paths.
@@ -447,10 +449,10 @@ failure.
 
 ## Run SBK and register it
 
-Start SBK with `PrometheusLogger`:
+SBK Dashboard scrapes the HTTP exporter owned by SBK's `PrometheusLogger`. Start the dashboard, then run SBK with
+the logger selected explicitly:
 
 ```bash
-cd /root/projects/SBK
 ./build/install/sbk/bin/sbk \
   -class file \
   -file /tmp/sbk-dashboard-example.dat \
@@ -458,8 +460,7 @@ cd /root/projects/SBK
   -size 4096 \
   -seconds 120 \
   -records 1000 \
-  -out PrometheusLogger \
-  -context 9718/metrics
+  -out PrometheusLogger
 ```
 
 Open `http://localhost:9721/` and add host `127.0.0.1`, port `9718`, path `/metrics`. The returned dashboard URL is
@@ -470,6 +471,11 @@ That `127.0.0.1` example applies to a directly installed sbk-dashboard. With Doc
 `host.docker.internal` default for an SBK process on the Docker host. Register while SBK is still running: SBK starts
 its PrometheusLogger HTTP endpoint when the benchmark opens and stops it when the benchmark closes. Prometheus
 retains successfully scraped history afterward, but the endpoint state becomes `down` once the exporter stops.
+
+Use `-context PORT/PATH` to change the exporter from its `9718/metrics` default. Direct SBK, Docker host access,
+remote exporters, multiple concurrent benchmarks, and SBM/SBK-GEM aggregation have different registration details.
+Follow the complete [SBK and PrometheusLogger guide](docs/SBK.md) for those workflows, verification commands,
+networking and security guidance, and troubleshooting.
 
 ### API
 
