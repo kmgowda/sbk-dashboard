@@ -80,15 +80,25 @@ The only runtime Python dependency is `psutil`, used for cross-platform process 
 Docker Compose is the shortest container workflow:
 
 ```bash
-docker compose build --progress=plain
-docker compose up --detach --no-build
+docker compose pull
+docker compose up --detach
 ```
 
-The first command is a one-time cold build: it pulls the pinned Python base, downloads and verifies the complete
-Prometheus and Grafana distributions, builds the Python wheel, and assembles the image. Its duration depends mainly
-on network and disk speed. Once the image exists, use `docker compose up --detach --no-build`, `docker compose stop`,
-and `docker compose start` so routine restarts do not rebuild it. A pinned released image avoids the source-build
-step, although its first pull still downloads the complete image.
+The production Compose definition pulls the pinned, multi-architecture image from GitHub Container Registry. That
+image already contains the Python package and checksum-verified Prometheus and Grafana distributions, so customer
+startup never builds source or downloads native archives separately. The first image pull depends on network speed;
+subsequent `docker compose start` operations use the local image and persistent volume.
+
+Developers who need a source build use the explicit override:
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml build --progress=plain
+docker compose -f compose.yaml -f compose.dev.yaml up --detach --no-build
+```
+
+The Dockerfile keeps Prometheus and Grafana in independent cached build stages, allowing cold downloads to run in
+parallel. A tool upgrade invalidates only that tool's extraction stage, and BuildKit can reuse a previously verified
+archive without placing it in the final image.
 
 Open `http://localhost:9721/` in the host browser. Dashboard links opened from that page use
 `http://localhost:3000/`. Compose publishes both ports, persists registrations, Prometheus history, and Grafana

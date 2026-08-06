@@ -16,6 +16,7 @@ class ContainerContractTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         cls.compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+        cls.development_compose = (ROOT / "compose.dev.yaml").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/container.yml").read_text(encoding="utf-8")
         cls.ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         cls.properties = (
@@ -27,7 +28,10 @@ class ContainerContractTest(unittest.TestCase):
         self.assertEqual(3, self.dockerfile.count("FROM ${PYTHON_BASE}"))
         self.assertNotIn("slim-bookworm", self.dockerfile)
         self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
-        self.assertIn(f"image: sbk-dashboard:{VERSION}", self.compose)
+        self.assertIn(
+            f"image: ${{SBK_DASHBOARD_IMAGE:-ghcr.io/kmgowda/sbk-dashboard:{VERSION}}}",
+            self.compose,
+        )
         self.assertIn("USER 10001:10001", self.dockerfile)
         self.assertIn('VOLUME ["/var/lib/sbk-dashboard"]', self.dockerfile)
         self.assertIn("EXPOSE 9721 3000", self.dockerfile)
@@ -46,6 +50,12 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("no-new-privileges:true", self.compose)
         self.assertIn("cap_drop:", self.compose)
         self.assertIn("enable_ipv6: true", self.compose)
+        self.assertIn("pull_policy: missing", self.compose)
+        self.assertNotIn("build:", self.compose)
+        self.assertIn(f"image: sbk-dashboard:{VERSION}", self.development_compose)
+        self.assertIn("pull_policy: never", self.development_compose)
+        self.assertIn("build:", self.development_compose)
+        self.assertIn("VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}", self.development_compose)
 
     def test_image_native_versions_and_checksums_match_packaged_bootstrap(self):
         expected = {
@@ -78,6 +88,12 @@ class ContainerContractTest(unittest.TestCase):
             self._property("download.max.bytes"), self._argument("NATIVE_DOWNLOAD_MAX_BYTES")
         )
         self.assertEqual(2, self.dockerfile.count('--max-filesize "${NATIVE_DOWNLOAD_MAX_BYTES}"'))
+        self.assertIn("FROM native-download-base AS prometheus-tools", self.dockerfile)
+        self.assertIn("FROM native-download-base AS grafana-tools", self.dockerfile)
+        self.assertIn("id=sbk-dashboard-prometheus-downloads", self.dockerfile)
+        self.assertIn("id=sbk-dashboard-grafana-downloads", self.dockerfile)
+        self.assertIn("COPY --from=prometheus-tools", self.dockerfile)
+        self.assertIn("COPY --from=grafana-tools", self.dockerfile)
 
     def test_build_context_excludes_generated_and_runtime_data(self):
         ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
@@ -85,6 +101,13 @@ class ContainerContractTest(unittest.TestCase):
             self.assertIn(required, ignored)
 
     def test_ci_runs_smoke_and_builds_both_linux_architectures(self):
+        self.assertIn('- "compose.dev.yaml"', self.workflow)
+        self.assertIn("Validate production and development Compose definitions", self.workflow)
+        self.assertIn(
+            "docker compose -f compose.yaml -f compose.dev.yaml config --quiet",
+            self.workflow,
+        )
+        self.assertIn("python tests/compose_contract.py", self.workflow)
         self.assertIn("python tests/container_smoke.py --image sbk-dashboard:ci", self.workflow)
         self.assertIn("platforms: linux/amd64", self.workflow)
         self.assertIn("platforms: linux/arm64", self.workflow)

@@ -24,6 +24,10 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 Constructors prepare Python objects only. Native processes, listener threads, and supervisor threads are acquired by
 explicit `start()` methods and released by idempotent `close()` or `stop()` methods.
 
+Container packaging does not introduce another composition root. Production Compose pulls the completed runtime
+image; the development override builds that image locally. Both invoke the same `sbk-dashboard` entry point, and the
+Python `run()` composition below remains the sole owner of Prometheus and Grafana in either delivery mode.
+
 ## Composition and startup
 
 `main.main()` performs the outer error mapping: argument parsing and configuration `ValueError`s exit with status 2,

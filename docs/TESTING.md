@@ -37,7 +37,13 @@ Compose hardening, and build-context exclusions:
 ```bash
 PYTHONPATH=src python -m unittest tests.test_container -v
 docker compose config --quiet
+docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+python tests/compose_contract.py
 ```
+
+The first resolved configuration must contain the pinned GHCR image and no build definition. The merged development
+configuration must retain the same ports, volume, network, security, and lifecycle settings while adding only the
+local image/build policy.
 
 Build and run the live Linux smoke test:
 

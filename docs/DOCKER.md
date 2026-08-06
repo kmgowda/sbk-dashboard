@@ -6,18 +6,25 @@ independent service containers.
 
 ## Quick start
 
-From a source checkout:
+Use the pinned release image:
 
 ```bash
-docker compose build --progress=plain
-docker compose up --detach --no-build
+docker compose pull
+docker compose up --detach
 docker compose ps
 ```
 
-The cold build downloads the complete pinned Prometheus and Grafana archives, verifies them, builds the Python
-package, and assembles the runtime image. This is normally the slow part; it is not application startup. After that
-first build, use `docker compose up --detach --no-build`, `docker compose stop`, and `docker compose start` for normal
-operation. Rebuild only after changing the application, Dockerfile, base image, or native-tool versions.
+`compose.yaml` contains no `build` section. It pulls
+`ghcr.io/kmgowda/sbk-dashboard:1.26.8.1` when missing and reuses the local image afterward. Prometheus, Grafana, and
+the Python wheel are already installed in that image; they are never downloaded during container startup. Override
+the pinned image only when deliberately testing another published build:
+
+```bash
+SBK_DASHBOARD_IMAGE=ghcr.io/kmgowda/sbk-dashboard:<version> docker compose up --detach
+```
+
+The first image pull still transfers the complete runtime image. Routine `docker compose start` operations perform
+no pull, build, native download, or extraction.
 
 Open these host URLs:
 
@@ -140,7 +147,18 @@ grace period whenever possible.
 
 ## Build and validate
 
-Build the local architecture:
+Production users should not build locally. For source development, combine the production definition with the
+explicit build override:
+
+```bash
+docker compose -f compose.yaml -f compose.dev.yaml build --progress=plain
+docker compose -f compose.yaml -f compose.dev.yaml up --detach --no-build
+```
+
+The override changes only image acquisition. Ports, volume, network, security settings, entry point, and the runtime
+topology remain inherited from `compose.yaml`.
+
+Build and smoke-test the local architecture directly:
 
 ```bash
 docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.1 .
@@ -156,6 +174,11 @@ docker buildx build --platform linux/amd64,linux/arm64 --tag sbk-dashboard:multi
 The live smoke test validates host port access, registration, a generated Grafana dashboard, persistent state over
 a full restart, graceful exit, and absence of surviving native child PIDs. The real-SBK mode is documented in
 `docs/TESTING.md`.
+
+Prometheus and Grafana downloads are separate Docker stages backed by independent checksum-validated BuildKit cache
+mounts, allowing cold downloads to run in parallel.
+Changing the Python source does not invalidate either native stage; changing only one native version does not
+invalidate the other tool's extraction. Cached archives never enter the final runtime image.
 
 ## Troubleshooting
 

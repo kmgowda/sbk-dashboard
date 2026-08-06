@@ -29,7 +29,8 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("docs/USAGE.md", agents)
         self.assertIn("docs/INTERNALS.md", agents)
         self.assertIn("host.docker.internal", docker)
-        self.assertIn("docker compose up --detach --no-build", docker)
+        self.assertIn("docker compose pull", docker)
+        self.assertIn("compose.dev.yaml", docker)
 
 
 if __name__ == "__main__":
