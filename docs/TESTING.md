@@ -44,9 +44,9 @@ docker compose -f compose.yaml -f compose.dev.yaml config --quiet
 python tests/compose_contract.py
 ```
 
-The first resolved configuration must contain the pinned GHCR image and no build definition. The merged development
-configuration must retain the same ports, volume, network, security, and lifecycle settings while adding only the
-local image/build policy.
+The first resolved configuration must contain the pinned Docker Hub image and no build definition. The merged
+development configuration must retain the same ports, volume, network, security, and lifecycle settings while
+adding only the local image/build policy.
 
 Build and run the live Linux smoke test:
 

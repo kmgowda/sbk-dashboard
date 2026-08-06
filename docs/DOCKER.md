@@ -15,12 +15,12 @@ docker compose ps
 ```
 
 `compose.yaml` contains no `build` section. It pulls
-`ghcr.io/kmgowda/sbk-dashboard:1.26.8.1` when missing and reuses the local image afterward. Prometheus, Grafana, and
-the Python wheel are already installed in that image; they are never downloaded during container startup. Override
-the pinned image only when deliberately testing another published build:
+`kmgowda/sbk-dashboard:1.26.8.1` from Docker Hub when missing and reuses the local image afterward. Prometheus,
+Grafana, and the Python wheel are already installed in that image; they are never downloaded during container
+startup. Override the pinned image only when deliberately testing another published build:
 
 ```bash
-SBK_DASHBOARD_IMAGE=ghcr.io/kmgowda/sbk-dashboard:<version> docker compose up --detach
+SBK_DASHBOARD_IMAGE=kmgowda/sbk-dashboard:<version> docker compose up --detach
 ```
 
 The first image pull still transfers the complete runtime image. Routine `docker compose start` operations perform
@@ -49,14 +49,14 @@ that option deletes endpoint registrations, Prometheus history, Grafana state, a
 
 ## Released image
 
-Release tags publish `linux/amd64` and `linux/arm64` images to GitHub Container Registry. Run a pinned release:
+Release tags publish `linux/amd64` and `linux/arm64` images to Docker Hub. Run a pinned release:
 
 ```bash
 docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  ghcr.io/kmgowda/sbk-dashboard:1.26.8.1
+  kmgowda/sbk-dashboard:1.26.8.1
 ```
 
 Use a pinned release in production instead of `latest`. The image runs as UID/GID 10001, uses `tini` as PID 1,
@@ -97,7 +97,7 @@ docker run --detach --name sbk-dashboard \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  ghcr.io/kmgowda/sbk-dashboard:1.26.8.1 \
+  kmgowda/sbk-dashboard:1.26.8.1 \
   -retention 14 -status-seconds 30
 ```
 
@@ -171,6 +171,24 @@ Build both published architectures with Buildx:
 docker buildx build --platform linux/amd64,linux/arm64 --tag sbk-dashboard:multiarch .
 ```
 
+To publish a validated release manually, authenticate using a Docker Hub access token when prompted and push both
+the immutable version tag and the convenience `latest` tag:
+
+```bash
+docker login --username kmgowda
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --build-arg APPLICATION_VERSION=1.26.8.1 \
+  --build-arg VCS_REF=<commit-sha> \
+  --tag kmgowda/sbk-dashboard:1.26.8.1 \
+  --tag kmgowda/sbk-dashboard:latest \
+  --push \
+  .
+```
+
+Use a Docker Hub access token rather than the account password. Confirm the AMD64 and ARM64 manifests exist before
+announcing the release.
+
 The live smoke test validates host port access, registration, a generated Grafana dashboard, persistent state over
 a full restart, graceful exit, and absence of surviving native child PIDs. The real-SBK mode is documented in
 `docs/TESTING.md`.
@@ -179,6 +197,11 @@ Prometheus and Grafana downloads are separate Docker stages backed by independen
 mounts, allowing cold downloads to run in parallel.
 Changing the Python source does not invalidate either native stage; changing only one native version does not
 invalidate the other tool's extraction. Cached archives never enter the final runtime image.
+
+Tagged release publishing requires the repository Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
+The token must have permission to push `kmgowda/sbk-dashboard`; do not store Docker Hub credentials in Compose,
+workflow source, or the image. A tag such as `v1.26.8.1` publishes both `1.26.8.1` and `latest` multi-architecture
+tags after validation succeeds.
 
 ## Troubleshooting
 

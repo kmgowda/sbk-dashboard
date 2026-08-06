@@ -86,7 +86,7 @@ docker compose pull
 docker compose up --detach
 ```
 
-The production Compose definition pulls the pinned, multi-architecture image from GitHub Container Registry. That
+The production Compose definition pulls the pinned, multi-architecture image from Docker Hub. That
 image already contains the Python package and checksum-verified Prometheus and Grafana distributions, so customer
 startup never builds source or downloads native archives separately. The first image pull depends on network speed;
 subsequent `docker compose start` operations use the local image and persistent volume.
@@ -124,7 +124,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  ghcr.io/kmgowda/sbk-dashboard:1.26.8.1
+  kmgowda/sbk-dashboard:1.26.8.1
 ```
 
 See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,

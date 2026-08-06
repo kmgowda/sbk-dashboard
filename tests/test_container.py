@@ -29,7 +29,7 @@ class ContainerContractTest(unittest.TestCase):
         self.assertNotIn("slim-bookworm", self.dockerfile)
         self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
         self.assertIn(
-            f"image: ${{SBK_DASHBOARD_IMAGE:-ghcr.io/kmgowda/sbk-dashboard:{VERSION}}}",
+            f"image: ${{SBK_DASHBOARD_IMAGE:-kmgowda/sbk-dashboard:{VERSION}}}",
             self.compose,
         )
         self.assertIn("USER 10001:10001", self.dockerfile)
@@ -112,7 +112,11 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("platforms: linux/amd64", self.workflow)
         self.assertIn("platforms: linux/arm64", self.workflow)
         self.assertIn("platforms: linux/amd64,linux/arm64", self.workflow)
-        self.assertIn("ghcr.io/${{ github.repository }}", self.workflow)
+        self.assertIn("images: kmgowda/sbk-dashboard", self.workflow)
+        self.assertIn("Log in to Docker Hub", self.workflow)
+        self.assertIn("secrets.DOCKERHUB_USERNAME", self.workflow)
+        self.assertIn("secrets.DOCKERHUB_TOKEN", self.workflow)
+        self.assertNotIn("ghcr.io", self.workflow)
         self.assertIn("Verify release tag matches the package version", self.workflow)
         self.assertEqual(2, self.workflow.count("runs-on: ubuntu-24.04"))
         self.assertNotIn("ubuntu-latest", self.workflow)
