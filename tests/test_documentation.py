@@ -32,6 +32,13 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("docker compose pull", docker)
         self.assertIn("compose.dev.yaml", docker)
 
+    def test_cross_platform_ci_uses_an_explicit_macos_runner(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        testing = (ROOT / "docs" / "TESTING.md").read_text(encoding="utf-8")
+        self.assertIn("macos-15-intel", workflow)
+        self.assertNotIn("macos-latest", workflow)
+        self.assertIn("macos-15-intel", testing)
+
 
 if __name__ == "__main__":
     unittest.main()
