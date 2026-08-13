@@ -85,6 +85,8 @@ runtime data as source material.
 
 - Constructors have no native-process side effects. `start()` acquires resources; `close()` is idempotent.
 - Validate both configured port owners before stopping either existing service.
+- CLI/environment Prometheus and Grafana ports are authoritative and non-replaceable: if occupied, report the
+  identifiable owner and fail without stopping it. Only unspecified built-in defaults may receive automatic fallback.
 - With `-continue false`, replace only verified Prometheus/Grafana listeners. Never kill unrelated or unidentified
   processes.
 - With `-continue true`, attach only to healthy compatible services; attached services are observed but never
@@ -121,11 +123,13 @@ runtime data as source material.
 | `src/sbk_dashboard/monitoring.py` | Monitoring facade, configuration, reconciliation, supervision, target status |
 | `src/sbk_dashboard/processes.py` | Lifecycle state machine, ownership registry, health strategy, process trees/logs |
 | `src/sbk_dashboard/guardian.py` | Parent-death monitoring and orphaned native-process tree cleanup |
+| `src/sbk_dashboard/windows_job.py` | Windows kill-on-close Job Object containment and suspended launch |
 | `src/sbk_dashboard/provisioning.py` | Prometheus discovery and endpoint-scoped Grafana dashboard generation |
 | `src/sbk_dashboard/bootstrap.py` | Native download, verification, extraction, and installation |
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
+| `scripts/sbk_dashboard_launcher.py` | Cross-platform foreground/background ownership, logs, and selective stop |
 | `Dockerfile`, `compose.yaml`, `compose.dev.yaml` | Non-root release image, production deployment, development build override |
 | `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |

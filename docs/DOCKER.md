@@ -143,10 +143,12 @@ mount the Docker socket. Native child logs and control-plane state remain bounde
 sbk-dashboard settings. The image health check reports unhealthy when the management/native stack health endpoint
 cannot respond successfully.
 
-Graceful `docker stop` sends `SIGTERM` through `tini`; the Python lifecycle closes Grafana and Prometheus in reverse
-dependency order and removes ownership records. The existing guardian processes provide additional cleanup if the
-Python control plane dies unexpectedly. Docker `SIGKILL` cannot run in-container cleanup, so use the normal stop
-grace period whenever possible.
+Graceful `docker stop` sends the declared `SIGTERM` through `tini`; the Python lifecycle closes Grafana and
+Prometheus in reverse dependency order and removes ownership records. The existing guardian processes provide
+additional cleanup if the Python control plane dies unexpectedly. Compose allows 30 seconds for ordered
+graceful/forced cleanup; after that deadline Docker kills every process remaining in the container PID
+namespace/cgroup. Docker `SIGKILL` cannot run in-container cleanup, so use the normal stop grace period whenever
+possible.
 
 ## Build and validate
 

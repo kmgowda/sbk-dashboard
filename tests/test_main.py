@@ -14,6 +14,7 @@ from sbk_dashboard.main import (
     print_effective,
     print_runtime,
     run,
+    select_native_ports,
 )
 from sbk_dashboard.version import VERSION
 
@@ -73,6 +74,155 @@ class MainTest(unittest.TestCase):
         self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_default_native_ports_fall_back_and_update_default_grafana_url(self, available):
+        available.side_effect = [19090, 13000]
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            monitoring = select_native_ports(parse_configuration([], {}).monitoring)
+        self.assertEqual(19090, monitoring.prometheus_port)
+        self.assertEqual(13000, monitoring.grafana_port)
+        self.assertEqual("http://localhost:13000", monitoring.grafana_public_url)
+        self.assertEqual("automatic fallback from 9090", monitoring.sources["prometheus-port"])
+        self.assertEqual("automatic fallback from 3000", monitoring.sources["grafana-port"])
+        self.assertEqual("automatic Grafana port", monitoring.sources["grafana-url"])
+        self.assertEqual(
+            [call(9090, "127.0.0.1"), call(3000, "0.0.0.0", {19090})],
+            available.call_args_list,
+        )
+        output = "\n".join(captured.output)
+        self.assertIn(
+            "Prometheus port: 19090 on 127.0.0.1 "
+            "(automatically selected because default port 9090 was already in use)",
+            output,
+        )
+        self.assertIn(
+            "Grafana port: 13000 on 0.0.0.0 "
+            "(automatically selected because default port 3000 was already in use)",
+            output,
+        )
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available", side_effect=[9090, 3000])
+    def test_available_default_native_ports_are_reported(self, _available):
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            select_native_ports(parse_configuration([], {}).monitoring)
+        output = "\n".join(captured.output)
+        self.assertIn("Prometheus port: 9090 on 127.0.0.1 (built-in default)", output)
+        self.assertIn("Grafana port: 3000 on 0.0.0.0 (built-in default)", output)
+
+    @patch("sbk_dashboard.main.PortProcessManager.require_available")
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_explicit_native_ports_and_grafana_url_are_authoritative(self, available, require_available):
+        parsed = parse_configuration(
+            [
+                "-prometheus-port",
+                "19090",
+                "-grafana-port",
+                "13000",
+                "-grafana-url",
+                "https://grafana.example/base",
+            ],
+            {},
+        )
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            monitoring = select_native_ports(parsed.monitoring)
+        self.assertEqual(19090, monitoring.prometheus_port)
+        self.assertEqual(13000, monitoring.grafana_port)
+        self.assertEqual("https://grafana.example/base", monitoring.grafana_public_url)
+        available.assert_not_called()
+        self.assertEqual(
+            [
+                call("Prometheus", 19090, "127.0.0.1", "command line"),
+                call("Grafana", 13000, "0.0.0.0", "command line"),
+            ],
+            require_available.call_args_list,
+        )
+        output = "\n".join(captured.output)
+        self.assertIn("Prometheus port: 19090 on 127.0.0.1 (user supplied via command line)", output)
+        self.assertIn("Grafana port: 13000 on 0.0.0.0 (user supplied via command line)", output)
+
+    @patch("sbk_dashboard.main.PortProcessManager.require_available")
+    def test_occupied_explicit_native_port_fails_before_startup(self, require_available):
+        require_available.side_effect = OSError(
+            "Prometheus port 19090 on bind address 127.0.0.1 is already in use by PID 42 (/usr/bin/prometheus); "
+            "this port was user supplied via command line. Choose an available Prometheus port; no process was stopped"
+        )
+        monitoring = parse_configuration(["-prometheus-port", "19090"], {}).monitoring
+        with self.assertRaisesRegex(
+            OSError,
+            "already in use by PID 42.*user supplied via command line.*no process was stopped",
+        ):
+            select_native_ports(monitoring)
+
+    def test_live_busy_user_port_is_reported_and_listener_survives(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            monitoring = parse_configuration(
+                ["-prometheus-port", str(port), "-prometheus-bind", "127.0.0.1"],
+                {},
+            ).monitoring
+            with self.assertRaisesRegex(
+                OSError,
+                f"Prometheus port {port}.*user supplied via command line.*no process was stopped",
+            ):
+                select_native_ports(monitoring)
+            # The availability probe establishes a real connection before reporting
+            # the listener as busy. Drain that connection before probing again: a
+            # listen(1) backlog remains occupied by the closed probe on macOS and
+            # Windows until the server accepts it.
+            accepted, _address = listener.accept()
+            with accepted:
+                pass
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                self.assertEqual(0, probe.connect_ex(("127.0.0.1", port)))
+
+    @patch("sbk_dashboard.main.NativeToolBootstrap")
+    @patch("sbk_dashboard.main.PortProcessManager.require_available")
+    def test_main_reports_busy_user_port_before_bootstrapping_tools(self, require_available, bootstrap):
+        require_available.side_effect = OSError(
+            "Prometheus port 19090 on bind address 127.0.0.1 is already in use by PID 42 (/usr/bin/prometheus); "
+            "this port was user supplied via command line. Choose an available Prometheus port; no process was stopped"
+        )
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured, self.assertRaises(SystemExit) as stopped:
+            main(["-prometheus-port", "19090"])
+        self.assertEqual(1, stopped.exception.code)
+        self.assertIn("Unable to start sbk-dashboard: Prometheus port 19090", "\n".join(captured.output))
+        bootstrap.assert_not_called()
+
+    @patch("sbk_dashboard.main.PortProcessManager.require_available")
+    def test_native_services_must_use_distinct_explicit_ports(self, _require_available):
+        monitoring = parse_configuration(
+            ["-prometheus-port", "19090", "-grafana-port", "19090"], {}
+        ).monitoring
+        with self.assertRaisesRegex(OSError, "cannot both use port 19090.*distinct available native ports"):
+            select_native_ports(monitoring)
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_continue_mode_preserves_default_ports_for_health_checked_attachment(self, available):
+        original = parse_configuration(["-continue", "true"], {}).monitoring
+        with self.assertLogs("sbk_dashboard.main", level="INFO") as captured:
+            self.assertIs(original, select_native_ports(original, continue_existing=True))
+        available.assert_not_called()
+        self.assertIn(
+            "Prometheus port: 9090 on 127.0.0.1 "
+            "(built-in default; reserved for -continue true compatibility/health attachment)",
+            "\n".join(captured.output),
+        )
+
+    @patch("sbk_dashboard.main.PortProcessManager.require_available")
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_explicit_grafana_url_survives_automatic_port_fallback(self, available, _require_available):
+        available.side_effect = [9090, 13000]
+        original = parse_configuration(
+            ["-grafana-url", "https://grafana.example/base"], {}
+        ).monitoring
+        selected = select_native_ports(original)
+        self.assertEqual(13000, selected.grafana_port)
+        self.assertEqual("https://grafana.example/base", selected.grafana_public_url)
+        self.assertEqual("command line", selected.sources["grafana-url"])
 
     @patch("sbk_dashboard.main.files")
     def test_runtime_continues_when_banner_cannot_be_read(self, resource_files):

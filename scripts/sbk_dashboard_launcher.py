@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start and stop one foreground or background SBK Dashboard process safely."""
+"""Start and stop foreground or background SBK Dashboard instances safely."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ except ModuleNotFoundError as error:
 
 STATE_FILE = "sbk-dashboard.json"
 LOG_FILE = "sbk-dashboard.log"
+DEFAULT_DASHBOARD_PORT = 9721
 DEFAULT_STOP_TIMEOUT_SECONDS = 45.0
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUPS = 3
@@ -45,29 +46,64 @@ def state_directory() -> Path:
     if override:
         return Path(override).expanduser().resolve()
     if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
         return base / "SBK Dashboard" / "launcher"
     return Path.home() / ".sbk-dashboard" / "launcher"
 
 
-def state_path() -> Path:
-    return state_directory() / STATE_FILE
+def state_path(port: int = DEFAULT_DASHBOARD_PORT) -> Path:
+    name = STATE_FILE if port == DEFAULT_DASHBOARD_PORT else f"sbk-dashboard-{port}.json"
+    return state_directory() / name
+
+
+def log_path(port: int = DEFAULT_DASHBOARD_PORT) -> Path:
+    name = LOG_FILE if port == DEFAULT_DASHBOARD_PORT else f"sbk-dashboard-{port}.log"
+    return state_directory() / name
 
 
 def foreground_stop_path(pid: int, create_time: float) -> Path:
     return state_directory() / f"stop-{pid}-{int(create_time * 1000)}.request"
 
 
-def load_state() -> dict[str, Any] | None:
+def load_state(port: int = DEFAULT_DASHBOARD_PORT) -> dict[str, Any] | None:
+    target = state_path(port)
     try:
-        value = json.loads(state_path().read_text(encoding="utf-8"))
+        value = json.loads(target.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
-    except (OSError, json.JSONDecodeError) as error:
-        raise SystemExit(f"Unable to read launcher state {state_path()}: {error}") from error
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise SystemExit(f"Unable to read launcher state {target}: {error}") from error
     if not isinstance(value, dict):
-        raise SystemExit(f"Launcher state {state_path()} is not a JSON object.")
+        raise SystemExit(f"Launcher state {target} is not a JSON object.")
     return value
+
+
+def load_states(port: int | None = None) -> list[tuple[int, dict[str, Any]]]:
+    if port is not None:
+        state = load_state(port)
+        return [] if state is None else [(port, state)]
+    directory = state_directory()
+    if not directory.exists():
+        return []
+    records = []
+    for path in sorted(directory.glob("sbk-dashboard*.json")):
+        name = path.name
+        if name == STATE_FILE:
+            selected_port = DEFAULT_DASHBOARD_PORT
+        else:
+            match = name.removeprefix("sbk-dashboard-").removesuffix(".json")
+            try:
+                selected_port = int(match)
+            except ValueError:
+                continue
+        try:
+            state = load_state(selected_port)
+        except SystemExit as error:
+            print(f"Skipping unreadable launcher state for port {selected_port}: {error}", file=sys.stderr)
+            continue
+        if state is not None:
+            records.append((selected_port, state))
+    return records
 
 
 def matching_process(state: dict[str, Any] | None) -> psutil.Process | None:
@@ -88,14 +124,14 @@ def process_matches(pid: int, create_time: float) -> psutil.Process | None:
     return matching_process({"pid": pid, "create_time": create_time})
 
 
-def remove_stale_state() -> None:
+def remove_stale_state(port: int = DEFAULT_DASHBOARD_PORT) -> None:
     with suppress(FileNotFoundError):
-        state_path().unlink()
+        state_path(port).unlink()
 
 
-def remove_owned_state(pid: int, create_time: float) -> None:
+def remove_owned_state(pid: int, create_time: float, port: int = DEFAULT_DASHBOARD_PORT) -> None:
     try:
-        state = load_state()
+        state = load_state(port)
     except SystemExit:
         return
     if state is None:
@@ -105,20 +141,21 @@ def remove_owned_state(pid: int, create_time: float) -> None:
     except (KeyError, TypeError, ValueError):
         return
     if matches:
-        remove_stale_state()
+        remove_stale_state(port)
 
 
-def write_state(process: psutil.Process, mode: str) -> Path | None:
+def write_state(process: psutil.Process, mode: str, port: int = DEFAULT_DASHBOARD_PORT) -> Path | None:
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True)
-    target = state_path()
+    target = state_path(port)
     temporary = target.with_suffix(f".tmp-{os.getpid()}")
     payload = {
         "pid": process.pid,
         "create_time": process.create_time(),
         "python": sys.executable,
         "mode": mode,
-        "log": str(directory / LOG_FILE),
+        "port": port,
+        "log": str(log_path(port)),
     }
     stop_request = None
     if mode == "foreground":
@@ -137,6 +174,79 @@ def write_state(process: psutil.Process, mode: str) -> Path | None:
         with suppress(FileNotFoundError):
             temporary.unlink()
     return stop_request
+
+
+def reserve_start(port: int) -> psutil.Process | None:
+    """Atomically reserve one management port or return its live launcher owner."""
+    directory = state_directory()
+    directory.mkdir(parents=True, exist_ok=True)
+    target = state_path(port)
+    owner = psutil.Process(os.getpid())
+    payload = {
+        "pid": owner.pid,
+        "create_time": owner.create_time(),
+        "python": sys.executable,
+        "mode": "starting",
+        "port": port,
+        "log": str(log_path(port)),
+    }
+    temporary = target.with_name(f".{target.name}.reserve-{os.getpid()}-{uuid.uuid4().hex}")
+    try:
+        with temporary.open("x", encoding="utf-8") as output:
+            json.dump(payload, output, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        with suppress(OSError):
+            temporary.chmod(0o600)
+        for _ in range(2):
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                current = matching_process(load_state(port))
+                if current is not None:
+                    return current
+                remove_stale_state(port)
+                continue
+            return None
+        raise SystemExit(f"Unable to reserve launcher state for dashboard port {port}.")
+    finally:
+        with suppress(FileNotFoundError):
+            temporary.unlink()
+
+
+def management_port(arguments: list[str]) -> int:
+    selected = str(DEFAULT_DASHBOARD_PORT)
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument in {"-port", "--port"}:
+            if index + 1 >= len(arguments):
+                raise SystemExit(f"{argument} requires a port number.")
+            selected = arguments[index + 1]
+            index += 2
+            continue
+        if argument.startswith("-port=") or argument.startswith("--port="):
+            selected = argument.partition("=")[2]
+        index += 1
+    try:
+        port = int(selected)
+    except ValueError as error:
+        raise SystemExit("Dashboard port must be between 1 and 65535.") from error
+    if not 1 <= port <= 65535:
+        raise SystemExit("Dashboard port must be between 1 and 65535.")
+    return port
+
+
+def informational(arguments: list[str]) -> bool:
+    return any(argument in {"-h", "--help", "-v", "--version"} for argument in arguments)
+
+
+def run_information_command(arguments: list[str]) -> int:
+    report_environment()
+    application = importlib.import_module("sbk_dashboard.main")
+    result = application.main(arguments)
+    return result if isinstance(result, int) else 0
 
 
 def report_environment() -> None:
@@ -166,15 +276,21 @@ def report_environment() -> None:
 
 
 def foreground(arguments: list[str]) -> int:
-    current = matching_process(load_state())
-    if current is not None:
-        print(f"SBK Dashboard is already running with PID {current.pid}.")
-        return 0
-    remove_stale_state()
+    if informational(arguments):
+        return run_information_command(arguments)
+    port = management_port(arguments)
     report_environment()
+    current = reserve_start(port)
+    if current is not None:
+        print(f"SBK Dashboard is already running on port {port} with PID {current.pid}.")
+        return 0
     process = psutil.Process(os.getpid())
     process_created = process.create_time()
-    stop_request = write_state(process, "foreground")
+    try:
+        stop_request = write_state(process, "foreground", port)
+    except BaseException:
+        remove_owned_state(process.pid, process_created, port)
+        raise
     assert stop_request is not None
     monitor_stopping = threading.Event()
 
@@ -201,17 +317,19 @@ def foreground(arguments: list[str]) -> int:
             stop_request.unlink()
         if monitor is not None:
             monitor.join(timeout=1)
-        remove_owned_state(process.pid, process_created)
+        remove_owned_state(process.pid, process_created, port)
     return 0
 
 
 def start_background(arguments: list[str]) -> int:
-    current = matching_process(load_state())
-    if current is not None:
-        print(f"SBK Dashboard is already running with PID {current.pid}.")
-        return 0
-    remove_stale_state()
+    if informational(arguments):
+        return run_information_command(arguments)
+    port = management_port(arguments)
     report_environment()
+    current = reserve_start(port)
+    if current is not None:
+        print(f"SBK Dashboard is already running on port {port} with PID {current.pid}.")
+        return 0
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
@@ -221,25 +339,29 @@ def start_background(arguments: list[str]) -> int:
     startup_id = uuid.uuid4().hex
     marker = directory / f"startup-{startup_id}.authorized"
     started_marker = directory / f"startup-{startup_id}.started"
-    child = subprocess.Popen(
-        [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "_run",
-            str(parent.pid),
-            str(parent.create_time()),
-            str(marker),
-            str(started_marker),
-            *arguments,
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=environment,
-        start_new_session=os.name != "nt",
-        creationflags=creation_flags,
-        close_fds=True,
-    )
+    try:
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "_run",
+                str(parent.pid),
+                str(parent.create_time()),
+                str(marker),
+                str(started_marker),
+                *arguments,
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+            start_new_session=os.name != "nt",
+            creationflags=creation_flags,
+            close_fds=True,
+        )
+    except BaseException:
+        remove_owned_state(parent.pid, parent.create_time(), port)
+        raise
     previous_handlers: dict[signal.Signals, Any] = {}
 
     def interrupt_start(_signum: int, _frame: object) -> None:
@@ -256,17 +378,17 @@ def start_background(arguments: list[str]) -> int:
         if child.poll() is not None:
             raise SystemExit(
                 f"SBK Dashboard exited during startup with status {child.returncode}. "
-                f"See {directory / LOG_FILE}."
+                f"See {log_path(port)}."
             )
         try:
             process = psutil.Process(child.pid)
         except psutil.NoSuchProcess:
             raise SystemExit(
-                f"SBK Dashboard exited during startup. See {directory / LOG_FILE}."
+                f"SBK Dashboard exited during startup. See {log_path(port)}."
             ) from None
-        write_state(process, "background")
+        write_state(process, "background", port)
         marker.touch(exist_ok=False)
-        wait_for_background_start(child, started_marker, directory / LOG_FILE)
+        wait_for_background_start(child, started_marker, log_path(port))
     except BaseException:
         running_child = None
         if child.poll() is None:
@@ -275,7 +397,7 @@ def start_background(arguments: list[str]) -> int:
         terminate_dashboard_group(child.pid, running_child)
         with suppress(subprocess.TimeoutExpired):
             child.wait(timeout=FORCE_CLEANUP_SECONDS)
-        remove_stale_state()
+        remove_stale_state(port)
         for startup_marker in (marker, started_marker):
             with suppress(FileNotFoundError):
                 startup_marker.unlink()
@@ -283,8 +405,8 @@ def start_background(arguments: list[str]) -> int:
     finally:
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
-    print(f"Started SBK Dashboard with PID {child.pid} using {sys.executable}.")
-    print(f"Log: {directory / LOG_FILE}")
+    print(f"Started SBK Dashboard on port {port} with PID {child.pid} using {sys.executable}.")
+    print(f"Log: {log_path(port)}")
     return 0
 
 
@@ -334,6 +456,15 @@ def append_log(log_path: Path, chunk: bytes) -> None:
     rotate_log(log_path, len(chunk))
     with log_path.open("ab", buffering=0) as output:
         output.write(chunk)
+
+
+def drain_child_output(child: subprocess.Popen[bytes], destination: Path) -> None:
+    assert child.stdout is not None
+    while True:
+        chunk = child.stdout.read(READ_CHUNK_BYTES)
+        if not chunk:
+            return
+        append_log(destination, chunk)
 
 
 def terminate_dashboard_group(group_id: int, dashboard: psutil.Process | None) -> None:
@@ -436,7 +567,8 @@ def run_dashboard(
 ) -> int:
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True)
-    log_path = directory / LOG_FILE
+    port = management_port(arguments)
+    instance_log_path = log_path(port)
     stopping = threading.Event()
     child: subprocess.Popen[bytes] | None = None
 
@@ -491,13 +623,7 @@ def run_dashboard(
                 close_fds=True,
             )
             started_marker.touch(exist_ok=False)
-        assert child.stdout is not None
-        while True:
-            chunk = child.stdout.read(READ_CHUNK_BYTES)
-            if chunk:
-                append_log(log_path, chunk)
-            if not chunk and child.poll() is not None:
-                break
+        drain_child_output(child, instance_log_path)
     finally:
         if child is not None:
             if child.stdout is not None:
@@ -509,7 +635,7 @@ def run_dashboard(
         for startup_marker in (marker, started_marker):
             with suppress(FileNotFoundError):
                 startup_marker.unlink()
-        remove_owned_state(supervisor.pid, supervisor_created)
+        remove_owned_state(supervisor.pid, supervisor_created, port)
     return exit_code
 
 
@@ -535,7 +661,11 @@ def request_stop(process: psutil.Process, mode: str, create_time: float) -> None
         except OSError:
             for child in process.children(recursive=True):
                 try:
-                    if "sbk_dashboard" in " ".join(child.cmdline()):
+                    command = child.cmdline()
+                    if any(
+                        command[index] == "-m" and command[index + 1] == "sbk_dashboard"
+                        for index in range(len(command) - 1)
+                    ):
                         child.terminate()
                         return
                 except psutil.Error:
@@ -545,14 +675,23 @@ def request_stop(process: psutil.Process, mode: str, create_time: float) -> None
     process.terminate()
 
 
-def stop() -> int:
-    state = load_state()
+def stop_selection(arguments: list[str]) -> int | None:
+    if not arguments:
+        return None
+    if len(arguments) == 1 and (
+        arguments[0].startswith("-port=") or arguments[0].startswith("--port=")
+    ):
+        return management_port(arguments)
+    if len(arguments) == 2 and arguments[0] in {"-port", "--port"}:
+        return management_port(arguments)
+    raise SystemExit("Usage: stop-sbk-dashboard [-port port]")
+
+
+def stop_instance(port: int, state: dict[str, Any]) -> bool:
     process = matching_process(state)
     if process is None:
-        remove_stale_state()
-        print("SBK Dashboard is not running (no matching launcher process).")
-        return 0
-    assert state is not None
+        remove_stale_state(port)
+        return False
     try:
         descendants = process.children(recursive=True)
     except psutil.Error:
@@ -561,9 +700,27 @@ def stop() -> int:
     with suppress(psutil.Error):
         request_stop(process, mode, float(state["create_time"]))
     forced = wait_then_force([process, *descendants], stop_timeout())
-    remove_owned_state(process.pid, float(state["create_time"]))
+    remove_owned_state(process.pid, float(state["create_time"]), port)
     suffix = " after bounded forceful cleanup" if forced else ""
-    print(f"Stopped SBK Dashboard PID {process.pid}{suffix}.")
+    print(f"Stopped SBK Dashboard on port {port} with PID {process.pid}{suffix}.")
+    return True
+
+
+def stop(arguments: list[str] | None = None) -> int:
+    supplied = [] if arguments is None else arguments
+    if supplied in (["-h"], ["--help"]):
+        print("Usage: stop-sbk-dashboard [-port port]")
+        print("With no port, stops all instances started by the launcher.")
+        return 0
+    selected_port = stop_selection(supplied)
+    states = load_states(selected_port)
+    stopped = 0
+    for port, state in states:
+        if stop_instance(port, state):
+            stopped += 1
+    if stopped == 0:
+        detail = "" if selected_port is None else f" on port {selected_port}"
+        print(f"SBK Dashboard is not running{detail} (no matching launcher process).")
     return 0
 
 
@@ -585,13 +742,13 @@ def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {"foreground", "background", "start", "stop"}:
         raise SystemExit(
             f"Usage: {Path(sys.argv[0]).name} "
-            "foreground|background|start [dashboard options...] | stop"
+            "foreground|background|start [dashboard options...] | stop [-port port]"
         )
     if sys.argv[1] == "foreground":
         return foreground(sys.argv[2:])
     if sys.argv[1] in {"background", "start"}:
         return start_background(sys.argv[2:])
-    return stop()
+    return stop(sys.argv[2:])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,10 @@ const emptyState = document.querySelector('#empty-state');
 const targetCount = document.querySelector('#target-count');
 const upCount = document.querySelector('#up-count');
 const downCount = document.querySelector('#down-count');
+const compareButton = document.querySelector('#compare-selected');
+const selectedTargetIds = new Set();
 const CLIENT_ID_KEY = 'sbk-dashboard-client-id';
+const MAX_COMPARISON_TARGETS = __MAX_COMPARISON_TARGETS__;
 
 function createClientId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
@@ -49,8 +52,28 @@ function element(tag, className, text) {
 
 function renderTarget(target) {
     const card = element('article', 'target-card');
+    const selector = element('label', 'compare-selector');
+    selector.title = `Include ${target.name} in comparison`;
+    const checkbox = element('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedTargetIds.has(target.id);
+    checkbox.setAttribute('aria-label', `Compare ${target.name}`);
+    checkbox.addEventListener('change', () => {
+        if (checkbox.checked && selectedTargetIds.size >= MAX_COMPARISON_TARGETS) {
+            checkbox.checked = false;
+            message.textContent = `No more than ${MAX_COMPARISON_TARGETS} endpoints can be compared at once.`;
+            return;
+        }
+        if (checkbox.checked) selectedTargetIds.add(target.id);
+        else selectedTargetIds.delete(target.id);
+        updateComparisonButton();
+    });
+    selector.append(checkbox);
+    card.append(selector);
     const details = element('div');
-    details.append(element('h3', null, target.name));
+    const heading = element('h3', null, target.name);
+    heading.append(element('span', 'kind-badge', target.kind || 'SBK'));
+    details.append(heading);
     const endpoint = element('div', 'endpoint', `${target.host}:${target.port}${target.metricsPath}`);
     const status = element('span', `status ${target.status.state}`, target.status.state);
     status.title = target.status.detail || 'Waiting for status';
@@ -72,6 +95,12 @@ function renderTarget(target) {
     return card;
 }
 
+function updateComparisonButton() {
+    const count = selectedTargetIds.size;
+    compareButton.textContent = `Compare selected (${count}) ↗`;
+    compareButton.disabled = count < 2 || count > MAX_COMPARISON_TARGETS;
+}
+
 function updateEndpointSummary(targets) {
     let up = 0;
     let down = 0;
@@ -89,7 +118,12 @@ async function loadTargets() {
         const response = await fetch('/api/targets', {cache: 'no-store'});
         if (!response.ok) throw new Error('Unable to load endpoints');
         const targets = await response.json();
+        const currentIds = new Set(targets.map(target => target.id));
+        for (const targetId of [...selectedTargetIds]) {
+            if (!currentIds.has(targetId)) selectedTargetIds.delete(targetId);
+        }
         targetList.replaceChildren(...targets.map(renderTarget));
+        updateComparisonButton();
         updateEndpointSummary(targets);
         emptyState.hidden = targets.length !== 0;
     } catch (error) {
@@ -118,7 +152,8 @@ form.addEventListener('submit', async event => {
         name: values.get('name'),
         host: values.get('host'),
         port: Number(values.get('port')),
-        metricsPath: values.get('metricsPath')
+        metricsPath: values.get('metricsPath'),
+        kind: values.get('kind')
     };
     try {
         const response = await fetch('/api/targets', {
@@ -135,6 +170,31 @@ form.addEventListener('submit', async event => {
         message.textContent = error.message;
     } finally {
         button.disabled = false;
+    }
+});
+
+compareButton.addEventListener('click', async () => {
+    if (selectedTargetIds.size < 2 || selectedTargetIds.size > MAX_COMPARISON_TARGETS) return;
+    compareButton.disabled = true;
+    message.textContent = '';
+    const comparisonWindow = window.open('', '_blank');
+    if (comparisonWindow) comparisonWindow.opener = null;
+    try {
+        const response = await fetch('/api/comparison-dashboard', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({targetIds: Array.from(selectedTargetIds)})
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Unable to create comparison dashboard');
+        reportActivity('grafana');
+        if (comparisonWindow) comparisonWindow.location.replace(body.dashboardUrl);
+        else window.location.assign(body.dashboardUrl);
+    } catch (error) {
+        if (comparisonWindow) comparisonWindow.close();
+        message.textContent = error.message;
+    } finally {
+        updateComparisonButton();
     }
 });
 

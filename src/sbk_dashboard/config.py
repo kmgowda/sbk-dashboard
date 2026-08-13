@@ -134,6 +134,29 @@ class MonitoringConfig:
     def with_tools(self, prometheus_binary: Path, grafana_home: Path) -> MonitoringConfig:
         return replace(self, prometheus_binary=prometheus_binary, grafana_home=grafana_home)
 
+    def port_was_supplied(self, component: str) -> bool:
+        """Return whether an operator selected this native port by CLI or environment."""
+        source = self.sources.get(f"{component}-port", "default")
+        return source == "command line" or source.startswith("environment ")
+
+    def with_runtime_ports(self, prometheus_port: int, grafana_port: int) -> MonitoringConfig:
+        sources = dict(self.sources)
+        if prometheus_port != self.prometheus_port:
+            sources["prometheus-port"] = f"automatic fallback from {self.prometheus_port}"
+        if grafana_port != self.grafana_port:
+            sources["grafana-port"] = f"automatic fallback from {self.grafana_port}"
+        public_url = self.grafana_public_url
+        if grafana_port != self.grafana_port and sources.get("grafana-url") == "default":
+            public_url = f"http://localhost:{grafana_port}"
+            sources["grafana-url"] = "automatic Grafana port"
+        return replace(
+            self,
+            prometheus_port=prometheus_port,
+            grafana_port=grafana_port,
+            grafana_public_url=public_url,
+            sources=sources,
+        )
+
 
 @dataclass(frozen=True)
 class ToolArchive:
@@ -172,7 +195,13 @@ def parser() -> argparse.ArgumentParser:
         epilog="Prometheus and Grafana run as child processes; Docker is not required.",
     )
     result.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
-    result.add_argument("-port", default=str(DEFAULT_PORT), metavar="port", help="dashboard HTTP port (default: 9721)")
+    result.add_argument(
+        "-port",
+        "--port",
+        default=str(DEFAULT_PORT),
+        metavar="port",
+        help="dashboard HTTP port (default: 9721)",
+    )
     result.add_argument("-bind", metavar="address", help="management bind address (default: 0.0.0.0)")
     result.add_argument("-auth", default="false", metavar="true|false", help="false only; reserved for future use")
     result.add_argument("-continue", dest="continue_existing", default="false", metavar="true|false",
@@ -181,10 +210,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("-retention", "--retention-days", dest="retention", metavar="days",
                         help="Prometheus retention days (default: 7)")
     result.add_argument("-prometheus-bin", metavar="path", help="Prometheus executable")
-    result.add_argument("-prometheus-port", metavar="port", help="managed Prometheus port (default: 9090)")
+    result.add_argument(
+        "-prometheus-port",
+        metavar="port",
+        help="managed Prometheus port (default: 9090; supplied busy ports fail startup)",
+    )
     result.add_argument("-prometheus-bind", metavar="address", help="Prometheus bind address (default: 127.0.0.1)")
     result.add_argument("-grafana-home", metavar="directory", help="Grafana installation home")
-    result.add_argument("-grafana-port", metavar="port", help="managed Grafana port (default: 3000)")
+    result.add_argument(
+        "-grafana-port",
+        metavar="port",
+        help="managed Grafana port (default: 3000; supplied busy ports fail startup)",
+    )
     result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
     result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")
@@ -211,8 +248,15 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     selected_log_level = log_level.upper()
     if selected_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ValueError("log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
-    data, data_source = _select(namespace.data, environment, "SBK_DASHBOARD_DATA_DIR",
-                                str(Path.home() / ".sbk-dashboard"))
+    default_data = Path.home() / ".sbk-dashboard"
+    if port != DEFAULT_PORT:
+        default_data = default_data / "instances" / str(port)
+    data, data_source = _select(
+        namespace.data,
+        environment,
+        "SBK_DASHBOARD_DATA_DIR",
+        str(default_data),
+    )
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
     scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
@@ -251,7 +295,12 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     dashboard = DashboardConfig(
         port, False, continue_existing, Path(data).expanduser().resolve(), _positive(scrape, "scrape interval"),
         _positive(retention, "retention"),
-        {"port": "command line" if "-port" in arguments else "default",
+        {"port": "command line" if any(
+            argument in {"-port", "--port"}
+            or argument.startswith("-port=")
+            or argument.startswith("--port=")
+            for argument in arguments
+        ) else "default",
          "auth": "command line" if "-auth" in arguments else "default",
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,

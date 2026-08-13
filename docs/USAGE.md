@@ -152,8 +152,11 @@ On Linux or macOS:
 # Background: logs are written to the launcher log file.
 ./scripts/start-sbk-dashboard-background.sh
 
-# Stops the instance started by either command above.
+# Stops all instances started by either command above.
 ./scripts/stop-sbk-dashboard.sh
+
+# Stops only the launcher-managed instance on management port 19721.
+./scripts/stop-sbk-dashboard.sh -port 19721
 ```
 
 On Windows PowerShell:
@@ -165,8 +168,11 @@ On Windows PowerShell:
 # Background: logs are written to the launcher log file.
 .\scripts\Start-SbkDashboardBackground.ps1
 
-# Stops the instance started by either command above.
+# Stops all instances started by either command above.
 .\scripts\Stop-SbkDashboard.ps1
+
+# Stops only the launcher-managed instance on management port 19721.
+.\scripts\Stop-SbkDashboard.ps1 -port 19721
 ```
 
 Every argument after the start-script name is passed unchanged and in the same order to the `sbk-dashboard`
@@ -180,14 +186,41 @@ application. Quote values containing spaces according to the current shell. For 
 .\scripts\Start-SbkDashboard.ps1 -data C:\sbk-dashboard-data -retention 14
 ```
 
-Only one script-started instance can run at a time. Launcher state records its mode, PID, and process creation time,
-so the shared stop script handles either foreground or background mode and a reused PID cannot identify an unrelated
-process. It does not search by process name or terminate an unrelated manually started dashboard.
+`--help`, `-h`, `--version`, and `-v` bypass running-instance checks, so help and version output remain available
+while a dashboard is running. Launcher identity is the management port. Starting on a different management port is
+allowed, while a second start on the same port reports the already-running instance. Each application instance owns
+its own Prometheus and Grafana children. When their built-in ports are occupied and neither a CLI option nor an
+environment variable supplied a port, startup selects the next suitable ports automatically. A non-default
+management port also receives the isolated default data directory `~/.sbk-dashboard/instances/<port>`. Therefore,
+starting another instance can be as simple as:
+
+```bash
+./scripts/start-sbk-dashboard-background.sh -port 19721
+```
+
+`-continue true` is the exception: it retains the configured/default native ports so the existing health-checked
+services can be attached rather than selecting replacements.
+
+Supply all ports and the data directory when stable operator-selected values are required:
+
+```bash
+./scripts/start-sbk-dashboard-background.sh -port 19721 -prometheus-port 19091 \
+  -grafana-port 13001 -data /srv/sbk-dashboard/19721
+./scripts/start-sbk-dashboard-background.sh -port 19722 -prometheus-port 19092 \
+  -grafana-port 13002 -data /srv/sbk-dashboard/19722
+```
+
+With no options, the stop script stops all launcher-managed foreground and background instances. Pass
+`-port <port>` or `--port <port>` to stop only the instance listening on that management port. Launcher state
+records the port, mode, PID, and process creation time, so a reused PID cannot identify an unrelated process. The
+stop helper does not search by process name or terminate an unrelated manually started dashboard.
 
 Launcher state defaults to `~/.sbk-dashboard/launcher` on Linux/macOS and
 `%LOCALAPPDATA%\SBK Dashboard\launcher` on Windows. Set `SBK_DASHBOARD_LAUNCHER_DIR` to override that location.
 Foreground logs are printed directly on the current console. The background launcher drains output continuously to
-`sbk-dashboard.log` in that directory and rotates it at 10 MiB with three backups.
+`sbk-dashboard.log` for the default port and `sbk-dashboard-<port>.log` for other ports in that directory, rotating
+each log at 10 MiB with three backups. Default-port state remains `sbk-dashboard.json`; other instances use
+`sbk-dashboard-<port>.json`.
 The stop scripts request normal control-plane shutdown and wait up to 45 seconds; set
 `SBK_DASHBOARD_STOP_TIMEOUT` to a value from 1 through 300 seconds when a different bound is required. If graceful
 shutdown exceeds that bound, the launcher forcefully cleans up only its recorded process tree. An independent
@@ -208,13 +241,16 @@ The landing-page form accepts:
 | Field | Meaning |
 |---|---|
 | Display name | Operator label; initially `SBK Dashboard`, while a deliberately blank value falls back to `host:port` |
+| Benchmark type | `SBK` or `SBM`; older registrations without this field continue to load as `SBK` |
 | Host or IP | DNS name, IPv4 literal, or IPv6 literal as reachable from Prometheus |
 | Port | SBK/SBM PrometheusLogger HTTP port, from 1 through 65535 |
 | Metrics path | Absolute HTTP path, normally `/metrics` |
 
-Identity is based only on normalized `host:port`. A different display name or metrics path does not create another
-identity (and a duplicate registration is rejected), while the same host on a second port produces an independent
-dashboard.
+Identity is based only on normalized `host:port`. Repeating the same normalized host, port, display name, metrics
+path, and benchmark type is idempotent: the existing endpoint and dashboard ID are returned and no duplicate
+dashboard is generated. If the same `host:port` is submitted with a different name, metrics path, or benchmark type,
+the request is rejected rather than silently changing the existing registration. The same host on a second port
+produces an independent dashboard.
 
 Endpoint states mean:
 
@@ -224,6 +260,21 @@ Endpoint states mean:
 - `unknown`: a defensive state for unrecognized status data.
 
 A down endpoint is non-fatal. Existing Prometheus history remains queryable until retention removes it.
+
+## Compare live SBK and SBM results
+
+Select between two and eight endpoint checkboxes on the landing page, then choose **Compare selected**. The opened
+Grafana dashboard applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
+friendly dashboard name, benchmark type, and stable endpoint ID. For example: `Primary NVMe [SBK · f9720cad…] —
+Average Latency`. The selector also displays the exporter address. The generated URL contains the selection and can
+be bookmarked or shared. The normalized endpoint set deterministically produces one
+`sbk-comparison-<16-hex>` ID: repeating the same selection in any order reuses the same dashboard ID and URL.
+Generated comparison files are a bounded cache of 128 entries rather than a separate user-managed registry.
+
+Comparison is intended for concurrent or otherwise wall-clock-overlapping exporters. It does not align separate
+historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already
+scraped samples remain subject to normal Prometheus retention and removes cached comparisons containing that
+endpoint during reconciliation.
 
 ## Use public and remote addresses
 
@@ -273,8 +324,15 @@ container-managed history and registrations is intended.
 
 ## Existing native services
 
-The default `-continue false` mode verifies both configured listener owners before replacing either one. It refuses
-to stop unrelated or unidentified processes.
+Startup identifies each native port as the built-in default, a command-line/environment value, or a bounded
+automatic fallback selected because the default was occupied. If `-prometheus-port`, `-grafana-port`,
+`SBK_DASHBOARD_PROMETHEUS_PORT`, or `SBK_DASHBOARD_GRAFANA_PORT` supplies a port that is already in use, startup
+reports the bind address and listener PID/executable when available, stops no process, and exits. Prometheus and
+Grafana must also use distinct ports.
+
+The default `-continue false` mode rechecks both ports immediately before starting either service, so a listener
+that appears after initial selection cannot cause an operator-supplied port to be replaced. It also refuses to stop
+unrelated or unidentified processes.
 
 `-continue true` attaches only when the configured Prometheus and Grafana health endpoints are already compatible:
 
@@ -287,7 +345,10 @@ use this data directory's discovery and provisioning files.
 
 ## Data, backup, and retention
 
-The default data directory is `~/.sbk-dashboard`. Set `-data` for a service installation:
+The default data directory is `~/.sbk-dashboard` when the management port is 9721. A non-default management port
+uses `~/.sbk-dashboard/instances/<port>` so concurrent instances never share Prometheus TSDB, Grafana state, or
+process ownership. An explicit `-data` or `SBK_DASHBOARD_DATA_DIR` remains authoritative. Set `-data` for a service
+installation:
 
 ```bash
 sbk-dashboard -data /var/lib/sbk-dashboard -retention 14

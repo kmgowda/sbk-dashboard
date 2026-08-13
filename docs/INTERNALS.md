@@ -16,6 +16,7 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 | `monitoring.py` | `ManagedMonitoringStack` | Generated native configuration, two services, supervisor, target status |
 | `processes.py` | lifecycle/process classes | Port ownership, guardians, process trees, PID records, bounded logs |
 | `guardian.py` | `guard()` | One owned native child and hard-parent-death cleanup |
+| `windows_job.py` | `WindowsKillOnCloseJob` | Suspended assignment to a kernel kill-on-close Job Object |
 | `web.py` | `DashboardHttpServer` | HTTP listener/thread, bounded worker pool, API transaction serialization |
 | `files.py` | `atomic_write()` | Temporary file, file `fsync`, replace, POSIX directory `fsync` |
 | `models.py` | immutable dataclasses | Endpoint identity, persisted schema, API status values |
@@ -36,7 +37,21 @@ PID and creation time, and authorizes acquisition with a bounded marker handshak
 start `python -m sbk_dashboard` and its parent-death watcher. A reverse marker is emitted only after both processes
 exist and the application has survived the immediate-exit window; the initiating command reports success only after
 that confirmation. The shared stop path tolerates process exit between identity validation and signaling, waits or
-force-cleans the captured tree, and removes only the matching ownership record.
+force-cleans the captured tree, and removes only the matching ownership record. Ownership records and background
+logs are keyed by management port (with legacy filenames retained for port 9721). Informational start requests do
+not acquire state. A stop request without a port enumerates all ownership records; `-port`/`--port` limits cleanup to
+one record. For a non-default management port, configuration derives an isolated default data directory. After
+native tools are resolved and immediately before stack startup, built-in Prometheus/Grafana ports are retained when
+available or replaced by bounded deterministic fallbacks. CLI/environment port values are never changed. The
+effective configuration records and prints automatic selections, and a default Grafana public URL follows an
+automatically selected Grafana port. `-continue true` bypasses fallback selection so compatible services can be
+health-checked and attached on the requested ports.
+
+Launcher start reservation uses exclusive state-file creation before any background supervisor is spawned. A
+same-port concurrent start therefore observes the live starting process rather than acquiring a second dashboard.
+Stop-all treats each port record independently: an unreadable record is reported and skipped without preventing
+cleanup of valid instances. Windows stop fallback matches the exact `python -m sbk_dashboard` child rather than its
+launcher watcher, and a closed background output pipe exits the log loop immediately.
 
 ## Composition and startup
 
@@ -104,12 +119,15 @@ The HTTP layer has one `_mutation_lock`, so create/delete and their monitoring r
 Registration proceeds as follows:
 
 1. bound request parsing and validation;
-2. atomic registry persistence;
-3. deterministic reconciliation of discovery, dashboards, mappings, and status;
-4. API rendering with a request-specific dashboard hostname; and
-5. HTTP 201.
+2. return the existing immutable target with HTTP 200 when all normalized registration fields exactly match;
+3. otherwise, atomic registry persistence for a new endpoint identity;
+4. deterministic reconciliation of discovery, dashboards, mappings, and status;
+5. API rendering with a request-specific dashboard hostname; and
+6. HTTP 201 for the new target.
 
-If step 3 fails, the new registration is removed, the prior snapshot is reconciled best-effort, and the request
+An exact repeat does not persist or reconcile and therefore cannot generate another dashboard. Different name,
+metrics path, or kind values for an existing `host:port` are rejected instead of mutating it. If reconciliation
+fails, the new registration is removed, the prior snapshot is reconciled best-effort, and the request
 fails. Deletion saves the immutable target, removes it, reconciles, and restores it on failure. This is a
 compensating transaction across several atomically replaced files; there is no database transaction coordinator.
 
@@ -122,6 +140,8 @@ compensating transaction across several atomically replaced files; there is no d
   "targets": ["127.0.0.1:9718"],
   "labels": {
     "sbk_endpoint_id": "f9720cad2e38eec6",
+    "sbk_dashboard_name": "SBK Dashboard",
+    "sbk_kind": "SBK",
     "sbk_metrics_path": "/metrics"
   }
 }
@@ -145,6 +165,19 @@ The generated dashboard is atomically written to `monitoring/grafana/dashboards/
 removes only files matching the managed `sbk-*.json` namespace that are absent from the expected endpoint set.
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
+
+`POST /api/comparison-dashboard` validates 2–8 unique registered IDs, sorts the set, and derives a stable
+`sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
+selection's canonical-dashboard clone and returns a request-host-aware Grafana URL. Repeating the same set in any
+order reuses the UID and file. The dashboard adds a multi-select variable containing only the selected endpoint IDs
+and rewrites all canonical `SBK_*` selectors with the variable's regex matcher. Variable choices display endpoint
+name, SBK/SBM kind, and exporter address. Legends use the readable dashboard name and kind followed by the immutable
+endpoint ID, so duplicate display names remain distinguishable.
+
+Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
+selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains
+entries whose endpoints remain registered, and removes malformed entries or entries containing a deleted endpoint.
+Comparison definitions do not alter endpoint registration or mapping persistence.
 
 Dashboard mappings persist deterministic default URLs. API responses do not blindly return that stored hostname:
 when `grafana-url` is still the default, the validated direct request `Host` supplies only the browser hostname while
@@ -191,6 +224,9 @@ restricted Windows socket inspection.
 Each owned `ManagedNativeService` launches a guardian in a new POSIX session or Windows process group. The guardian
 starts the real native command and atomically returns its PID. The control plane records native identity, waits for
 HTTP readiness, and continuously drains guardian/native combined output through a bounded rotating log pump.
+On Windows, the guardian first creates a kill-on-close Job Object, starts the native command suspended, assigns it
+to the job, and resumes its primary thread only after successful assignment. This removes the launch-to-assignment
+orphan window and gives inherited native descendants kernel-enforced lifetime containment.
 
 The single monitoring supervisor:
 
@@ -202,6 +238,14 @@ The single monitoring supervisor:
 If the control process disappears, the guardian detects PID/creation-time mismatch four times per second and
 terminates the native descendant tree. If a guardian disappears unexpectedly, the control plane's native PID check
 still detects and cleans the remaining tree during restart/shutdown.
+On Windows, guardian termination additionally closes the only Job Object handle, so the kernel terminates any
+surviving job member without waiting for polling or a later supervisor pass.
+
+`main.select_native_ports()` classifies port sources before native-tool bootstrap. Built-in defaults use
+`PortProcessManager.find_available()` and may receive a bounded fallback; CLI/environment ports use
+`require_available()` and fail with listener identity without stopping it. `ManagedMonitoringStack._start()` passes
+per-service replacement policy into the final two-port inspection, preserving the same rule if a listener appears
+between selection and acquisition. Continue mode retains the requested ports for compatible attachment.
 
 ## Threads and processes
 

@@ -29,11 +29,42 @@ class TargetRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already registered"):
             TargetRegistry(self.directory).register("Again", "host.example", 9718, "/other")
 
+    def test_exact_normalized_registration_is_idempotent(self):
+        registry = TargetRegistry(self.directory)
+        first = registry.register_with_status(" Same run ", "HOST.Example.", 9718, None, "sbk")
+        repeated = registry.register_with_status("Same run", "host.example", 9718, "/metrics", "SBK")
+        self.assertTrue(first.created)
+        self.assertFalse(repeated.created)
+        self.assertEqual(first.target, repeated.target)
+        self.assertEqual(1, len(registry.list()))
+
+    def test_same_endpoint_with_conflicting_metadata_is_rejected(self):
+        registry = TargetRegistry(self.directory)
+        registry.register("Same run", "host.example", 9718, "/metrics", "SBK")
+        for name, path, kind in (
+            ("Other run", "/metrics", "SBK"),
+            ("Same run", "/other", "SBK"),
+            ("Same run", "/metrics", "SBM"),
+        ):
+            with self.subTest(name=name, path=path, kind=kind), self.assertRaisesRegex(
+                ValueError, "already registered with different"
+            ):
+                registry.register(name, "HOST.EXAMPLE.", 9718, path, kind)
+        self.assertEqual(1, len(registry.list()))
+
     def test_same_host_different_port(self):
         registry = TargetRegistry(self.directory)
         registry.register("One", "host", 9718, "/metrics")
         registry.register("Two", "host", 9719, "/metrics")
         self.assertEqual(2, len(registry.list()))
+
+    def test_registers_sbm_kind_and_rejects_unknown_kind(self):
+        registry = TargetRegistry(self.directory)
+        target = registry.register("SBM run", "host", 9719, "/metrics", "sbm")
+        self.assertEqual("SBM", target.kind)
+        self.assertEqual("SBM", TargetRegistry(self.directory).find(target.id).kind)
+        with self.assertRaisesRegex(ValueError, "Kind must be SBK or SBM"):
+            registry.register("Unknown", "host", 9720, "/metrics", "other")
 
     def test_default_name_path_and_ipv6_address(self):
         target = TargetRegistry(self.directory).register(None, "[2001:db8::1]", 9718, None)

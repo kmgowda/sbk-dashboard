@@ -18,6 +18,8 @@ The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
+- A deterministic live comparison dashboard for any 2–8 selected SBK or SBM endpoints, with a reusable ID and
+  shareable URL for the same endpoint set.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
@@ -239,7 +241,9 @@ For a detached process with bounded rotating file logs, use the background start
 ```
 
 See [the usage guide](docs/USAGE.md#start-and-stop-scripts) for environment selection, logs, PID-reuse protection,
-custom arguments, and shutdown timeouts.
+multiple port-isolated instances, custom arguments, and shutdown timeouts. `--help` and `--version` remain available
+while an instance is running. With no arguments the stop script stops every launcher-managed instance; `-port
+<port>` stops only the instance on that management port.
 
 Stop the foreground script cleanly with `Ctrl+C`, or use the stop script for either launch mode. The shutdown path stops HTTP
 admission first, then Grafana and Prometheus in reverse dependency order. For unattended operation, use the host
@@ -249,13 +253,13 @@ Defaults:
 
 - Management UI: `http://localhost:9721/`
 - Management bind: `0.0.0.0` (all IPv4 interfaces)
-- Prometheus: `http://127.0.0.1:9090/` (loopback only)
-- Grafana: `http://localhost:3000/`
+- Prometheus: `http://127.0.0.1:9090/` when available; otherwise the next suitable port (loopback only)
+- Grafana: `http://localhost:3000/` when available; otherwise the next suitable port
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
 - Endpoint form display name: initially `SBK Dashboard`; if cleared, registration falls back to `host:port`
 - Endpoint form host/IP: `127.0.0.1` for native/Conda execution; `host.docker.internal` in the container image
 - Authentication: disabled
-- Data directory: `~/.sbk-dashboard`
+- Data directory: `~/.sbk-dashboard` on management port 9721; `~/.sbk-dashboard/instances/<port>` on other ports
 - Prometheus retention: 7 days
 - Scrape interval: 5 seconds
 - Existing-process continuation: disabled
@@ -332,10 +336,10 @@ from Grafana's local listen address.
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus retention days (default 7)
 -prometheus-bin <path>        Prometheus executable (PATH, then download)
--prometheus-port <port>       Prometheus port (default 9090)
+-prometheus-port <port>       Prometheus port (default 9090; omitted default auto-selects; supplied busy port fails)
 -prometheus-bind <address>    Prometheus bind address (default 127.0.0.1)
 -grafana-home <path>          Grafana home (system path, then download)
--grafana-port <port>          Grafana port (default 3000)
+-grafana-port <port>          Grafana port (default 3000; omitted default auto-selects; supplied busy port fails)
 -grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
@@ -416,9 +420,15 @@ Pass it using `-monitoring-properties /path/to/monitoring-download.properties`. 
 
 ## Existing-process behavior
 
-By default, `-continue false` verifies the owners of the configured Prometheus and Grafana ports before stopping
-anything. It stops only executables named `prometheus`, `grafana`, or `grafana-server`; an unrelated or unidentified
-listener fails startup safely.
+At startup, sbk-dashboard reports whether each Prometheus/Grafana port is the available built-in default, was
+supplied through the command line/environment, or was selected automatically because the built-in default was busy.
+An occupied CLI/environment port fails startup with the bind address and identifiable listener PID/executable; the
+listener is never stopped, even when it is another Prometheus or Grafana process. Choose another explicit port or
+use an unspecified default to allow bounded automatic fallback.
+
+With `-continue false`, the application still validates both native ports immediately before acquisition. This
+second check closes the selection-to-launch race and refuses replacement of operator-supplied ports. Unrelated or
+unidentified listeners always fail startup safely.
 
 Use `-continue true` to attach to healthy compatible services already on the configured ports:
 
@@ -464,7 +474,8 @@ avoid spurious Grafana failures on slower hosts while keeping Prometheus failure
 - Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
   and `failed` states. Shutdown is idempotent and reports incomplete child termination.
 - Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
-  descendants; Windows uses a new process group plus recursive process-tree termination.
+  descendants. Windows starts each native process suspended, assigns it to a kill-on-close Job Object, and only then
+  resumes it; recursive graceful/forceful cleanup remains the ordered shutdown path.
 - One small guardian process per owned native service closes the cleanup gap where the control plane cannot run a
   signal handler. It retains no samples or endpoint state and exits with its native child.
 - A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are
@@ -511,11 +522,28 @@ networking and security guidance, and troubleshooting.
 ```bash
 curl -fsS -X POST http://localhost:9721/api/targets \
   -H 'Content-Type: application/json' \
-  --data '{"name":"NVMe benchmark","host":"benchmark-01.example","port":9718,"metricsPath":"/metrics"}'
+  --data '{"name":"NVMe benchmark","kind":"SBK","host":"benchmark-01.example","port":9718,"metricsPath":"/metrics"}'
 
 curl -fsS http://localhost:9721/api/targets
+
+curl -fsS -X POST http://localhost:9721/api/comparison-dashboard \
+  -H 'Content-Type: application/json' \
+  --data '{"targetIds":["<first-endpoint-id>","<second-endpoint-id>"]}'
+
 curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
 ```
+
+Repeating the first request with the same normalized host, port, name, metrics path, and kind returns HTTP 200 with
+the existing endpoint and dashboard ID; the initial creation returns HTTP 201. No duplicate dashboard is generated.
+Conflicting metadata for an already registered `host:port` is rejected instead of silently replacing its scrape
+configuration.
+
+The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
+selected** to open a live comparison dashboard. The sorted endpoint-ID set produces a deterministic
+`sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
+same ID and URL. Selection is also encoded in repeated Grafana `var-sbk_endpoints` URL parameters for bookmarking
+and sharing. The generated cache is bounded to 128 comparison dashboards. Live comparison uses wall-clock time;
+independently timed historical runs are not shifted to a common run-relative origin.
 
 ## Persistent files
 

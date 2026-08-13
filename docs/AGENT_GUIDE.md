@@ -29,7 +29,9 @@ endpoint.
 
 `processes.py` owns lifecycle state, process groups, trees, and bounded native logs. The separate `guardian.py`
 entry point is the lightweight child-process parent-death monitor; keep it independently runnable because it must
-clean native descendants even after the control plane is forcefully terminated.
+clean native descendants even after the control plane is forcefully terminated. On Windows, `windows_job.py`
+creates the guardian's kill-on-close Job Object before the native process is resumed; do not replace it with only
+`CREATE_NEW_PROCESS_GROUP`, which does not provide kernel-enforced descendant lifetime containment.
 
 ## Request and persistence flow
 
@@ -63,7 +65,8 @@ clean native descendants even after the control plane is forcefully terminated.
 
 ## Runtime data layout
 
-The default data root is `~/.sbk-dashboard`; tests must override it:
+The management-port 9721 default data root is `~/.sbk-dashboard`; non-default management ports use
+`~/.sbk-dashboard/instances/<port>`. Tests must override it:
 
 ```text
 <data>/
@@ -96,6 +99,7 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
+| `POST /api/comparison-dashboard` | Validate 2–8 registered endpoints and return a deterministic ID/URL for the set |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 
@@ -115,9 +119,9 @@ Important defaults:
 |---|---|
 | Management port | 9721 |
 | Management bind | 0.0.0.0 |
-| Prometheus port | 9090 |
+| Prometheus port | 9090, or a bounded automatic fallback when unspecified and occupied; supplied busy ports fail |
 | Prometheus bind | 127.0.0.1 |
-| Grafana port | 3000 |
+| Grafana port | 3000, or a bounded automatic fallback when unspecified and occupied; supplied busy ports fail |
 | Grafana bind | 0.0.0.0 |
 | Authentication | false |
 | Continue existing processes | false |
@@ -165,7 +169,8 @@ registration and deletion serialized through reconciliation and preserve compens
 1. Preserve existing JSON compatibility or add an explicit migration/recovery path.
 2. Keep identity independent of display name and metrics path unless the product contract changes.
 3. Update models, registry validation, API serialization, discovery, mappings, and tests together.
-4. Test duplicate registration, same host/different port, DNS, IPv4, IPv6, malformed hosts, and endpoint limits.
+4. Test idempotent exact registration, conflicting duplicate registration, same host/different port, DNS, IPv4,
+   IPv6, malformed hosts, and endpoint limits.
 
 ### Change dashboard provisioning
 

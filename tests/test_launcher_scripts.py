@@ -46,6 +46,9 @@ class LauncherScriptTest(unittest.TestCase):
             "        print('fake dashboard startup failure', flush=True)\n"
             "        return\n"
             "    supplied = sys.argv[1:] if arguments is None else arguments\n"
+            "    if '-h' in supplied or '--help' in supplied:\n"
+            "        print('usage: sbk-dashboard [options]', flush=True)\n"
+            "        return\n"
             "    arguments_output = os.environ.get('FAKE_ARGUMENTS_OUTPUT')\n"
             "    if arguments_output:\n"
             "        with open(arguments_output, 'w', encoding='utf-8') as output:\n"
@@ -111,6 +114,14 @@ class LauncherScriptTest(unittest.TestCase):
                 sbk_dashboard_launcher.LOG_MAX_BYTES = original_max
                 sbk_dashboard_launcher.LOG_BACKUPS = original_backups
 
+    def test_log_drain_returns_immediately_at_eof(self):
+        child = Mock()
+        child.stdout.read.return_value = b""
+        with patch.object(sbk_dashboard_launcher, "append_log") as append:
+            sbk_dashboard_launcher.drain_child_output(child, Path("unused.log"))
+        child.stdout.read.assert_called_once_with(sbk_dashboard_launcher.READ_CHUNK_BYTES)
+        append.assert_not_called()
+
     def test_wait_for_process_exit_treats_zombie_as_stopped(self):
         process = Mock()
         process.is_running.return_value = True
@@ -143,7 +154,7 @@ class LauncherScriptTest(unittest.TestCase):
         process.children.return_value = []
         state = {"pid": 123, "create_time": 456.0, "mode": "background"}
         with (
-            patch.object(sbk_dashboard_launcher, "load_state", return_value=state),
+            patch.object(sbk_dashboard_launcher, "load_states", return_value=[(9721, state)]),
             patch.object(sbk_dashboard_launcher, "matching_process", return_value=process),
             patch.object(
                 sbk_dashboard_launcher,
@@ -155,7 +166,26 @@ class LauncherScriptTest(unittest.TestCase):
         ):
             self.assertEqual(0, sbk_dashboard_launcher.stop())
         wait.assert_called_once_with([process], sbk_dashboard_launcher.DEFAULT_STOP_TIMEOUT_SECONDS)
-        remove.assert_called_once_with(123, 456.0)
+        remove.assert_called_once_with(123, 456.0, 9721)
+
+    def test_management_port_accepts_application_port_forms(self):
+        self.assertEqual(9721, sbk_dashboard_launcher.management_port([]))
+        self.assertEqual(19721, sbk_dashboard_launcher.management_port(["-port", "19721"]))
+        self.assertEqual(19722, sbk_dashboard_launcher.management_port(["--port=19722"]))
+        with self.assertRaisesRegex(SystemExit, "between 1 and 65535"):
+            sbk_dashboard_launcher.management_port(["-port", "0"])
+
+    def test_empty_windows_local_app_data_falls_back_to_home(self):
+        fallback = Path("C:/Users/tester")
+        expected = fallback / "SBK Dashboard" / "launcher"
+        path_factory = Mock(return_value=fallback)
+        path_factory.home.return_value = fallback
+        with (
+            patch.object(sbk_dashboard_launcher.os, "name", "nt"),
+            patch.dict(os.environ, {"LOCALAPPDATA": ""}, clear=False),
+            patch.object(sbk_dashboard_launcher, "Path", path_factory),
+        ):
+            self.assertEqual(expected, sbk_dashboard_launcher.state_directory())
 
     def test_windows_foreground_stop_writes_identity_specific_request(self):
         process = Mock(pid=321)
@@ -166,6 +196,23 @@ class LauncherScriptTest(unittest.TestCase):
         ):
             sbk_dashboard_launcher.request_stop(process, "foreground", 456.789)
             self.assertTrue(sbk_dashboard_launcher.foreground_stop_path(321, 456.789).exists())
+        process.terminate.assert_not_called()
+
+    def test_windows_background_fallback_targets_application_not_watcher(self):
+        process = Mock(pid=321)
+        watcher = Mock()
+        watcher.cmdline.return_value = [sys.executable, str(LAUNCHER), "_watch"]
+        dashboard = Mock()
+        dashboard.cmdline.return_value = [sys.executable, "-m", "sbk_dashboard"]
+        process.children.return_value = [watcher, dashboard]
+        with (
+            patch.object(sbk_dashboard_launcher.os, "name", "nt"),
+            patch.object(signal, "CTRL_BREAK_EVENT", 123, create=True),
+            patch.object(sbk_dashboard_launcher.os, "kill", side_effect=OSError("denied")),
+        ):
+            sbk_dashboard_launcher.request_stop(process, "background", 456.789)
+        dashboard.terminate.assert_called_once_with()
+        watcher.terminate.assert_not_called()
         process.terminate.assert_not_called()
 
     def test_wrappers_prefer_active_environments(self):
@@ -192,8 +239,10 @@ class LauncherScriptTest(unittest.TestCase):
             self.assertIn("sbk_dashboard_launcher.py", content)
         self.assertIn('foreground "$@"', start_shell)
         self.assertIn('background "$@"', background_shell)
+        self.assertIn('stop "$@"', stop_shell)
         self.assertIn("foreground @DashboardArguments", start_powershell)
         self.assertIn("background @DashboardArguments", background_powershell)
+        self.assertIn("stop @DashboardArguments", stop_powershell)
         self.assertIn("sys.version_info >= (3, 10)", start_shell)
         self.assertIn("sys.version_info >= (3, 10)", start_powershell)
         self.assertIn("sys.version_info >= (3, 10)", stop_shell)
@@ -282,6 +331,172 @@ class LauncherScriptTest(unittest.TestCase):
                     for child in descendants:
                         child.kill()
                     process.kill()
+
+    def test_help_bypasses_an_existing_instance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            subprocess.run(
+                [sys.executable, str(LAUNCHER), "background"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            state = json.loads((state_directory / "sbk-dashboard.json").read_text(encoding="utf-8"))
+            process = psutil.Process(state["pid"])
+            try:
+                helped = subprocess.run(
+                    [sys.executable, str(LAUNCHER), "foreground", "--help"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertIn("usage: sbk-dashboard", helped.stdout)
+                self.assertTrue(process.is_running())
+            finally:
+                subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assert_processes_exit([process])
+
+    def test_multiple_ports_have_independent_state_and_selective_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            processes = []
+            try:
+                for port in (19721, 19722):
+                    subprocess.run(
+                        [sys.executable, str(LAUNCHER), "background", "-port", str(port)],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    )
+                    state = json.loads(
+                        (state_directory / f"sbk-dashboard-{port}.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    self.assertEqual(port, state["port"])
+                    processes.append(psutil.Process(state["pid"]))
+
+                selective = subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop", "-port", "19721"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertIn("on port 19721", selective.stdout)
+                self.assert_processes_exit([processes[0]])
+                self.assertTrue(processes[1].is_running())
+                self.assertFalse((state_directory / "sbk-dashboard-19721.json").exists())
+                self.assertTrue((state_directory / "sbk-dashboard-19722.json").exists())
+
+                stopped_all = subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertIn("on port 19722", stopped_all.stdout)
+                self.assert_processes_exit([processes[1]])
+                self.assertFalse((state_directory / "sbk-dashboard-19722.json").exists())
+            finally:
+                for process in processes:
+                    if process.is_running():
+                        process.kill()
+
+    def test_stop_all_skips_corrupt_state_and_stops_other_instances(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            subprocess.run(
+                [sys.executable, str(LAUNCHER), "background", "-port", "19722"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+            state = json.loads(
+                (state_directory / "sbk-dashboard-19722.json").read_text(encoding="utf-8")
+            )
+            process = psutil.Process(state["pid"])
+            (state_directory / "sbk-dashboard.json").write_bytes(b"\xffnot-json")
+            try:
+                stopped = subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertIn("Skipping unreadable launcher state for port 9721", stopped.stderr)
+                self.assertIn("on port 19722", stopped.stdout)
+                self.assert_processes_exit([process])
+            finally:
+                if process.is_running():
+                    process.kill()
+
+    def test_concurrent_background_starts_create_only_one_instance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            starts = [
+                subprocess.Popen(
+                    [sys.executable, str(LAUNCHER), "background", "-port", "19723"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=environment,
+                )
+                for _ in range(2)
+            ]
+            outputs = [process.communicate(timeout=15) for process in starts]
+            self.assertTrue(all(process.returncode == 0 for process in starts))
+            combined = "\n".join(output for output, _error in outputs)
+            self.assertEqual(1, combined.count("Started SBK Dashboard"))
+            self.assertEqual(1, combined.count("already running"))
+            state = json.loads(
+                (state_directory / "sbk-dashboard-19723.json").read_text(encoding="utf-8")
+            )
+            launcher = psutil.Process(state["pid"])
+            try:
+                subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop", "-port", "19723"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assert_processes_exit([launcher])
+            finally:
+                if launcher.is_running():
+                    launcher.kill()
 
     def test_force_killed_launcher_does_not_orphan_dashboard(self):
         with tempfile.TemporaryDirectory() as temporary:

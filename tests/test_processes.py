@@ -95,7 +95,16 @@ class LifecycleTest(unittest.TestCase):
             guardian = psutil.Process(service._process.pid)
             guardian.kill()
             guardian.wait(3)
-            self.assertTrue(psutil.pid_exists(first_native_pid))
+            if os.name == "nt":
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and psutil.pid_exists(first_native_pid):
+                    time.sleep(0.05)
+                self.assertFalse(
+                    psutil.pid_exists(first_native_pid),
+                    "Windows Job Object did not kill the native child when its guardian exited",
+                )
+            else:
+                self.assertTrue(psutil.pid_exists(first_native_pid))
             self.assertTrue(service.supervise())
             self.assertFalse(psutil.pid_exists(first_native_pid))
             self.assertNotEqual(first_native_pid, service.pid)
@@ -233,6 +242,92 @@ class LifecycleTest(unittest.TestCase):
         connection.settimeout.assert_called_once_with(0.2)
         connection.connect_ex.assert_called_once_with(("127.0.0.1", 19090))
         connection.bind.assert_not_called()
+
+    def test_find_available_port_uses_bounded_next_port_fallback(self):
+        with patch.object(
+            PortProcessManager,
+            "available",
+            side_effect=lambda port, _bind: port == 9092,
+        ) as available:
+            self.assertEqual(9092, PortProcessManager.find_available(9090, "127.0.0.1"))
+        self.assertEqual(
+            [
+                call(9090, "127.0.0.1"),
+                call(9091, "127.0.0.1"),
+                call(9092, "127.0.0.1"),
+            ],
+            available.call_args_list,
+        )
+
+    def test_find_available_port_skips_an_excluded_port(self):
+        with patch.object(PortProcessManager, "available", return_value=True) as available:
+            self.assertEqual(
+                3001,
+                PortProcessManager.find_available(3000, "0.0.0.0", {3000}),
+            )
+        available.assert_called_once_with(3001, "0.0.0.0")
+
+    def test_find_available_port_search_is_bounded(self):
+        with (
+            patch.object(PortProcessManager, "available", return_value=False) as available,
+            patch("sbk_dashboard.processes.AUTO_PORT_SEARCH_ATTEMPTS", 2),
+            self.assertRaisesRegex(OSError, "after 2 attempts"),
+        ):
+            PortProcessManager.find_available(9090, "127.0.0.1")
+        self.assertEqual(3, available.call_count)
+
+    def test_user_supplied_busy_port_reports_owner_and_never_stops_it(self):
+        listener = SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            laddr=SimpleNamespace(port=19090),
+            pid=42,
+        )
+        owner = MagicMock(pid=42)
+        owner.exe.return_value = "/opt/prometheus/prometheus"
+        with (
+            patch.object(PortProcessManager, "available", return_value=False),
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.psutil.Process", return_value=owner),
+            self.assertRaisesRegex(
+                OSError,
+                r"Prometheus port 19090.*PID 42 \(/opt/prometheus/prometheus\).*"
+                r"environment SBK_DASHBOARD_PROMETHEUS_PORT.*no process was stopped",
+            ),
+        ):
+            PortProcessManager.require_available(
+                "Prometheus",
+                19090,
+                "127.0.0.1",
+                "environment SBK_DASHBOARD_PROMETHEUS_PORT",
+            )
+        owner.terminate.assert_not_called()
+        owner.kill.assert_not_called()
+
+    def test_replacement_check_rejects_busy_user_port_even_for_expected_executable(self):
+        listener = SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            laddr=SimpleNamespace(port=19090),
+            pid=42,
+        )
+        owner = MagicMock(pid=42)
+        owner.exe.return_value = "/opt/prometheus/prometheus"
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.psutil.Process", return_value=owner),
+            self.assertRaisesRegex(OSError, "already in use by PID 42"),
+        ):
+            PortProcessManager._inspect(
+                "Prometheus",
+                "prometheus",
+                19090,
+                "127.0.0.1",
+                {"prometheus"},
+                MagicMock(),
+                [],
+                allow_replacement=False,
+            )
+        owner.terminate.assert_not_called()
+        owner.kill.assert_not_called()
 
     def test_windows_port_probe_requests_exclusive_address_use(self):
         connection_context, connection = self._socket_context()
@@ -485,6 +580,17 @@ class LifecycleTest(unittest.TestCase):
 
 
 class TerminationTest(unittest.TestCase):
+    def test_finish_descendants_reports_process_that_survives_force(self):
+        from sbk_dashboard.processes import _finish_descendants
+
+        child = MagicMock(pid=12)
+        with (
+            patch("sbk_dashboard.processes.psutil.wait_procs", side_effect=[([], [child]), ([], [child])]),
+            self.assertRaisesRegex(OSError, "12"),
+        ):
+            _finish_descendants([child])
+        child.kill.assert_called_once_with()
+
     def test_terminate_psutil_tree_continues_when_a_child_disappears(self):
         from sbk_dashboard.processes import _terminate_psutil_tree
 
@@ -549,20 +655,23 @@ class BoundedHttpServerTest(unittest.TestCase):
         server = BoundedThreadPoolHttpServer(("127.0.0.1", 0), Handler, 1, 0, 2)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        first = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
-        first.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        self.assertTrue(entered.wait(2))
-        second = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
-        second.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        self.assertIn(b"503 Service Unavailable", second.recv(1024))
-        second.close()
-        release.set()
-        self.assertIn(b"200 OK", first.recv(1024))
-        first.close()
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
-        server.close_pool()
+        try:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as first:
+                first.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                self.assertTrue(entered.wait(2))
+                # Admission is rejected immediately after accept, before an HTTP
+                # request is read. Sending request bytes races the server close and
+                # can produce WSAECONNABORTED instead of exposing the queued 503.
+                with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as second:
+                    self.assertIn(b"503 Service Unavailable", second.recv(1024))
+                release.set()
+                self.assertIn(b"200 OK", first.recv(1024))
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+            server.close_pool()
         self.assertFalse(any(item.name.startswith("sbk-http-worker") for item in threading.enumerate()))
 
 

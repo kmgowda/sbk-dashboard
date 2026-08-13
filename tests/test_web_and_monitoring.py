@@ -1,3 +1,5 @@
+import contextlib
+import hashlib
 import io
 import json
 import re
@@ -43,6 +45,19 @@ class FakeMonitoring:
         formatted = f"[{host}]" if ":" in host else host
         return f"http://{formatted}:3000/d/sbk-{target_id}/"
 
+    def comparison_dashboard_url(self, target_ids, browser_host=None):
+        host = browser_host or "grafana"
+        formatted = f"[{host}]" if ":" in host else host
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in normalized)
+        return f"http://{formatted}:3000/d/sbk-comparison-{digest}/?{query}"
+
+    def comparison_dashboard_id(self, target_ids):
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        return f"sbk-comparison-{digest}"
+
 
 class AssetRenderingTest(unittest.TestCase):
     def test_index_renders_validated_native_and_container_defaults(self):
@@ -87,6 +102,8 @@ class WebTest(unittest.TestCase):
             self.assertIn(b'id="target-count"', page)
             self.assertIn(b'id="up-count"', page)
             self.assertIn(b'id="down-count"', page)
+            self.assertIn(b'id="compare-selected"', page)
+            self.assertIn(b'<option value="SBM">SBM</option>', page)
             self.assertIn(b'aria-label="Endpoint status summary" aria-live="polite"', page)
             self.assertNotIn(b"NVMe endurance run", page)
             self.assertNotIn(b"__ASSET_VERSION__", page)
@@ -104,6 +121,9 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"reportActivity('landing');", script)
             self.assertIn(b"reportActivity('grafana')", script)
             self.assertIn(b"window.sessionStorage", script)
+            self.assertIn(b"/api/comparison-dashboard", script)
+            self.assertIn(b"const MAX_COMPARISON_TARGETS = 8;", script)
+            self.assertNotIn(b"__MAX_COMPARISON_TARGETS__", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
             self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()
@@ -131,6 +151,17 @@ class WebTest(unittest.TestCase):
             created = json.load(response)
             self.assertEqual(201, response.status)
             self.assertIn("dashboardUrl", created)
+            self.assertEqual("SBK", created["kind"])
+        repeated_request = urllib.request.Request(
+            self.base + "/api/targets", method="POST", data=json.dumps({
+                "name": " Run ", "kind": "sbk", "host": "127.0.0.1", "port": 9718,
+                "metricsPath": "/metrics",
+            }).encode(), headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(repeated_request) as response:
+            repeated = json.load(response)
+            self.assertEqual(200, response.status)
+        self.assertEqual(created, repeated)
         with urllib.request.urlopen(self.base + "/api/targets") as response:
             self.assertEqual(1, len(json.load(response)))
         for host, expected in (
@@ -152,6 +183,67 @@ class WebTest(unittest.TestCase):
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
         with urllib.request.urlopen(delete) as response:
             self.assertEqual(204, response.status)
+
+    def test_registers_sbm_and_builds_bounded_comparison_url(self):
+        target_ids = []
+        for port, kind in ((9718, "SBK"), (9719, "SBM")):
+            request = urllib.request.Request(
+                self.base + "/api/targets",
+                method="POST",
+                data=json.dumps({
+                    "name": f"{kind} run", "host": "127.0.0.1", "port": port,
+                    "metricsPath": "/metrics", "kind": kind,
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request) as response:
+                target_ids.append(json.load(response)["id"])
+        comparison = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": target_ids}).encode(),
+            headers={"Content-Type": "application/json", "Host": "dashboard.example:9721"},
+        )
+        with urllib.request.urlopen(comparison) as response:
+            body = json.load(response)
+        self.assertTrue(body["dashboardId"].startswith("sbk-comparison-"))
+        self.assertTrue(
+            body["dashboardUrl"].startswith(
+                f"http://dashboard.example:3000/d/{body['dashboardId']}/"
+            )
+        )
+        self.assertEqual(2, body["dashboardUrl"].count("var-sbk_endpoints="))
+        repeated = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": list(reversed(target_ids))}).encode(),
+            headers={"Content-Type": "application/json", "Host": "dashboard.example:9721"},
+        )
+        with urllib.request.urlopen(repeated) as response:
+            repeated_body = json.load(response)
+        self.assertEqual(body, repeated_body)
+        self.assertEqual({"SBK", "SBM"}, {target.kind for target in self.registry.list()})
+
+    def test_rejects_invalid_comparison_selections(self):
+        first = self.registry.register("One", "host", 9718, "/metrics")
+        payloads = (
+            {},
+            {"targetIds": [first.id]},
+            {"targetIds": [first.id, first.id]},
+            {"targetIds": [first.id, "missing"]},
+            {"targetIds": [str(index) for index in range(9)]},
+            {"targetIds": [first.id, 123]},
+        )
+        for payload in payloads:
+            request = urllib.request.Request(
+                self.base + "/api/comparison-dashboard",
+                method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.subTest(payload=payload), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(400, caught.exception.code)
 
     def test_ui_uses_configured_container_default_target_host(self):
         self.server.close()
@@ -241,7 +333,10 @@ class WebTest(unittest.TestCase):
         )
         with socket.create_connection(("127.0.0.1", self.server._server.server_port), timeout=2) as connection:
             connection.sendall(request)
-            connection.shutdown(socket.SHUT_WR)
+            # The server may reject the invalid Content-Length and close first.
+            # macOS reports ENOTCONN from shutdown in that valid peer-close race.
+            with contextlib.suppress(OSError):
+                connection.shutdown(socket.SHUT_WR)
             response = connection.recv(4096)
         self.assertIn(b"400 Bad Request", response)
         self.assertEqual([], self.registry.list())
@@ -353,6 +448,13 @@ class MonitoringContinueTest(unittest.TestCase):
             Path("unused"), data / "unused", 19090, 3000, "https://grafana.example/base",
             {"grafana-url": "command line"},
         )
+        first = BenchmarkTarget("one", "One", "bench.example", 9718, "/metrics", "SBK", "now")
+        second = BenchmarkTarget("two", "Two", "bench.example", 9719, "/metrics", "SBM", "now")
+        default_stack = ManagedMonitoringStack(dashboard, default)
+        explicit_stack = ManagedMonitoringStack(dashboard, explicit)
+        default_stack._targets = (first, second)
+        explicit_stack._targets = (first, second)
+        comparison_uid = default_stack.dashboard_provisioner.comparison_dashboard_uid(["one", "two"])
         self.assertEqual(
             "http://198.51.100.7:3000/d/sbk-target/",
             ManagedMonitoringStack(dashboard, default).dashboard_url("target", "198.51.100.7"),
@@ -360,6 +462,14 @@ class MonitoringContinueTest(unittest.TestCase):
         self.assertEqual(
             "https://grafana.example/base/d/sbk-target/",
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
+        )
+        self.assertEqual(
+            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            default_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
+        )
+        self.assertEqual(
+            f"https://grafana.example/base/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            explicit_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):
@@ -461,6 +571,35 @@ class MonitoringContinueTest(unittest.TestCase):
         command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
         self.assertIn("--web.listen-address=127.0.0.1:19090", command)
         self.assertIn("--storage.tsdb.retention.time=7d", command)
+
+    def test_stack_never_replaces_operator_supplied_native_ports(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            Path("prometheus"),
+            data / "grafana",
+            19090,
+            13000,
+            "http://localhost:13000",
+            {
+                "prometheus-port": "command line",
+                "grafana-port": "environment SBK_DASHBOARD_GRAFANA_PORT",
+            },
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        with (
+            mock.patch.object(stack, "_prepare_configuration"),
+            mock.patch.object(stack, "reconcile"),
+            mock.patch.object(stack, "_validate_prometheus_configuration"),
+            mock.patch(
+                "sbk_dashboard.monitoring.PortProcessManager.terminate_existing",
+                side_effect=OSError("busy user port"),
+            ) as terminate,
+            self.assertRaisesRegex(OSError, "busy user port"),
+        ):
+            stack.start([])
+        self.assertFalse(terminate.call_args.kwargs["replace_prometheus"])
+        self.assertFalse(terminate.call_args.kwargs["replace_grafana"])
 
     def test_promtool_validates_generated_configuration_and_rejects_failure(self):
         data = Path(self.temporary.name)

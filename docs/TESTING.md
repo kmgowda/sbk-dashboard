@@ -64,8 +64,10 @@ dashboard container on randomly selected non-default loopback host ports, and a 
 by their literal container IPv4 and IPv6 addresses, proving that
 Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
 host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
-clean shutdown, absence of recorded native PIDs, and registration/dashboard persistence across a full restart. Its
-`finally` cleanup removes only those uniquely named containers, network, and volume.
+exact-registration reuse with HTTP 200, deterministic comparison ID/URL reuse in reversed order, its generated
+53-panel comparison file, comparison persistence across restart, clean shutdown, absence of recorded native PIDs,
+and registration/dashboard persistence across a full restart. Its `finally` cleanup removes only those uniquely
+named containers, network, and volume.
 
 For real SBK integration, expose a non-default host exporter port for at least 120 seconds:
 
@@ -114,6 +116,14 @@ failure removes guardian state, a killed guardian cannot orphan its native child
 both the guarded native process and guardian. Guardian-handshake tests also reproduce a transient Windows
 `PermissionError`, verify that a subsequent read succeeds, and ensure persistent access denial times out with useful
 diagnostics.
+Windows Job Object unit tests verify the kill-on-close limit, process assignment, handle closure, primary-thread
+resume, and suspended creation flags on every platform. A native Windows smoke test must additionally kill the
+guardian and main dashboard independently and confirm Prometheus/Grafana plus descendants disappear within the
+bounded cleanup period; Linux simulation is not a native Job Object claim.
+Native-port tests verify startup reporting for available defaults, automatic fallbacks, CLI values, and environment
+values; occupied operator-supplied ports report identifiable owners and stop no process. A second acquisition-time
+test verifies that even an expected Prometheus/Grafana executable cannot be replaced on an operator-supplied port
+if it appears after initial selection. Continue-mode tests retain compatible attachment behavior.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,
@@ -129,6 +139,12 @@ placeholder reaches the browser.
 Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
 verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery
 to `up` and exact summary counts in both states.
+
+Registration regressions submit the same normalized host, port, metrics path, display name, and kind repeatedly and
+verify that the first request creates one endpoint with HTTP 201 while every exact repeat returns that same endpoint
+and dashboard with HTTP 200. Conflicting metadata for the same `host:port` remains rejected. Comparison regressions
+likewise verify that the same endpoint set in any order returns the same deterministic comparison dashboard ID and
+URL.
 
 Reconciliation-generation regressions block a Prometheus status response while replacing the target set and verify
 that the obsolete response cannot remove the new endpoint's `pending` state or restore a deleted endpoint. Command
@@ -209,6 +225,12 @@ across landing and Grafana categories, per-category capacity eviction, exact two
 30-second browser heartbeat/dashboard-click hooks. Native Prometheus and Grafana configuration and routing remain
 unchanged; direct native-server clients are deliberately not asserted as observable.
 
+Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
+complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
+comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-host URL behavior, and removal of cached
+comparisons when an endpoint is removed. A native smoke test should run two concurrent exporters, select both on the landing
+page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
+
 ## venv and Conda checks
 
 Validate both installers rather than assuming their activation semantics are equivalent:
@@ -226,21 +248,22 @@ conda run -p /tmp/sbk-dashboard-conda sbk-dashboard -h
 On Windows, substitute `Scripts\\python.exe` and `Scripts\\sbk-dashboard.exe` for the venv paths.
 
 The automated launcher tests use a disposable fake application to verify foreground console logging, background
-file logging, shared stop behavior, active-environment precedence, duplicate-start behavior, PID creation-time
-validation, and bounded log rotation. For a native launcher
+file logging, help while an instance is running, independent per-port ownership, automatic native-port fallback,
+selective and default stop behavior, active-environment precedence, duplicate-start behavior, PID creation-time
+validation, bounded log rotation, and forceful descendant cleanup. For a native launcher
 smoke test, activate the venv or Conda environment, use unique non-default ports and a temporary data directory, and
 run the matching pair:
 
 ```bash
 ./scripts/start-sbk-dashboard-background.sh -port 19721 -prometheus-port 19090 -grafana-port 13000 \
   -data /tmp/sbk-dashboard-launcher-test
-./scripts/stop-sbk-dashboard.sh
+./scripts/stop-sbk-dashboard.sh -port 19721
 ```
 
 ```powershell
 .\scripts\Start-SbkDashboardBackground.ps1 -port 19721 -prometheus-port 19090 -grafana-port 13000 `
   -data $env:TEMP\sbk-dashboard-launcher-test
-.\scripts\Stop-SbkDashboard.ps1
+.\scripts\Stop-SbkDashboard.ps1 -port 19721
 ```
 
 Confirm the recorded launcher PID and all owned native descendants exit before removing only that disposable data
@@ -252,8 +275,8 @@ owned children. The same stop script must also stop that foreground instance whe
 
 ## Native Windows extraction smoke test
 
-The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows ZIP
-or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
+The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows
+archive or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
 
 ```powershell
 py -3 -m venv $env:TEMP\sbk-dashboard-win-venv

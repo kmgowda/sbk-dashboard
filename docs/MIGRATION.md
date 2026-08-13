@@ -9,6 +9,20 @@ The Python rewrite preserves the external contract:
 - the monitoring directory, Prometheus TSDB, Grafana data, generated dashboards, and mappings remain in place;
 - the exact canonical Grafana dashboard remains packaged.
 
+The comparison feature adds an optional `kind` field with values `SBK` or `SBM`. Existing registrations lacking the
+field continue to load as `SBK`, so no registry migration is required. Reconciliation generates
+comparison dashboards and attaches `sbk_dashboard_name` and `sbk_kind` to newly scraped samples for readable legends.
+Samples retained from before this feature keep their original label set and remain queryable; a Grafana range that
+crosses the upgrade can show an older endpoint-ID-only series beside its newly named series. Endpoint IDs, dedicated
+dashboard UIDs, and stored historical samples remain unchanged. Comparison selections are carried in Grafana URLs
+and create no new user-managed registry.
+
+Comparison dashboards now use an order-independent `sbk-comparison-<16-hex>` UID derived from the selected endpoint
+set instead of the former global `sbk-comparison` UID. Selecting the same set again reuses its ID and URL. The old
+generated shared file is removed by reconciliation; bookmarks using that old UID must be recreated through the
+landing page or comparison API. The new generated-file cache is bounded to 128 entries and does not change endpoint
+IDs, samples, or registration persistence.
+
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.
 
@@ -49,6 +63,12 @@ Owned Prometheus and Grafana processes now run beneath lightweight lifecycle gua
 or persisted-data migration. Service managers may retain their existing stop timeout and process-group policy; normal
 shutdown remains graceful, while hard termination of only the main PID now triggers guardian cleanup. Attached
 `-continue true` services remain externally owned and are never guarded or terminated by sbk-dashboard.
+
+Windows-owned native services now additionally use a kill-on-close Job Object. Each native process starts suspended,
+is assigned to the job, and resumes only after assignment succeeds, so Prometheus, Grafana, and their descendants
+cannot escape during startup or survive closure of the guardian's job handle. This changes no command-line option,
+service definition, or persisted data. POSIX deployments retain their dedicated session/process-group cleanup, and
+containers retain the same application cleanup inside Docker's final PID-namespace/cgroup termination boundary.
 
 The landing page now displays total, up, and down endpoint counters derived from the existing target inventory API.
 This is a browser-only presentation change with no new endpoint, option, or persisted-data migration.
@@ -103,3 +123,19 @@ enables IPv6 on its bridge so literal IPv6 targets can be scraped when the Docke
 Release 1.26.8.2 switched the published-image workflow to Docker Hub, added source-archive foreground/background
 launchers for Linux, macOS, and Windows, and changed only the container endpoint-form default to
 `host.docker.internal`. Direct Python/Conda target defaults and persisted registrations remain unchanged.
+
+The multi-instance launcher extension keeps the historical default-port data root and launcher filenames. An
+instance using a non-default management port now defaults to `~/.sbk-dashboard/instances/<port>`. If the built-in
+Prometheus 9090 or Grafana 3000 port is occupied, and that native port was not supplied by CLI or environment,
+startup chooses and reports a bounded fallback port instead of replacing the listener. Existing deployments that
+explicitly configure native ports or data directories retain their exact values.
+
+Operator-supplied Prometheus and Grafana ports are now strictly non-replaceable. If a CLI/environment port is busy,
+startup reports its listener where identifiable and exits instead of stopping an existing native service. Omit the
+native-port option to use the built-in default with automatic fallback, or use `-continue true` to attach to already
+running compatible services. This behavior changes no persisted data.
+
+Exact repeated endpoint registration is now idempotent. Submitting the same normalized host, port, metrics path,
+display name, and SBK/SBM kind returns the existing endpoint and dashboard rather than a duplicate-registration
+error. The initial API request returns HTTP 201 and repeats return HTTP 200. Existing endpoint IDs and persisted
+registrations are unchanged; conflicting metadata for an existing `host:port` is still rejected.

@@ -53,6 +53,7 @@
             </div>
             <form id="target-form">
                 <label>Display name<input name="name" maxlength="100" value="SBK Dashboard"></label>
+                <label>Benchmark type<select name="kind"><option value="SBK">SBK</option><option value="SBM">SBM</option></select></label>
                 <label>Host or IP<input name="host" required value="__DEFAULT_TARGET_HOST__"></label>
                 <label>Port<input name="port" required type="number" min="1" max="65535" value="9718"></label>
                 <label>Metrics path<input name="metricsPath" required value="/metrics"></label>
@@ -67,6 +68,10 @@
                 <span>02</span>
                 <div><h2>Benchmark dashboards</h2><p>Live endpoint inventory</p></div>
                 <button id="refresh" class="icon-button" title="Refresh endpoints" aria-label="Refresh endpoints">↻</button>
+            </div>
+            <div class="comparison-bar">
+                <div><strong>Compare live results</strong><span>Select 2–8 SBK or SBM endpoints</span></div>
+                <button id="compare-selected" type="button" disabled>Compare selected (0) ↗</button>
             </div>
             <div id="targets" class="target-list" aria-live="polite"></div>
             <div id="empty-state" class="empty-state">

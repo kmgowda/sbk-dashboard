@@ -94,6 +94,8 @@ class ManagedMonitoringStack:
                     self.process_registry,
                     self.monitoring.prometheus_bind_address,
                     self.monitoring.grafana_bind_address,
+                    replace_prometheus=not self.monitoring.port_was_supplied("prometheus"),
+                    replace_grafana=not self.monitoring.port_was_supplied("grafana"),
                 )
             self._services = self._native_services()
             for service in self._services:
@@ -146,6 +148,20 @@ class ManagedMonitoringStack:
         # receive a localhost-only Grafana link.
         dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
         return self.dashboard_provisioner.dashboard_url(target_id, dynamic_host)
+
+    def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
+        dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
+        with self._data_lock:
+            targets_by_id = {target.id: target for target in self._targets}
+        try:
+            selected = [targets_by_id[target_id] for target_id in sorted(set(target_ids))]
+        except KeyError as error:
+            raise ValueError("Every comparison endpoint must be reconciled") from error
+        self.dashboard_provisioner.ensure_comparison_dashboard(selected)
+        return self.dashboard_provisioner.comparison_dashboard_url(target_ids, dynamic_host)
+
+    def comparison_dashboard_id(self, target_ids: list[str]) -> str:
+        return self.dashboard_provisioner.comparison_dashboard_uid(target_ids)
 
     def healthy(self) -> bool:
         return self.lifecycle.state == LifecycleState.RUNNING and bool(self._services) and all(

@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.models import BenchmarkTarget, endpoint_id, normalize_metrics_path
 from sbk_dashboard.network import normalize_host
+
+
+@dataclass(frozen=True)
+class RegistrationResult:
+    """The canonical target returned by an idempotent registration attempt."""
+
+    target: BenchmarkTarget
+    created: bool
 
 
 class TargetRegistry:
@@ -43,30 +52,61 @@ class TargetRegistry:
         with self._lock:
             return self._targets.get(target_id)
 
-    def register(self, name: str | None, host: str | None, port: int, metrics_path: str | None) -> BenchmarkTarget:
+    def register(
+        self,
+        name: str | None,
+        host: str | None,
+        port: int,
+        metrics_path: str | None,
+        kind: str | None = None,
+    ) -> BenchmarkTarget:
+        return self.register_with_status(name, host, port, metrics_path, kind).target
+
+    def register_with_status(
+        self,
+        name: str | None,
+        host: str | None,
+        port: int,
+        metrics_path: str | None,
+        kind: str | None = None,
+    ) -> RegistrationResult:
+        """Register a target, returning the existing target for an exact repeat."""
         if name is not None and not isinstance(name, str):
             raise ValueError("Name must be a string")
         normalized_host = self._validate_host(host)
         normalized_port = self._validate_port(port)
         normalized_path = self._validate_path(metrics_path)
+        normalized_kind = kind.strip().upper() if isinstance(kind, str) else "SBK" if kind is None else ""
+        if normalized_kind not in {"SBK", "SBM"}:
+            raise ValueError("Kind must be SBK or SBM")
         target_id = endpoint_id(normalized_host, normalized_port)
         normalized_name = name.strip() if name and name.strip() else f"{normalized_host}:{normalized_port}"
         if len(normalized_name) > 100:
             raise ValueError("Name must not exceed 100 characters")
         with self._lock:
-            if target_id in self._targets:
-                raise ValueError(f"The endpoint {normalized_host}:{normalized_port} is already registered")
+            existing = self._targets.get(target_id)
+            if existing is not None:
+                if (
+                    existing.name == normalized_name
+                    and existing.metrics_path == normalized_path
+                    and existing.kind == normalized_kind
+                ):
+                    return RegistrationResult(existing, False)
+                raise ValueError(
+                    f"The endpoint {normalized_host}:{normalized_port} is already registered "
+                    "with different name, metrics path, or kind"
+                )
             if len(self._targets) >= self._max_targets:
                 raise ValueError(f"Endpoint limit of {self._max_targets} has been reached")
             target = BenchmarkTarget(
-                target_id, normalized_name, normalized_host, normalized_port, normalized_path, "SBK",
+                target_id, normalized_name, normalized_host, normalized_port, normalized_path, normalized_kind,
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
             next_targets = dict(self._targets)
             next_targets[target_id] = target
             self._persist(next_targets)
             self._targets = next_targets
-            return target
+            return RegistrationResult(target, True)
 
     def remove(self, target_id: str) -> bool:
         with self._lock:
