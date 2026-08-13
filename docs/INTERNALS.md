@@ -28,8 +28,10 @@ Container packaging does not introduce another composition root. Production Comp
 image; the development override builds that image locally. Both invoke the same `sbk-dashboard` entry point, and the
 Python `run()` composition below remains the sole owner of Prometheus and Grafana in either delivery mode.
 
-The optional source-archive launcher helper is outside the package composition root. Foreground mode calls
-`main.main()` in the console-attached helper process. Background mode first starts an empty supervisor, records its
+The optional source-archive launcher helper is outside the package composition root. POSIX foreground mode calls
+`main.main()` in the console-attached helper process. Windows foreground mode keeps a console-attached relay parent,
+starts the application as a dedicated process-group leader, forwards `Ctrl+Break`, and watches the relay parent so
+an abrupt relay exit still cleans the application tree. Background mode first starts an empty supervisor, records its
 PID and creation time, and authorizes acquisition with a bounded marker handshake. Only then may the supervisor
 start `python -m sbk_dashboard` and its parent-death watcher. A reverse marker is emitted only after both processes
 exist and the application has survived the immediate-exit window; the initiating command reports success only after

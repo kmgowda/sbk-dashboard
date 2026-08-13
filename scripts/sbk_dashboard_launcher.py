@@ -154,7 +154,7 @@ def report_environment() -> None:
     print(f"sbk-dashboard available: version {version}")
 
 
-def foreground(arguments: list[str]) -> int:
+def run_foreground(arguments: list[str]) -> int:
     current = matching_process(load_state())
     if current is not None:
         print(f"SBK Dashboard is already running with PID {current.pid}.")
@@ -172,6 +172,62 @@ def foreground(arguments: list[str]) -> int:
     finally:
         remove_owned_state(process.pid, process_created)
     return 0
+
+
+def foreground(arguments: list[str]) -> int:
+    if os.name != "nt":
+        return run_foreground(arguments)
+    current = matching_process(load_state())
+    if current is not None:
+        print(f"SBK Dashboard is already running with PID {current.pid}.")
+        return 0
+    remove_stale_state()
+    parent = psutil.Process(os.getpid())
+    creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    child = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "_foreground", *arguments],
+        creationflags=creation_flags,
+        close_fds=False,
+    )
+    child_process = psutil.Process(child.pid)
+    subprocess.Popen(
+        [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "_watch",
+            str(parent.pid),
+            str(parent.create_time()),
+            str(child_process.pid),
+            str(child_process.create_time()),
+            str(child_process.pid),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creation_flags,
+        close_fds=True,
+    )
+    previous_handlers: dict[signal.Signals, Any] = {}
+
+    def stop_child(_signum: int, _frame: object) -> None:
+        if child.poll() is None:
+            terminate_dashboard_group(child.pid, child_process)
+
+    handled_signals = [signal.SIGINT, signal.SIGTERM]
+    break_signal = vars(signal).get("SIGBREAK")
+    if isinstance(break_signal, signal.Signals):
+        handled_signals.append(break_signal)
+    try:
+        for signum in handled_signals:
+            previous_handlers[signum] = signal.signal(signum, stop_child)
+        return child.wait()
+    finally:
+        if child.poll() is None:
+            terminate_dashboard_group(child.pid, child_process)
+            with suppress(subprocess.TimeoutExpired):
+                child.wait(timeout=FORCE_CLEANUP_SECONDS)
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
 
 
 def start_background(arguments: list[str]) -> int:
@@ -368,14 +424,20 @@ def wait_then_force(processes: list[psutil.Process], timeout: float) -> bool:
     return True
 
 
-def watch_launcher(parent_pid: int, parent_created: float, child_pid: int, child_created: float) -> int:
+def watch_launcher(
+    parent_pid: int,
+    parent_created: float,
+    child_pid: int,
+    child_created: float,
+    group_id: int,
+) -> int:
     while True:
         child = process_matches(child_pid, child_created)
         if child is None:
             return 0
         if process_matches(parent_pid, parent_created) is None:
             descendants = child.children(recursive=True)
-            terminate_dashboard_group(parent_pid, child)
+            terminate_dashboard_group(group_id, child)
             wait_then_force([child, *descendants], DEFAULT_STOP_TIMEOUT_SECONDS)
             return 0
         time.sleep(WATCH_INTERVAL_SECONDS)
@@ -451,6 +513,7 @@ def run_dashboard(
                     str(supervisor_created),
                     str(child_process.pid),
                     str(child_process.create_time()),
+                    str(supervisor.pid),
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -494,7 +557,7 @@ def stop_timeout() -> float:
 
 
 def request_stop(process: psutil.Process, mode: str) -> None:
-    if os.name == "nt" and mode == "background" and hasattr(signal, "CTRL_BREAK_EVENT"):
+    if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
         try:
             os.kill(process.pid, signal.CTRL_BREAK_EVENT)
             return
@@ -534,6 +597,8 @@ def stop() -> int:
 
 
 def main() -> int:
+    if len(sys.argv) >= 2 and sys.argv[1] == "_foreground":
+        return run_foreground(sys.argv[2:])
     if len(sys.argv) >= 2 and sys.argv[1] == "_run":
         if len(sys.argv) < 6:
             raise SystemExit("Invalid internal launcher arguments.")
@@ -545,9 +610,15 @@ def main() -> int:
             sys.argv[6:],
         )
     if len(sys.argv) >= 2 and sys.argv[1] == "_watch":
-        if len(sys.argv) != 6:
+        if len(sys.argv) != 7:
             raise SystemExit("Invalid internal watcher arguments.")
-        return watch_launcher(int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5]))
+        return watch_launcher(
+            int(sys.argv[2]),
+            float(sys.argv[3]),
+            int(sys.argv[4]),
+            float(sys.argv[5]),
+            int(sys.argv[6]),
+        )
     if len(sys.argv) < 2 or sys.argv[1] not in {"foreground", "background", "start", "stop"}:
         raise SystemExit(
             f"Usage: {Path(sys.argv[0]).name} "

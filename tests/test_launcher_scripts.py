@@ -157,6 +157,17 @@ class LauncherScriptTest(unittest.TestCase):
         wait.assert_called_once_with([process], sbk_dashboard_launcher.DEFAULT_STOP_TIMEOUT_SECONDS)
         remove.assert_called_once_with(123, 456.0)
 
+    def test_windows_foreground_stop_uses_ctrl_break_process_group(self):
+        process = Mock(pid=321)
+        with (
+            patch.object(sbk_dashboard_launcher.os, "name", "nt"),
+            patch.object(sbk_dashboard_launcher.signal, "CTRL_BREAK_EVENT", 1, create=True),
+            patch.object(sbk_dashboard_launcher.os, "kill") as kill,
+        ):
+            sbk_dashboard_launcher.request_stop(process, "foreground")
+        kill.assert_called_once_with(321, 1)
+        process.terminate.assert_not_called()
+
     def test_wrappers_prefer_active_environments(self):
         start_shell = (ROOT / "scripts" / "start-sbk-dashboard.sh").read_text(encoding="utf-8")
         background_shell = (ROOT / "scripts" / "start-sbk-dashboard-background.sh").read_text(
@@ -189,6 +200,9 @@ class LauncherScriptTest(unittest.TestCase):
         self.assertIn("sys.version_info >= (3, 10)", stop_powershell)
         self.assertNotIn("Write-Error @'", start_powershell)
         self.assertNotIn('Write-Error @"', start_powershell)
+        launcher = LAUNCHER.read_text(encoding="utf-8")
+        self.assertIn('"_foreground"', launcher)
+        self.assertIn("terminate_dashboard_group(child.pid, child_process)", launcher)
 
     def test_source_distribution_manifest_includes_launchers(self):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
