@@ -62,16 +62,21 @@ class LifecycleTest(unittest.TestCase):
                 shutdown,
             )
             service.start(False)
-            first_pid = service.pid
-            self.assertIsNotNone(first_pid)
-            psutil.Process(first_pid).kill()
-            psutil.Process(first_pid).wait(3)
-            self.assertTrue(service.supervise())
-            second_pid = service.pid
-            self.assertNotEqual(first_pid, second_pid)
-            service.stop()
-            self.assertEqual(LifecycleState.STOPPED, service.lifecycle.state)
-            self.assertFalse(psutil.pid_exists(second_pid))
+            try:
+                first_pid = service.pid
+                self.assertIsNotNone(first_pid)
+                first_process = psutil.Process(first_pid)
+                first_process.kill()
+                first_process.wait(3)
+                self.assertTrue(service.supervise())
+                second_pid = service.pid
+                self.assertIsNotNone(second_pid)
+                self.assertNotEqual(first_pid, second_pid)
+                service.stop()
+                self.assertEqual(LifecycleState.STOPPED, service.lifecycle.state)
+                self.assertFalse(psutil.pid_exists(second_pid))
+            finally:
+                service.stop()
 
     def test_managed_service_cleans_native_child_if_guardian_is_killed(self):
         with tempfile.TemporaryDirectory() as temporary:
