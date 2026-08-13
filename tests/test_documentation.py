@@ -46,9 +46,12 @@ class DocumentationContractTest(unittest.TestCase):
     def test_cross_platform_ci_uses_an_explicit_macos_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         testing = (ROOT / "docs" / "TESTING.md").read_text(encoding="utf-8")
-        self.assertIn("macos-15-intel", workflow)
+        self.assertIn("os: [macos-15, windows-2022]", workflow)
+        self.assertNotIn("macos-15-intel", workflow)
         self.assertNotIn("macos-latest", workflow)
-        self.assertIn("macos-15-intel", testing)
+        self.assertIn("machine == 'arm64'", workflow)
+        self.assertIn("python -m sbk_dashboard -v", workflow)
+        self.assertIn("Apple Silicon `macos-15`", testing)
 
 
 if __name__ == "__main__":

@@ -29,9 +29,11 @@ PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -v
 
 Socket-based tests need permission to bind loopback ports. Windows and macOS should run their native smoke tests on
 those operating systems because native executables cannot be meaningfully launched through Linux simulation.
-The cross-platform unit workflow uses the explicit `macos-15-intel` runner instead of the moving `macos-latest`
-label so runner OS and architecture changes cannot silently alter the required check. Platform-resolution tests
-still cover macOS x86-64 and ARM64; native Apple Silicon remains a separate smoke-test requirement.
+The cross-platform unit workflow uses the explicit Apple Silicon `macos-15` runner instead of the moving
+`macos-latest` label so runner OS and architecture changes cannot silently alter the required check.
+The job asserts that macOS reports `arm64` and invokes the installed CLI before running the unit suite.
+Platform-resolution tests still cover macOS x86-64 and ARM64; full native Apple Silicon operation remains a
+separate smoke-test requirement.
 
 ## Container validation
 

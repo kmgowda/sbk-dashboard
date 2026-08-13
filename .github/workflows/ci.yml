@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15-intel, windows-2022]
+        os: [macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,4 +50,9 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
+      - name: Verify Apple Silicon runner
+        if: runner.os == 'macOS'
+        run: python -c "import platform; machine = platform.machine().lower(); assert machine == 'arm64', machine"
+      - name: Verify CLI
+        run: python -m sbk_dashboard -v
       - run: python -W error::ResourceWarning -m unittest discover -s tests -q
