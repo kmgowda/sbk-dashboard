@@ -289,7 +289,10 @@ native-service ownership or the production recommendation to use a host service 
 parent-death watcher observes the background supervisor's PID and creation time. If the supervisor is killed, the
 watcher signals the isolated dashboard process group, waits for normal cleanup, and then forcefully removes only
 captured descendants that exceed the shutdown bound. The shared stop launcher addresses either mode solely through
-the creation-time-guarded ownership record.
+the creation-time-guarded ownership record. Background startup uses two bounded handshakes: the start command first
+records ownership and authorizes acquisition, so the supervisor cannot launch the application or watcher early; the
+supervisor then confirms that the application survived its immediate startup window and that the watcher exists
+before the start command reports success.
 
 ## Authentication and container boundary
 

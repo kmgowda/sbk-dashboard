@@ -5,8 +5,9 @@ services:
     image: ${SBK_DASHBOARD_IMAGE:-kmgowda/sbk-dashboard:1.26.8.2}
     pull_policy: missing
     ports:
-      - "9721:9721"
-      - "3000:3000"
+      # Authentication is disabled. Set SBK_DASHBOARD_PUBLISH_HOST=127.0.0.1 for host-only access.
+      - "${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:9721:9721"
+      - "${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:3000:3000"
     volumes:
       - sbk-dashboard-data:/var/lib/sbk-dashboard
     extra_hosts:

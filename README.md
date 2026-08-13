@@ -252,7 +252,7 @@ Defaults:
 - Prometheus: `http://127.0.0.1:9090/` (loopback only)
 - Grafana: `http://localhost:3000/`
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
-- Endpoint form display name: `SBK Dashboard`
+- Endpoint form display name: initially `SBK Dashboard`; if cleared, registration falls back to `host:port`
 - Endpoint form host/IP: `127.0.0.1` for native/Conda execution; `host.docker.internal` in the container image
 - Authentication: disabled
 - Data directory: `~/.sbk-dashboard`
@@ -555,13 +555,15 @@ Code-level component ownership and call paths are documented separately in
 
 ```bash
 python -m pip install -e ".[dev]"
-ruff check src tests
-mypy src
+ruff check src tests scripts
+mypy src scripts/sbk_dashboard_launcher.py
 python -m pytest
+coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
 coverage combine
 coverage report
 python -m build --no-isolation
+git diff --check
 ```
 
 Tests cover lifecycle transitions, bounded HTTP admission, process restart/tree shutdown, resource-leak warnings,

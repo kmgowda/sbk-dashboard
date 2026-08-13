@@ -18,7 +18,7 @@ if ($env:VIRTUAL_ENV) {
         $PythonCommand = Get-Command python -ErrorAction SilentlyContinue
     }
     if (-not $PythonCommand) {
-        Write-Error @'
+        $MissingPythonMessage = @'
 Python 3.10 or newer is required, but no py or python command was found.
 Install Python from https://www.python.org/downloads/windows/ and enable the Python launcher.
 Then run:
@@ -26,6 +26,7 @@ Then run:
   .\.venv\Scripts\Activate.ps1
   python -m pip install .
 '@
+        Write-Error $MissingPythonMessage -ErrorAction Continue
         exit 1
     }
     $Python = $PythonCommand.Source
@@ -33,20 +34,21 @@ Then run:
 }
 
 if (-not (Test-Path -LiteralPath $Python)) {
-    Write-Error @"
+    $BrokenEnvironmentMessage = @"
 The selected $EnvironmentDescription has no Python executable at $Python.
 Reactivate a valid environment, or recreate the project environment:
   py -3 -m venv .venv
   .\.venv\Scripts\Activate.ps1
   python -m pip install .
 "@
+    Write-Error $BrokenEnvironmentMessage -ErrorAction Continue
     exit 1
 }
 
 & $Python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
 if ($LASTEXITCODE -ne 0) {
     $PythonVersion = (& $Python --version 2>&1) -join ' '
-    Write-Error "Python 3.10 or newer is required; selected interpreter reports: $PythonVersion. Install a supported Python, then recreate or reactivate the venv/Conda environment."
+    Write-Error "Python 3.10 or newer is required; selected interpreter reports: $PythonVersion. Install a supported Python, then recreate or reactivate the venv/Conda environment." -ErrorAction Continue
     exit 1
 }
 

@@ -42,6 +42,9 @@ class LauncherScriptTest(unittest.TestCase):
             "import sys\n"
             "import time\n"
             "def main(arguments=None):\n"
+            "    if os.environ.get('FAKE_EXIT_IMMEDIATELY'):\n"
+            "        print('fake dashboard startup failure', flush=True)\n"
+            "        return\n"
             "    supplied = sys.argv[1:] if arguments is None else arguments\n"
             "    arguments_output = os.environ.get('FAKE_ARGUMENTS_OUTPUT')\n"
             "    if arguments_output:\n"
@@ -114,6 +117,46 @@ class LauncherScriptTest(unittest.TestCase):
         process.status.return_value = psutil.STATUS_ZOMBIE
         self.assertEqual([], sbk_dashboard_launcher.wait_for_process_exit([process], 1))
 
+    def test_run_dashboard_acquires_no_process_before_parent_handshake(self):
+        stopping = Mock()
+        with (
+            patch.object(sbk_dashboard_launcher, "wait_for_startup_handshake", return_value=False),
+            patch.object(sbk_dashboard_launcher.subprocess, "Popen") as popen,
+            patch.object(sbk_dashboard_launcher.threading, "Event", return_value=stopping),
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"SBK_DASHBOARD_LAUNCHER_DIR": temporary}),
+        ):
+            self.assertEqual(
+                1,
+                sbk_dashboard_launcher.run_dashboard(
+                    os.getpid(),
+                    psutil.Process().create_time(),
+                    Path(temporary) / "authorized",
+                    Path(temporary) / "started",
+                    [],
+                ),
+            )
+        popen.assert_not_called()
+
+    def test_stop_continues_cleanup_when_process_exits_before_signal(self):
+        process = Mock(pid=123)
+        process.children.return_value = []
+        state = {"pid": 123, "create_time": 456.0, "mode": "background"}
+        with (
+            patch.object(sbk_dashboard_launcher, "load_state", return_value=state),
+            patch.object(sbk_dashboard_launcher, "matching_process", return_value=process),
+            patch.object(
+                sbk_dashboard_launcher,
+                "request_stop",
+                side_effect=psutil.NoSuchProcess(123),
+            ),
+            patch.object(sbk_dashboard_launcher, "wait_then_force", return_value=False) as wait,
+            patch.object(sbk_dashboard_launcher, "remove_owned_state") as remove,
+        ):
+            self.assertEqual(0, sbk_dashboard_launcher.stop())
+        wait.assert_called_once_with([process], sbk_dashboard_launcher.DEFAULT_STOP_TIMEOUT_SECONDS)
+        remove.assert_called_once_with(123, 456.0)
+
     def test_wrappers_prefer_active_environments(self):
         start_shell = (ROOT / "scripts" / "start-sbk-dashboard.sh").read_text(encoding="utf-8")
         background_shell = (ROOT / "scripts" / "start-sbk-dashboard-background.sh").read_text(
@@ -142,6 +185,10 @@ class LauncherScriptTest(unittest.TestCase):
         self.assertIn("background @DashboardArguments", background_powershell)
         self.assertIn("sys.version_info >= (3, 10)", start_shell)
         self.assertIn("sys.version_info >= (3, 10)", start_powershell)
+        self.assertIn("sys.version_info >= (3, 10)", stop_shell)
+        self.assertIn("sys.version_info >= (3, 10)", stop_powershell)
+        self.assertNotIn("Write-Error @'", start_powershell)
+        self.assertNotIn('Write-Error @"', start_powershell)
 
     def test_source_distribution_manifest_includes_launchers(self):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
@@ -149,6 +196,7 @@ class LauncherScriptTest(unittest.TestCase):
             "Start-SbkDashboard.ps1",
             "Start-SbkDashboardBackground.ps1",
             "Stop-SbkDashboard.ps1",
+            "docker_safe_extract.py",
             "sbk_dashboard_launcher.py",
             "start-sbk-dashboard.sh",
             "start-sbk-dashboard-background.sh",
@@ -251,6 +299,32 @@ class LauncherScriptTest(unittest.TestCase):
             )
             self.assertIn("no matching launcher process", stopped.stdout)
 
+    def test_background_start_does_not_report_success_for_immediate_application_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            environment["FAKE_EXIT_IMMEDIATELY"] = "1"
+            started = subprocess.run(
+                [sys.executable, str(LAUNCHER), "background"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+                timeout=15,
+            )
+            self.assertNotEqual(0, started.returncode)
+            self.assertNotIn("Started SBK Dashboard", started.stdout)
+            self.assertIn("exited during startup", started.stderr)
+            self.assertFalse((state_directory / "sbk-dashboard.json").exists())
+            self.assertIn(
+                "fake dashboard startup failure",
+                (state_directory / "sbk-dashboard.log").read_text(encoding="utf-8"),
+            )
+
     def test_interrupting_start_command_cleans_every_acquired_process(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -270,8 +344,8 @@ class LauncherScriptTest(unittest.TestCase):
                 creationflags=creation_flags,
             )
             start_process = psutil.Process(started.pid)
-            descendants = self.wait_for_descendants(start_process, 3)
-            self.assertGreaterEqual(len(descendants), 3)
+            descendants = self.wait_for_descendants(start_process, 2)
+            self.assertGreaterEqual(len(descendants), 2)
             if os.name == "nt":
                 os.kill(started.pid, signal.CTRL_BREAK_EVENT)
             else:

@@ -17,6 +17,7 @@ COPY src ./src
 RUN python -m pip wheel --disable-pip-version-check --wheel-dir /wheels .
 
 FROM ${PYTHON_BASE} AS native-download-base
+COPY scripts/docker_safe_extract.py /usr/local/bin/docker-safe-extract
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
@@ -47,7 +48,7 @@ RUN --mount=type=cache,id=sbk-dashboard-prometheus-downloads,target=/var/cache/s
       mv "${cached_archive}.part" "${cached_archive}"; \
     fi; \
     mkdir -p /opt/prometheus; \
-    tar --extract --gzip --file "${cached_archive}" --strip-components=1 --directory /opt/prometheus; \
+    python /usr/local/bin/docker-safe-extract "${cached_archive}" /opt/prometheus; \
     test -x /opt/prometheus/prometheus; \
     test -x /opt/prometheus/promtool
 
@@ -78,7 +79,7 @@ RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-
       mv "${cached_archive}.part" "${cached_archive}"; \
     fi; \
     mkdir -p /opt/grafana; \
-    tar --extract --gzip --file "${cached_archive}" --strip-components=1 --directory /opt/grafana; \
+    python /usr/local/bin/docker-safe-extract "${cached_archive}" /opt/grafana; \
     test -x /opt/grafana/bin/grafana
 
 FROM ${PYTHON_BASE} AS runtime

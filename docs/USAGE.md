@@ -45,6 +45,8 @@ Command Prompt uses:
 ```batch
 py -3 -m venv .venv
 .venv\Scripts\activate.bat
+python -m pip install --upgrade pip
+python -m pip install .
 sbk-dashboard
 ```
 
@@ -129,8 +131,10 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 
 ## Start and stop scripts
 
-The repository includes foreground, background, and stop scripts for direct host installations. They select Python in this
-order: an active virtual environment, an active Conda environment, the repository's `.venv`, and finally Python on
+The repository and source archive include foreground, background, and stop scripts for direct host installations.
+They are not installed by the wheel; a wheel installation always provides the `sbk-dashboard` console command.
+The helper scripts select Python in this order: an active virtual environment, an active Conda environment, the
+repository's `.venv`, and finally Python on
 `PATH`. The selected environment must already contain `sbk-dashboard`; the scripts never install or alter an
 environment automatically.
 
@@ -189,7 +193,9 @@ The stop scripts request normal control-plane shutdown and wait up to 45 seconds
 shutdown exceeds that bound, the launcher forcefully cleans up only its recorded process tree. An independent
 parent-death watcher provides the same bounded cleanup if the background supervisor is killed, including forced
 termination. In foreground mode the application's native-process guardians handle abrupt parent death. Interrupting
-background startup before its startup handshake completes also tears down everything it acquired.
+background startup before authorization acquires no dashboard process; interruption after authorization tears down
+the supervisor and everything it acquired. The start command reports success only after the dashboard survives its
+immediate startup window and its parent-death watcher is running.
 
 ## Add an endpoint
 
@@ -201,7 +207,7 @@ The landing-page form accepts:
 
 | Field | Meaning |
 |---|---|
-| Display name | Operator label; defaults to the host and port when blank |
+| Display name | Operator label; initially `SBK Dashboard`, while a deliberately blank value falls back to `host:port` |
 | Host or IP | DNS name, IPv4 literal, or IPv6 literal as reachable from Prometheus |
 | Port | SBK/SBM PrometheusLogger HTTP port, from 1 through 65535 |
 | Metrics path | Absolute HTTP path, normally `/metrics` |

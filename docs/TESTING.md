@@ -6,9 +6,10 @@ Create either supported development environment and execute:
 
 ```bash
 python -m pip install -e ".[dev]"
-ruff check src tests scripts/sbk_dashboard_launcher.py
-mypy src
+ruff check src tests scripts
+mypy src scripts/sbk_dashboard_launcher.py
 python -m pytest
+coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
 coverage combine
 coverage report
@@ -16,6 +17,7 @@ python -m build --no-isolation
 python -m pip install --force-reinstall dist/sbk_dashboard-*.whl
 sbk-dashboard -h
 sbk-dashboard -v
+git diff --check
 ```
 
 The standard-library suite is also runnable without pytest. Promoting `ResourceWarning` to an error checks leaked
@@ -55,8 +57,9 @@ docker build --tag sbk-dashboard:test .
 python tests/container_smoke.py --image sbk-dashboard:test
 ```
 
-It starts a uniquely named IPv6-enabled bridge, two synthetic remote exporters, a disposable dashboard container,
-and a volume. The exporters are registered by their literal container IPv4 and IPv6 addresses, proving that
+It starts a uniquely named IPv6-enabled bridge, two single-threaded synthetic remote exporters, a disposable
+dashboard container on randomly selected non-default loopback host ports, and a volume. The exporters are registered
+by their literal container IPv4 and IPv6 addresses, proving that
 Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
 host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
 clean shutdown, absence of recorded native PIDs, and registration/dashboard persistence across a full restart. Its
@@ -258,6 +261,7 @@ py -3 -m venv $env:TEMP\sbk-dashboard-win-venv
 ```
 
 For a full bootstrap smoke test, start without installed native tools using a disposable data directory, verify the
-pinned Windows ZIPs install beneath that directory, and confirm `prometheus.exe`, `promtool.exe`, and Grafana start.
+pinned Windows archives install beneath that directory (Prometheus ZIP and Grafana TAR.GZ), and confirm
+`prometheus.exe`, `promtool.exe`, and Grafana start.
 Stop the dashboard and verify all child processes exit before deleting only those two disposable directories. This
 native Windows validation remains required before claiming Windows runtime certification.

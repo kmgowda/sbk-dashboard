@@ -151,9 +151,12 @@ Listener binding and browser-visible Grafana URL resolution are separate contrac
 
 ### Change the release version
 
-Update only `src/sbk_dashboard/version.py`. The `Major.Year.Month.Minor` value flows into setuptools package
-metadata through `pyproject.toml`, normal startup output, and `sbk-dashboard -v`. Validate all three surfaces and
-build both wheel and source distributions; do not add another version literal to application or packaging code.
+Update `src/sbk_dashboard/version.py` as the application source of truth. The `Major.Year.Month.Minor` value flows
+into setuptools metadata, normal startup output, and `sbk-dashboard -v`; do not add another runtime version source.
+Release packaging also carries deliberately pinned fallback/reference literals, so synchronize `Dockerfile`,
+`compose.yaml`, `compose.dev.yaml`, README release examples, and Docker documentation. The container contract tests
+must prove those literals equal `version.py`. Validate package metadata, startup output, `-v`, both distributions,
+Compose resolution, and container contract tests.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
 
@@ -293,6 +296,9 @@ Review changes in this order:
 - `docs/USAGE.md`: operator installation, environment, endpoint, backup, upgrade, and troubleshooting procedures.
 - `docs/INTERNALS.md`: implementation-level call paths, locks, processes, persistence formats, and failure boundaries.
 - `docs/MIGRATION.md`: compatibility and upgrade behavior.
+- `SBK.md`: benchmark/exporter integration and endpoint examples.
+- `docs/DOCKER.md`: container architecture, operation, persistence, networking, and security.
+- `docs/DOCKER_HUB.md`: Docker Hub build, publication, pull, and upgrade workflow.
 - `AGENTS.md`: concise normative instructions for all agents.
 - `docs/AGENT_GUIDE.md`: detailed implementation navigation and recipes.
 - Tool-specific files: discovery pointers only; do not place unique project rules in them.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import subprocess
 import time
 import urllib.error
@@ -12,6 +13,12 @@ import urllib.parse
 import urllib.request
 import uuid
 from typing import Any
+
+
+def available_host_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
 
 
 def command(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -282,7 +289,7 @@ class ContainerSmoke:
         family = "socket.AF_INET6" if ipv6 else "socket.AF_INET"
         return (
             "import socket\n"
-            "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+            "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
             "class Handler(BaseHTTPRequestHandler):\n"
             " def do_GET(self):\n"
             "  body=b'# TYPE SBK_DockerSmoke gauge\\nSBK_DockerSmoke 1\\n'\n"
@@ -292,7 +299,7 @@ class ContainerSmoke:
             "  self.end_headers()\n"
             "  self.wfile.write(body)\n"
             " def log_message(self, format, *args): pass\n"
-            "class Server(ThreadingHTTPServer): pass\n"
+            "class Server(HTTPServer): pass\n"
             f"Server.address_family={family}\n"
             f"Server(({address!r},{port}),Handler).serve_forever()\n"
         )
@@ -328,16 +335,20 @@ class ContainerSmoke:
 def main() -> None:
     arguments = argparse.ArgumentParser()
     arguments.add_argument("--image", default="sbk-dashboard:test")
-    arguments.add_argument("--dashboard-port", type=int, default=9721)
-    arguments.add_argument("--grafana-port", type=int, default=3000)
+    arguments.add_argument("--dashboard-port", type=int)
+    arguments.add_argument("--grafana-port", type=int)
     arguments.add_argument("--target-host", default="host.docker.internal")
     arguments.add_argument("--target-port", type=int, default=19718)
     arguments.add_argument("--expect-target-up", action="store_true")
     selected = arguments.parse_args()
+    dashboard_port = selected.dashboard_port or available_host_port()
+    grafana_port = selected.grafana_port or available_host_port()
+    while grafana_port == dashboard_port:
+        grafana_port = available_host_port()
     ContainerSmoke(
         selected.image,
-        selected.dashboard_port,
-        selected.grafana_port,
+        dashboard_port,
+        grafana_port,
         selected.target_host,
         selected.target_port,
         selected.expect_target_up,

@@ -35,6 +35,7 @@ LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUPS = 3
 READ_CHUNK_BYTES = 64 * 1024
 STARTUP_HANDSHAKE_SECONDS = 10.0
+BACKGROUND_STARTUP_GRACE_SECONDS = 0.5
 WATCH_INTERVAL_SECONDS = 0.25
 FORCE_CLEANUP_SECONDS = 10.0
 
@@ -86,6 +87,21 @@ def process_matches(pid: int, create_time: float) -> psutil.Process | None:
 def remove_stale_state() -> None:
     with suppress(FileNotFoundError):
         state_path().unlink()
+
+
+def remove_owned_state(pid: int, create_time: float) -> None:
+    try:
+        state = load_state()
+    except SystemExit:
+        return
+    if state is None:
+        return
+    try:
+        matches = int(state["pid"]) == pid and abs(float(state["create_time"]) - create_time) <= 0.01
+    except (KeyError, TypeError, ValueError):
+        return
+    if matches:
+        remove_stale_state()
 
 
 def write_state(process: psutil.Process, mode: str) -> None:
@@ -146,6 +162,7 @@ def foreground(arguments: list[str]) -> int:
     remove_stale_state()
     report_environment()
     process = psutil.Process(os.getpid())
+    process_created = process.create_time()
     write_state(process, "foreground")
     print(f"Starting SBK Dashboard in the foreground with PID {process.pid}.")
     print("Press Ctrl+C to stop SBK Dashboard.")
@@ -153,10 +170,7 @@ def foreground(arguments: list[str]) -> int:
         application = importlib.import_module("sbk_dashboard.main")
         application.main(arguments)
     finally:
-        state = load_state()
-        owner = matching_process(state)
-        if owner is not None and owner.pid == process.pid:
-            remove_stale_state()
+        remove_owned_state(process.pid, process_created)
     return 0
 
 
@@ -171,9 +185,11 @@ def start_background(arguments: list[str]) -> int:
     directory.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
-    creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     parent = psutil.Process(os.getpid())
-    marker = directory / f"startup-{uuid.uuid4().hex}.ready"
+    startup_id = uuid.uuid4().hex
+    marker = directory / f"startup-{startup_id}.authorized"
+    started_marker = directory / f"startup-{startup_id}.started"
     child = subprocess.Popen(
         [
             sys.executable,
@@ -182,6 +198,7 @@ def start_background(arguments: list[str]) -> int:
             str(parent.pid),
             str(parent.create_time()),
             str(marker),
+            str(started_marker),
             *arguments,
         ],
         stdin=subprocess.DEVNULL,
@@ -218,6 +235,7 @@ def start_background(arguments: list[str]) -> int:
             ) from None
         write_state(process, "background")
         marker.touch(exist_ok=False)
+        wait_for_background_start(child, started_marker, directory / LOG_FILE)
     except BaseException:
         running_child = None
         if child.poll() is None:
@@ -227,8 +245,9 @@ def start_background(arguments: list[str]) -> int:
         with suppress(subprocess.TimeoutExpired):
             child.wait(timeout=FORCE_CLEANUP_SECONDS)
         remove_stale_state()
-        with suppress(FileNotFoundError):
-            marker.unlink()
+        for startup_marker in (marker, started_marker):
+            with suppress(FileNotFoundError):
+                startup_marker.unlink()
         raise
     finally:
         for signum, handler in previous_handlers.items():
@@ -236,6 +255,30 @@ def start_background(arguments: list[str]) -> int:
     print(f"Started SBK Dashboard with PID {child.pid} using {sys.executable}.")
     print(f"Log: {directory / LOG_FILE}")
     return 0
+
+
+def wait_for_background_start(
+    supervisor: subprocess.Popen[bytes], started_marker: Path, log_path: Path
+) -> None:
+    deadline = time.monotonic() + STARTUP_HANDSHAKE_SECONDS
+    while time.monotonic() < deadline:
+        status = supervisor.poll()
+        if status is not None:
+            raise SystemExit(
+                f"SBK Dashboard exited during startup with status {status}. See {log_path}."
+            )
+        if started_marker.exists():
+            with suppress(FileNotFoundError):
+                started_marker.unlink()
+            time.sleep(0.1)
+            status = supervisor.poll()
+            if status is not None:
+                raise SystemExit(
+                    f"SBK Dashboard exited during startup with status {status}. See {log_path}."
+                )
+            return
+        time.sleep(0.05)
+    raise SystemExit(f"SBK Dashboard startup confirmation timed out. See {log_path}.")
 
 
 def rotate_log(log_path: Path, incoming_bytes: int) -> None:
@@ -288,8 +331,10 @@ def force_cleanup(processes: list[psutil.Process]) -> list[psutil.Process]:
             if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
                 process.kill()
                 living.append(process)
-        except psutil.Error:
+        except psutil.NoSuchProcess:
             continue
+        except psutil.Error:
+            living.append(process)
     return wait_for_process_exit(living, FORCE_CLEANUP_SECONDS)
 
 
@@ -302,8 +347,10 @@ def wait_for_process_exit(processes: list[psutil.Process], timeout: float) -> li
             try:
                 if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
                     remaining.append(process)
-            except psutil.Error:
+            except psutil.NoSuchProcess:
                 continue
+            except psutil.Error:
+                remaining.append(process)
         living = remaining
         if living:
             time.sleep(WATCH_INTERVAL_SECONDS)
@@ -350,42 +397,21 @@ def wait_for_startup_handshake(
 
 
 def run_dashboard(
-    parent_pid: int, parent_created: float, marker: Path, arguments: list[str]
+    parent_pid: int,
+    parent_created: float,
+    marker: Path,
+    started_marker: Path,
+    arguments: list[str],
 ) -> int:
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True)
     log_path = directory / LOG_FILE
-    child = subprocess.Popen(
-        [sys.executable, "-m", "sbk_dashboard", *arguments],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        close_fds=True,
-    )
-    child_process = psutil.Process(child.pid)
-    watch_creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    subprocess.Popen(
-        [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "_watch",
-            str(os.getpid()),
-            str(psutil.Process(os.getpid()).create_time()),
-            str(child_process.pid),
-            str(child_process.create_time()),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=os.name != "nt",
-        creationflags=watch_creation_flags,
-        close_fds=True,
-    )
     stopping = threading.Event()
+    child: subprocess.Popen[bytes] | None = None
 
     def stop_child(_signum: int, _frame: object) -> None:
         stopping.set()
-        if os.name != "nt" and child.poll() is None:
+        if os.name != "nt" and child is not None and child.poll() is None:
             child.terminate()
 
     handled_signals = [signal.SIGINT, signal.SIGTERM]
@@ -394,11 +420,47 @@ def run_dashboard(
         handled_signals.append(break_signal)
     for signum in handled_signals:
         signal.signal(signum, stop_child)
-    assert child.stdout is not None
+    if not wait_for_startup_handshake(parent_pid, parent_created, marker, stopping):
+        return 1
+
+    supervisor = psutil.Process(os.getpid())
+    supervisor_created = supervisor.create_time()
     exit_code = 1
     try:
-        if not wait_for_startup_handshake(parent_pid, parent_created, marker, stopping):
-            terminate_dashboard_group(os.getpid(), child_process)
+        child = subprocess.Popen(
+            [sys.executable, "-m", "sbk_dashboard", *arguments],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+        )
+        child_process = psutil.Process(child.pid)
+        startup_deadline = time.monotonic() + BACKGROUND_STARTUP_GRACE_SECONDS
+        while time.monotonic() < startup_deadline and child.poll() is None and not stopping.is_set():
+            time.sleep(0.05)
+        if child.poll() is None and not stopping.is_set():
+            watch_creation_flags = (
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+            )
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "_watch",
+                    str(supervisor.pid),
+                    str(supervisor_created),
+                    str(child_process.pid),
+                    str(child_process.create_time()),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=os.name != "nt",
+                creationflags=watch_creation_flags,
+                close_fds=True,
+            )
+            started_marker.touch(exist_ok=False)
+        assert child.stdout is not None
         while True:
             chunk = child.stdout.read(READ_CHUNK_BYTES)
             if chunk:
@@ -406,11 +468,17 @@ def run_dashboard(
             if not chunk and child.poll() is not None:
                 break
     finally:
-        child.stdout.close()
-        if child.poll() is None:
-            child.terminate()
-        with suppress(subprocess.TimeoutExpired):
-            exit_code = child.wait(timeout=DEFAULT_STOP_TIMEOUT_SECONDS)
+        if child is not None:
+            if child.stdout is not None:
+                child.stdout.close()
+            if child.poll() is None:
+                child.terminate()
+            with suppress(subprocess.TimeoutExpired):
+                exit_code = child.wait(timeout=DEFAULT_STOP_TIMEOUT_SECONDS)
+        for startup_marker in (marker, started_marker):
+            with suppress(FileNotFoundError):
+                startup_marker.unlink()
+        remove_owned_state(supervisor.pid, supervisor_created)
     return exit_code
 
 
@@ -438,7 +506,8 @@ def request_stop(process: psutil.Process, mode: str) -> None:
                         return
                 except psutil.Error:
                     continue
-            raise SystemExit(f"Unable to signal SBK Dashboard process group {process.pid}.") from None
+            process.terminate()
+            return
     process.terminate()
 
 
@@ -449,11 +518,16 @@ def stop() -> int:
         remove_stale_state()
         print("SBK Dashboard is not running (no matching launcher process).")
         return 0
-    descendants = process.children(recursive=True)
-    mode = str(state.get("mode", "background")) if state is not None else "background"
-    request_stop(process, mode)
+    assert state is not None
+    try:
+        descendants = process.children(recursive=True)
+    except psutil.Error:
+        descendants = []
+    mode = str(state.get("mode", "background"))
+    with suppress(psutil.Error):
+        request_stop(process, mode)
     forced = wait_then_force([process, *descendants], stop_timeout())
-    remove_stale_state()
+    remove_owned_state(process.pid, float(state["create_time"]))
     suffix = " after bounded forceful cleanup" if forced else ""
     print(f"Stopped SBK Dashboard PID {process.pid}{suffix}.")
     return 0
@@ -461,9 +535,15 @@ def stop() -> int:
 
 def main() -> int:
     if len(sys.argv) >= 2 and sys.argv[1] == "_run":
-        if len(sys.argv) < 5:
+        if len(sys.argv) < 6:
             raise SystemExit("Invalid internal launcher arguments.")
-        return run_dashboard(int(sys.argv[2]), float(sys.argv[3]), Path(sys.argv[4]), sys.argv[5:])
+        return run_dashboard(
+            int(sys.argv[2]),
+            float(sys.argv[3]),
+            Path(sys.argv[4]),
+            Path(sys.argv[5]),
+            sys.argv[6:],
+        )
     if len(sys.argv) >= 2 and sys.argv[1] == "_watch":
         if len(sys.argv) != 6:
             raise SystemExit("Invalid internal watcher arguments.")
@@ -471,7 +551,7 @@ def main() -> int:
     if len(sys.argv) < 2 or sys.argv[1] not in {"foreground", "background", "start", "stop"}:
         raise SystemExit(
             f"Usage: {Path(sys.argv[0]).name} "
-            "foreground|background [dashboard options...] | stop"
+            "foreground|background|start [dashboard options...] | stop"
         )
     if sys.argv[1] == "foreground":
         return foreground(sys.argv[2:])

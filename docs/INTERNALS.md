@@ -28,6 +28,14 @@ Container packaging does not introduce another composition root. Production Comp
 image; the development override builds that image locally. Both invoke the same `sbk-dashboard` entry point, and the
 Python `run()` composition below remains the sole owner of Prometheus and Grafana in either delivery mode.
 
+The optional source-archive launcher helper is outside the package composition root. Foreground mode calls
+`main.main()` in the console-attached helper process. Background mode first starts an empty supervisor, records its
+PID and creation time, and authorizes acquisition with a bounded marker handshake. Only then may the supervisor
+start `python -m sbk_dashboard` and its parent-death watcher. A reverse marker is emitted only after both processes
+exist and the application has survived the immediate-exit window; the initiating command reports success only after
+that confirmation. The shared stop path tolerates process exit between identity validation and signaling, waits or
+force-cleans the captured tree, and removes only the matching ownership record.
+
 ## Composition and startup
 
 `main.main()` performs the outer error mapping: argument parsing and configuration `ValueError`s exit with status 2,

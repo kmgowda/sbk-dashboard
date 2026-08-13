@@ -78,7 +78,7 @@ the packaged default is 2 GiB.
 
 ## Optional container deployment
 
-Release 1.26.8.1 adds an optional Linux AMD64/ARM64 container without changing endpoint IDs, persisted JSON,
+Release 1.26.8.1 added an optional Linux AMD64/ARM64 container without changing endpoint IDs, persisted JSON,
 dashboard UIDs, retention, or the native child-process design. To move an existing direct installation, stop it
 cleanly and copy its data root into a Docker volume or a UID/GID 10001-writable bind mount at
 `/var/lib/sbk-dashboard`. Publish host ports 9721 and 3000; do not publish internal Prometheus port 9090.
@@ -99,3 +99,7 @@ The production container base is now pinned to Python 3.12.13 on Debian Trixie b
 digest, and container CI is pinned to Ubuntu 24.04. This changes only the packaged Linux userspace and build runner;
 application behavior, persisted data, endpoint identity, and native deployment support are unchanged. Compose now
 enables IPv6 on its bridge so literal IPv6 targets can be scraped when the Docker host has working IPv6 routing.
+
+Release 1.26.8.2 switched the published-image workflow to Docker Hub, added source-archive foreground/background
+launchers for Linux, macOS, and Windows, and changed only the container endpoint-form default to
+`host.docker.internal`. Direct Python/Conda target defaults and persisted registrations remain unchanged.

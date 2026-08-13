@@ -42,8 +42,8 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal", self.dockerfile)
 
     def test_compose_publishes_dashboard_ports_and_persists_state(self):
-        self.assertIn('"9721:9721"', self.compose)
-        self.assertIn('"3000:3000"', self.compose)
+        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:9721:9721"', self.compose)
+        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:3000:3000"', self.compose)
         self.assertNotRegex(self.compose, r'["\s]9090:9090')
         self.assertIn("sbk-dashboard-data:/var/lib/sbk-dashboard", self.compose)
         self.assertIn("host.docker.internal:host-gateway", self.compose)
@@ -94,11 +94,20 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("id=sbk-dashboard-grafana-downloads", self.dockerfile)
         self.assertIn("COPY --from=prometheus-tools", self.dockerfile)
         self.assertIn("COPY --from=grafana-tools", self.dockerfile)
+        self.assertEqual(2, self.dockerfile.count("python /usr/local/bin/docker-safe-extract"))
 
     def test_build_context_excludes_generated_and_runtime_data(self):
         ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
         for required in (".git", ".venv", ".coverage*", "build", "dist", "downloads", "runtime"):
             self.assertIn(required, ignored)
+
+    def test_container_smoke_uses_ephemeral_host_ports_and_bounded_exporters(self):
+        smoke = (ROOT / "tests/container_smoke.py").read_text(encoding="utf-8")
+        self.assertIn('listener.bind(("127.0.0.1", 0))', smoke)
+        self.assertIn('arguments.add_argument("--dashboard-port", type=int)', smoke)
+        self.assertIn('arguments.add_argument("--grafana-port", type=int)', smoke)
+        self.assertIn("BaseHTTPRequestHandler, HTTPServer", smoke)
+        self.assertNotIn("ThreadingHTTPServer", smoke)
 
     def test_ci_runs_smoke_and_builds_both_linux_architectures(self):
         self.assertIn('- "compose.dev.yaml"', self.workflow)
@@ -128,6 +137,9 @@ class ContainerContractTest(unittest.TestCase):
             3,
             self.workflow.count("APPLICATION_VERSION=${{ steps.version.outputs.value }}"),
         )
+        self.assertNotRegex(self.workflow + self.ci_workflow, r"uses: [^\s]+@v\d+(?:\s|$)")
+        self.assertIn("windows-2022", self.ci_workflow)
+        self.assertNotIn("windows-latest", self.ci_workflow)
 
     def _argument(self, name):
         match = re.search(rf"^ARG {re.escape(name)}=([^\s]+)$", self.dockerfile, re.MULTILINE)

@@ -31,8 +31,11 @@ Open these host URLs:
 - Landing page: `http://localhost:9721/`
 - Grafana: `http://localhost:3000/`
 
-The container is headless and cannot open a browser process on the Docker host. Publishing ports 9721 and 3000
-makes the UI and every generated dashboard link available to the host browser immediately. Opening the landing page
+The container is headless and cannot open a browser process on the Docker host. By default, Compose publishes ports
+9721 and 3000 on every host interface. Because authentication is disabled, set
+`SBK_DASHBOARD_PUBLISH_HOST=127.0.0.1` before `docker compose up` for host-only access, or protect both ports with a
+firewall, trusted network, or authenticated reverse proxy. Publishing the ports makes the UI and every generated
+dashboard link available to the host browser immediately. Opening the landing page
 through a public IP or DNS name produces generated Grafana links with that same hostname and port 3000.
 
 Inspect or stop the deployment with:
@@ -165,11 +168,19 @@ docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.2 .
 python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
 ```
 
-Build both published architectures with Buildx without publishing them:
+The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Current
+Docker Desktop and Docker Engine installations normally provide it; legacy-builder-only installations must install
+Buildx before building.
+
+Build both published architectures into a local OCI archive without publishing them:
 
 ```bash
-docker buildx build --platform linux/amd64,linux/arm64 --tag sbk-dashboard:multiarch .
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --output type=oci,dest=sbk-dashboard-multiarch.oci .
 ```
+
+Docker cannot load a multi-platform image into the classic local image store. For a runnable local image, build one
+host platform with `--load`; for a release manifest, use the authenticated `--push` workflow in `DOCKER_HUB.md`.
 
 The live smoke test validates host port access, registration, a generated Grafana dashboard, persistent state over
 a full restart, graceful exit, and absence of surviving native child PIDs. The real-SBK mode is documented in

@@ -28,13 +28,13 @@ architecture, migration, and operations documentation.
 
 ## Read before editing
 
-Use this order to build context without scanning generated artifacts:
+Read `docs/AGENT_GUIDE.md` first, then use this order to build detailed context without scanning generated artifacts:
 
-1. `README.md` for user behavior, installation, CLI, and operations.
-2. `docs/ARCHITECTURE.md` for invariants, concurrency, persistence, and process ownership.
-3. `docs/INTERNALS.md` for module-level call paths, locks, generated files, and failure boundaries.
-4. `docs/TESTING.md` for automated and real-SBK validation.
-5. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
+1. `docs/AGENT_GUIDE.md` for the code map, change recipes, and completion checklist.
+2. `README.md` for user behavior, installation, CLI, and operations.
+3. `docs/ARCHITECTURE.md` for invariants, concurrency, persistence, and process ownership.
+4. `docs/INTERNALS.md` for module-level call paths, locks, generated files, and failure boundaries.
+5. `docs/TESTING.md` for automated and real-SBK validation.
 6. `docs/USAGE.md` when changing installation, environment, endpoint, upgrade, or operator behavior.
 7. `docs/DOCKER.md` when changing container packaging, networking, security, or delivery.
 8. The relevant source module and its matching test module.
@@ -152,8 +152,8 @@ python -m pip install -e ".[dev]"
 Run the fast required checks after every code change:
 
 ```bash
-ruff check src tests
-mypy src
+ruff check src tests scripts
+mypy src scripts/sbk_dashboard_launcher.py
 PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -q
 git diff --check
 ```
