@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import io
 import json
@@ -332,7 +333,10 @@ class WebTest(unittest.TestCase):
         )
         with socket.create_connection(("127.0.0.1", self.server._server.server_port), timeout=2) as connection:
             connection.sendall(request)
-            connection.shutdown(socket.SHUT_WR)
+            # The server may reject the invalid Content-Length and close first.
+            # macOS reports ENOTCONN from shutdown in that valid peer-close race.
+            with contextlib.suppress(OSError):
+                connection.shutdown(socket.SHUT_WR)
             response = connection.recv(4096)
         self.assertIn(b"400 Bad Request", response)
         self.assertEqual([], self.registry.list())

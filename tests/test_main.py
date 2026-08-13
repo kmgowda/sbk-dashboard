@@ -168,6 +168,13 @@ class MainTest(unittest.TestCase):
                 f"Prometheus port {port}.*user supplied via command line.*no process was stopped",
             ):
                 select_native_ports(monitoring)
+            # The availability probe establishes a real connection before reporting
+            # the listener as busy. Drain that connection before probing again: a
+            # listen(1) backlog remains occupied by the closed probe on macOS and
+            # Windows until the server accepts it.
+            accepted, _address = listener.accept()
+            with accepted:
+                pass
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
                 probe.settimeout(1)
                 self.assertEqual(0, probe.connect_ex(("127.0.0.1", port)))
