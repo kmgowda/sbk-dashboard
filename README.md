@@ -214,23 +214,34 @@ custom `-data` directory, or a Docker volume. See the [usage guide](docs/USAGE.m
 sbk-dashboard
 ```
 
-Detached launchers are also provided. They reuse an active venv or Conda environment, otherwise prefer the project
-`.venv`, and pass every additional dashboard option through unchanged and in the same order:
+Cross-platform launchers reuse an active venv or Conda environment, otherwise prefer the project `.venv`, and pass
+every additional dashboard option through unchanged and in the same order. The default start script stays in the
+foreground and prints application logs to the console:
 
 ```bash
 ./scripts/start-sbk-dashboard.sh
-./scripts/stop-sbk-dashboard.sh
 ```
 
 ```powershell
 .\scripts\Start-SbkDashboard.ps1
+```
+
+For a detached process with bounded rotating file logs, use the background start script:
+
+```bash
+./scripts/start-sbk-dashboard-background.sh
+./scripts/stop-sbk-dashboard.sh
+```
+
+```powershell
+.\scripts\Start-SbkDashboardBackground.ps1
 .\scripts\Stop-SbkDashboard.ps1
 ```
 
 See [the usage guide](docs/USAGE.md#start-and-stop-scripts) for environment selection, logs, PID-reuse protection,
 custom arguments, and shutdown timeouts.
 
-Run it in the foreground for interactive use and stop it cleanly with `Ctrl+C`. The shutdown path stops HTTP
+Stop the foreground script cleanly with `Ctrl+C`, or use the stop script for either launch mode. The shutdown path stops HTTP
 admission first, then Grafana and Prometheus in reverse dependency order. For unattended operation, use the host
 service manager rather than a detached shell command. See [usage and operations](docs/USAGE.md).
 

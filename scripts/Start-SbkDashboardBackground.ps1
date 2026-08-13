@@ -51,5 +51,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Selected $EnvironmentDescription"
-& $Python (Join-Path $ScriptDirectory 'sbk_dashboard_launcher.py') foreground @DashboardArguments
+& $Python (Join-Path $ScriptDirectory 'sbk_dashboard_launcher.py') background @DashboardArguments
 exit $LASTEXITCODE

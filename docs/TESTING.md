@@ -220,19 +220,20 @@ conda run -p /tmp/sbk-dashboard-conda sbk-dashboard -h
 
 On Windows, substitute `Scripts\\python.exe` and `Scripts\\sbk-dashboard.exe` for the venv paths.
 
-The automated launcher tests use a disposable fake application to verify detached start/stop, active-environment
-precedence, duplicate-start behavior, PID creation-time validation, and bounded log rotation. For a native launcher
+The automated launcher tests use a disposable fake application to verify foreground console logging, background
+file logging, shared stop behavior, active-environment precedence, duplicate-start behavior, PID creation-time
+validation, and bounded log rotation. For a native launcher
 smoke test, activate the venv or Conda environment, use unique non-default ports and a temporary data directory, and
 run the matching pair:
 
 ```bash
-./scripts/start-sbk-dashboard.sh -port 19721 -prometheus-port 19090 -grafana-port 13000 \
+./scripts/start-sbk-dashboard-background.sh -port 19721 -prometheus-port 19090 -grafana-port 13000 \
   -data /tmp/sbk-dashboard-launcher-test
 ./scripts/stop-sbk-dashboard.sh
 ```
 
 ```powershell
-.\scripts\Start-SbkDashboard.ps1 -port 19721 -prometheus-port 19090 -grafana-port 13000 `
+.\scripts\Start-SbkDashboardBackground.ps1 -port 19721 -prometheus-port 19090 -grafana-port 13000 `
   -data $env:TEMP\sbk-dashboard-launcher-test
 .\scripts\Stop-SbkDashboard.ps1
 ```
@@ -240,6 +241,9 @@ run the matching pair:
 Confirm the recorded launcher PID and all owned native descendants exit before removing only that disposable data
 directory. Run the PowerShell pair on native Windows; a Linux-only run does not validate Windows process-group and
 `Ctrl+Break` behavior.
+
+Repeat with the default foreground start script and confirm logs remain on its console and `Ctrl+C` cleans up all
+owned children. The same stop script must also stop that foreground instance when invoked from a second terminal.
 
 ## Native Windows extraction smoke test
 

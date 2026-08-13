@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start and stop one detached SBK Dashboard process safely."""
+"""Start and stop one foreground or background SBK Dashboard process safely."""
 
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def remove_stale_state() -> None:
         state_path().unlink()
 
 
-def write_state(process: psutil.Process) -> None:
+def write_state(process: psutil.Process, mode: str) -> None:
     directory = state_directory()
     directory.mkdir(parents=True, exist_ok=True)
     target = state_path()
@@ -97,6 +97,7 @@ def write_state(process: psutil.Process) -> None:
         "pid": process.pid,
         "create_time": process.create_time(),
         "python": sys.executable,
+        "mode": mode,
         "log": str(directory / LOG_FILE),
     }
     try:
@@ -137,7 +138,29 @@ def report_environment() -> None:
     print(f"sbk-dashboard available: version {version}")
 
 
-def start(arguments: list[str]) -> int:
+def foreground(arguments: list[str]) -> int:
+    current = matching_process(load_state())
+    if current is not None:
+        print(f"SBK Dashboard is already running with PID {current.pid}.")
+        return 0
+    remove_stale_state()
+    report_environment()
+    process = psutil.Process(os.getpid())
+    write_state(process, "foreground")
+    print(f"Starting SBK Dashboard in the foreground with PID {process.pid}.")
+    print("Press Ctrl+C to stop SBK Dashboard.")
+    try:
+        application = importlib.import_module("sbk_dashboard.main")
+        application.main(arguments)
+    finally:
+        state = load_state()
+        owner = matching_process(state)
+        if owner is not None and owner.pid == process.pid:
+            remove_stale_state()
+    return 0
+
+
+def start_background(arguments: list[str]) -> int:
     current = matching_process(load_state())
     if current is not None:
         print(f"SBK Dashboard is already running with PID {current.pid}.")
@@ -193,7 +216,7 @@ def start(arguments: list[str]) -> int:
             raise SystemExit(
                 f"SBK Dashboard exited during startup. See {directory / LOG_FILE}."
             ) from None
-        write_state(process)
+        write_state(process, "background")
         marker.touch(exist_ok=False)
     except BaseException:
         running_child = None
@@ -267,13 +290,28 @@ def force_cleanup(processes: list[psutil.Process]) -> list[psutil.Process]:
                 living.append(process)
         except psutil.Error:
             continue
-    if living:
-        _, living = psutil.wait_procs(living, timeout=FORCE_CLEANUP_SECONDS)
+    return wait_for_process_exit(living, FORCE_CLEANUP_SECONDS)
+
+
+def wait_for_process_exit(processes: list[psutil.Process], timeout: float) -> list[psutil.Process]:
+    deadline = time.monotonic() + timeout
+    living = list(processes)
+    while living and time.monotonic() < deadline:
+        remaining = []
+        for process in living:
+            try:
+                if process.is_running() and process.status() != psutil.STATUS_ZOMBIE:
+                    remaining.append(process)
+            except psutil.Error:
+                continue
+        living = remaining
+        if living:
+            time.sleep(WATCH_INTERVAL_SECONDS)
     return living
 
 
 def wait_then_force(processes: list[psutil.Process], timeout: float) -> bool:
-    _, living = psutil.wait_procs(processes, timeout=timeout)
+    living = wait_for_process_exit(processes, timeout)
     if not living:
         return False
     remaining = force_cleanup(living)
@@ -387,8 +425,8 @@ def stop_timeout() -> float:
     return timeout
 
 
-def request_stop(process: psutil.Process) -> None:
-    if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
+def request_stop(process: psutil.Process, mode: str) -> None:
+    if os.name == "nt" and mode == "background" and hasattr(signal, "CTRL_BREAK_EVENT"):
         try:
             os.kill(process.pid, signal.CTRL_BREAK_EVENT)
             return
@@ -405,13 +443,15 @@ def request_stop(process: psutil.Process) -> None:
 
 
 def stop() -> int:
-    process = matching_process(load_state())
+    state = load_state()
+    process = matching_process(state)
     if process is None:
         remove_stale_state()
         print("SBK Dashboard is not running (no matching launcher process).")
         return 0
     descendants = process.children(recursive=True)
-    request_stop(process)
+    mode = str(state.get("mode", "background")) if state is not None else "background"
+    request_stop(process, mode)
     forced = wait_then_force([process, *descendants], stop_timeout())
     remove_stale_state()
     suffix = " after bounded forceful cleanup" if forced else ""
@@ -428,9 +468,16 @@ def main() -> int:
         if len(sys.argv) != 6:
             raise SystemExit("Invalid internal watcher arguments.")
         return watch_launcher(int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5]))
-    if len(sys.argv) < 2 or sys.argv[1] not in {"start", "stop"}:
-        raise SystemExit(f"Usage: {Path(sys.argv[0]).name} start [dashboard options...] | stop")
-    return start(sys.argv[2:]) if sys.argv[1] == "start" else stop()
+    if len(sys.argv) < 2 or sys.argv[1] not in {"foreground", "background", "start", "stop"}:
+        raise SystemExit(
+            f"Usage: {Path(sys.argv[0]).name} "
+            "foreground|background [dashboard options...] | stop"
+        )
+    if sys.argv[1] == "foreground":
+        return foreground(sys.argv[2:])
+    if sys.argv[1] in {"background", "start"}:
+        return start_background(sys.argv[2:])
+    return stop()
 
 
 if __name__ == "__main__":

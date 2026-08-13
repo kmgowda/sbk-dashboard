@@ -1,5 +1,7 @@
 include scripts/Start-SbkDashboard.ps1
+include scripts/Start-SbkDashboardBackground.ps1
 include scripts/Stop-SbkDashboard.ps1
 include scripts/sbk_dashboard_launcher.py
 include scripts/start-sbk-dashboard.sh
+include scripts/start-sbk-dashboard-background.sh
 include scripts/stop-sbk-dashboard.sh

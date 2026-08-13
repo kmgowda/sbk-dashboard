@@ -43,4 +43,4 @@ if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10)
 fi
 
 echo "Selected $ENVIRONMENT"
-exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" foreground "$@"
+exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" background "$@"

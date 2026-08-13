@@ -129,7 +129,7 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 
 ## Start and stop scripts
 
-The repository includes detached start/stop scripts for direct host installations. They select Python in this
+The repository includes foreground, background, and stop scripts for direct host installations. They select Python in this
 order: an active virtual environment, an active Conda environment, the repository's `.venv`, and finally Python on
 `PATH`. The selected environment must already contain `sbk-dashboard`; the scripts never install or alter an
 environment automatically.
@@ -142,14 +142,26 @@ installation guidance and exits without acquiring any launcher or native-process
 On Linux or macOS:
 
 ```bash
+# Foreground: logs remain on this console; Ctrl+C stops the application.
 ./scripts/start-sbk-dashboard.sh
+
+# Background: logs are written to the launcher log file.
+./scripts/start-sbk-dashboard-background.sh
+
+# Stops the instance started by either command above.
 ./scripts/stop-sbk-dashboard.sh
 ```
 
 On Windows PowerShell:
 
 ```powershell
+# Foreground: logs remain on this console; Ctrl+C stops the application.
 .\scripts\Start-SbkDashboard.ps1
+
+# Background: logs are written to the launcher log file.
+.\scripts\Start-SbkDashboardBackground.ps1
+
+# Stops the instance started by either command above.
 .\scripts\Stop-SbkDashboard.ps1
 ```
 
@@ -164,15 +176,20 @@ application. Quote values containing spaces according to the current shell. For 
 .\scripts\Start-SbkDashboard.ps1 -data C:\sbk-dashboard-data -retention 14
 ```
 
-Launcher state records both the PID and process creation time, so a reused PID cannot identify an unrelated process.
-Bounded rotating logs and launcher state default to `~/.sbk-dashboard/launcher` on Linux/macOS and
+Only one script-started instance can run at a time. Launcher state records its mode, PID, and process creation time,
+so the shared stop script handles either foreground or background mode and a reused PID cannot identify an unrelated
+process. It does not search by process name or terminate an unrelated manually started dashboard.
+
+Launcher state defaults to `~/.sbk-dashboard/launcher` on Linux/macOS and
 `%LOCALAPPDATA%\SBK Dashboard\launcher` on Windows. Set `SBK_DASHBOARD_LAUNCHER_DIR` to override that location.
-The launcher drains output continuously and rotates at 10 MiB with three backups.
+Foreground logs are printed directly on the current console. The background launcher drains output continuously to
+`sbk-dashboard.log` in that directory and rotates it at 10 MiB with three backups.
 The stop scripts request normal control-plane shutdown and wait up to 45 seconds; set
 `SBK_DASHBOARD_STOP_TIMEOUT` to a value from 1 through 300 seconds when a different bound is required. If graceful
 shutdown exceeds that bound, the launcher forcefully cleans up only its recorded process tree. An independent
-parent-death watcher provides the same bounded cleanup if the launcher is killed, including forced termination;
-interrupting the start script before its startup handshake completes also tears down everything it acquired.
+parent-death watcher provides the same bounded cleanup if the background supervisor is killed, including forced
+termination. In foreground mode the application's native-process guardians handle abrupt parent death. Interrupting
+background startup before its startup handshake completes also tears down everything it acquired.
 
 ## Add an endpoint
 

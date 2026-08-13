@@ -9,7 +9,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import psutil
 
@@ -35,27 +35,31 @@ class LauncherScriptTest(unittest.TestCase):
         package = root / "sbk_dashboard"
         package.mkdir()
         (package / "__init__.py").write_text("", encoding="utf-8")
-        (package / "__main__.py").write_text(
+        application = (
             "import json\n"
             "import os\n"
             "import signal\n"
             "import sys\n"
             "import time\n"
-            "arguments_output = os.environ.get('FAKE_ARGUMENTS_OUTPUT')\n"
-            "if arguments_output:\n"
-            "    with open(arguments_output, 'w', encoding='utf-8') as output:\n"
-            "        json.dump(sys.argv[1:], output)\n"
-            "running = True\n"
-            "def stop(*_args):\n"
-            "    global running\n"
-            "    running = False\n"
-            "for name in ('SIGINT', 'SIGTERM', 'SIGBREAK'):\n"
-            "    if hasattr(signal, name):\n"
-            "        signal.signal(getattr(signal, name), stop)\n"
-            "while running:\n"
-            "    time.sleep(0.05)\n",
-            encoding="utf-8",
+            "def main(arguments=None):\n"
+            "    supplied = sys.argv[1:] if arguments is None else arguments\n"
+            "    arguments_output = os.environ.get('FAKE_ARGUMENTS_OUTPUT')\n"
+            "    if arguments_output:\n"
+            "        with open(arguments_output, 'w', encoding='utf-8') as output:\n"
+            "            json.dump(supplied, output)\n"
+            "    print('fake dashboard console log', flush=True)\n"
+            "    running = True\n"
+            "    def stop(*_args):\n"
+            "        nonlocal running\n"
+            "        running = False\n"
+            "    for name in ('SIGINT', 'SIGTERM', 'SIGBREAK'):\n"
+            "        if hasattr(signal, name):\n"
+            "            signal.signal(getattr(signal, name), stop)\n"
+            "    while running:\n"
+            "        time.sleep(0.05)\n"
         )
+        (package / "main.py").write_text(application, encoding="utf-8")
+        (package / "__main__.py").write_text("from .main import main\nmain()\n", encoding="utf-8")
 
     def assert_processes_exit(self, processes, timeout=12.0):
         deadline = time.monotonic() + timeout
@@ -104,17 +108,38 @@ class LauncherScriptTest(unittest.TestCase):
                 sbk_dashboard_launcher.LOG_MAX_BYTES = original_max
                 sbk_dashboard_launcher.LOG_BACKUPS = original_backups
 
+    def test_wait_for_process_exit_treats_zombie_as_stopped(self):
+        process = Mock()
+        process.is_running.return_value = True
+        process.status.return_value = psutil.STATUS_ZOMBIE
+        self.assertEqual([], sbk_dashboard_launcher.wait_for_process_exit([process], 1))
+
     def test_wrappers_prefer_active_environments(self):
         start_shell = (ROOT / "scripts" / "start-sbk-dashboard.sh").read_text(encoding="utf-8")
+        background_shell = (ROOT / "scripts" / "start-sbk-dashboard-background.sh").read_text(
+            encoding="utf-8"
+        )
         stop_shell = (ROOT / "scripts" / "stop-sbk-dashboard.sh").read_text(encoding="utf-8")
         start_powershell = (ROOT / "scripts" / "Start-SbkDashboard.ps1").read_text(encoding="utf-8")
+        background_powershell = (ROOT / "scripts" / "Start-SbkDashboardBackground.ps1").read_text(
+            encoding="utf-8"
+        )
         stop_powershell = (ROOT / "scripts" / "Stop-SbkDashboard.ps1").read_text(encoding="utf-8")
-        for content in (start_shell, stop_shell, start_powershell, stop_powershell):
+        for content in (
+            start_shell,
+            background_shell,
+            stop_shell,
+            start_powershell,
+            background_powershell,
+            stop_powershell,
+        ):
             self.assertLess(content.index("VIRTUAL_ENV"), content.index("CONDA_PREFIX"))
             self.assertIn(".venv", content)
             self.assertIn("sbk_dashboard_launcher.py", content)
-        self.assertIn('start "$@"', start_shell)
-        self.assertIn("start @DashboardArguments", start_powershell)
+        self.assertIn('foreground "$@"', start_shell)
+        self.assertIn('background "$@"', background_shell)
+        self.assertIn("foreground @DashboardArguments", start_powershell)
+        self.assertIn("background @DashboardArguments", background_powershell)
         self.assertIn("sys.version_info >= (3, 10)", start_shell)
         self.assertIn("sys.version_info >= (3, 10)", start_powershell)
 
@@ -122,9 +147,11 @@ class LauncherScriptTest(unittest.TestCase):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         for name in (
             "Start-SbkDashboard.ps1",
+            "Start-SbkDashboardBackground.ps1",
             "Stop-SbkDashboard.ps1",
             "sbk_dashboard_launcher.py",
             "start-sbk-dashboard.sh",
+            "start-sbk-dashboard-background.sh",
             "stop-sbk-dashboard.sh",
         ):
             self.assertIn(f"include scripts/{name}", manifest)
@@ -148,7 +175,7 @@ class LauncherScriptTest(unittest.TestCase):
                 str(root / "data with spaces"),
             ]
             start = subprocess.run(
-                [sys.executable, str(LAUNCHER), "start", *dashboard_arguments],
+                [sys.executable, str(LAUNCHER), "background", *dashboard_arguments],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -162,11 +189,12 @@ class LauncherScriptTest(unittest.TestCase):
                 self.assertGreaterEqual(len(descendants), 2)
                 self.assertEqual(dashboard_arguments, json.loads(arguments_output.read_text(encoding="utf-8")))
                 self.assertAlmostEqual(state["create_time"], process.create_time(), places=2)
+                self.assertEqual("background", state["mode"])
                 self.assertIn("Python available:", start.stdout)
                 self.assertIn("sbk-dashboard available: version", start.stdout)
                 self.assertIn("Started SBK Dashboard", start.stdout)
                 duplicate = subprocess.run(
-                    [sys.executable, str(LAUNCHER), "start"],
+                    [sys.executable, str(LAUNCHER), "background"],
                     check=True,
                     capture_output=True,
                     text=True,
@@ -183,6 +211,10 @@ class LauncherScriptTest(unittest.TestCase):
                 self.assertIn("Stopped SBK Dashboard", stopped.stdout)
                 self.assertFalse(state_path.exists())
                 self.assert_processes_exit([process, *descendants])
+                self.assertIn(
+                    "fake dashboard console log",
+                    (state_directory / "sbk-dashboard.log").read_text(encoding="utf-8"),
+                )
             finally:
                 if process.is_running():
                     for child in descendants:
@@ -198,7 +230,7 @@ class LauncherScriptTest(unittest.TestCase):
             environment["PYTHONPATH"] = str(root)
             environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
             subprocess.run(
-                [sys.executable, str(LAUNCHER), "start"],
+                [sys.executable, str(LAUNCHER), "background"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -229,7 +261,7 @@ class LauncherScriptTest(unittest.TestCase):
             environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
             started = subprocess.Popen(
-                [sys.executable, str(LAUNCHER), "start"],
+                [sys.executable, str(LAUNCHER), "background"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -275,7 +307,7 @@ class LauncherScriptTest(unittest.TestCase):
             environment = os.environ.copy()
             environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
             started = subprocess.run(
-                [sys.executable, str(LAUNCHER), "start"],
+                [sys.executable, str(LAUNCHER), "background"],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -284,6 +316,90 @@ class LauncherScriptTest(unittest.TestCase):
             self.assertNotEqual(0, started.returncode)
             self.assertIn("Unable to read launcher state", started.stderr)
             self.assertTrue(state_path.exists())
+
+    def test_foreground_streams_logs_and_stop_uses_the_same_owned_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            arguments_output = root / "arguments.json"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            environment["FAKE_ARGUMENTS_OUTPUT"] = str(arguments_output)
+            dashboard_arguments = ["-name", "foreground dashboard"]
+            started = subprocess.Popen(
+                [sys.executable, str(LAUNCHER), "foreground", *dashboard_arguments],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=environment,
+            )
+            process = psutil.Process(started.pid)
+            state_path = state_directory / "sbk-dashboard.json"
+            deadline = time.monotonic() + 5
+            while not arguments_output.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            try:
+                self.assertTrue(arguments_output.exists())
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                self.assertEqual("foreground", state["mode"])
+                self.assertEqual(dashboard_arguments, json.loads(arguments_output.read_text(encoding="utf-8")))
+                stopped = subprocess.run(
+                    [sys.executable, str(LAUNCHER), "stop"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                output, _ = started.communicate(timeout=12)
+                self.assertEqual(0, started.returncode)
+                self.assertIn("fake dashboard console log", output)
+                self.assertIn("Stopped SBK Dashboard", stopped.stdout)
+                self.assertFalse(state_path.exists())
+                self.assert_processes_exit([process])
+            finally:
+                if process.is_running():
+                    process.kill()
+
+    def test_ctrl_c_stops_foreground_and_removes_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.write_fake_dashboard(root)
+            state_directory = root / "state"
+            arguments_output = root / "arguments.json"
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root)
+            environment["SBK_DASHBOARD_LAUNCHER_DIR"] = str(state_directory)
+            environment["FAKE_ARGUMENTS_OUTPUT"] = str(arguments_output)
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            started = subprocess.Popen(
+                [sys.executable, str(LAUNCHER), "foreground"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env=environment,
+                start_new_session=os.name != "nt",
+                creationflags=creation_flags,
+            )
+            process = psutil.Process(started.pid)
+            deadline = time.monotonic() + 5
+            while not arguments_output.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            try:
+                self.assertTrue(arguments_output.exists())
+                if os.name == "nt":
+                    os.kill(started.pid, signal.CTRL_BREAK_EVENT)
+                else:
+                    started.send_signal(signal.SIGINT)
+                output, _ = started.communicate(timeout=12)
+                self.assertEqual(0, started.returncode)
+                self.assertIn("fake dashboard console log", output)
+                self.assertFalse((state_directory / "sbk-dashboard.json").exists())
+                self.assert_processes_exit([process])
+            finally:
+                if process.is_running():
+                    process.kill()
 
 
 if __name__ == "__main__":
