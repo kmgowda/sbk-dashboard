@@ -8,6 +8,7 @@ const downCount = document.querySelector('#down-count');
 const compareButton = document.querySelector('#compare-selected');
 const selectedTargetIds = new Set();
 const CLIENT_ID_KEY = 'sbk-dashboard-client-id';
+const MAX_COMPARISON_TARGETS = __MAX_COMPARISON_TARGETS__;
 
 function createClientId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
@@ -58,9 +59,9 @@ function renderTarget(target) {
     checkbox.checked = selectedTargetIds.has(target.id);
     checkbox.setAttribute('aria-label', `Compare ${target.name}`);
     checkbox.addEventListener('change', () => {
-        if (checkbox.checked && selectedTargetIds.size >= 8) {
+        if (checkbox.checked && selectedTargetIds.size >= MAX_COMPARISON_TARGETS) {
             checkbox.checked = false;
-            message.textContent = 'No more than 8 endpoints can be compared at once.';
+            message.textContent = `No more than ${MAX_COMPARISON_TARGETS} endpoints can be compared at once.`;
             return;
         }
         if (checkbox.checked) selectedTargetIds.add(target.id);
@@ -97,7 +98,7 @@ function renderTarget(target) {
 function updateComparisonButton() {
     const count = selectedTargetIds.size;
     compareButton.textContent = `Compare selected (${count}) ↗`;
-    compareButton.disabled = count < 2 || count > 8;
+    compareButton.disabled = count < 2 || count > MAX_COMPARISON_TARGETS;
 }
 
 function updateEndpointSummary(targets) {
@@ -118,7 +119,7 @@ async function loadTargets() {
         if (!response.ok) throw new Error('Unable to load endpoints');
         const targets = await response.json();
         const currentIds = new Set(targets.map(target => target.id));
-        for (const targetId of selectedTargetIds) {
+        for (const targetId of [...selectedTargetIds]) {
             if (!currentIds.has(targetId)) selectedTargetIds.delete(targetId);
         }
         targetList.replaceChildren(...targets.map(renderTarget));
@@ -173,7 +174,7 @@ form.addEventListener('submit', async event => {
 });
 
 compareButton.addEventListener('click', async () => {
-    if (selectedTargetIds.size < 2 || selectedTargetIds.size > 8) return;
+    if (selectedTargetIds.size < 2 || selectedTargetIds.size > MAX_COMPARISON_TARGETS) return;
     compareButton.disabled = true;
     message.textContent = '';
     const comparisonWindow = window.open('', '_blank');

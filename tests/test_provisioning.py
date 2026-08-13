@@ -88,6 +88,33 @@ class ProvisioningTest(unittest.TestCase):
             self.provisioner.comparison_dashboard_url(["first", "second"]),
         )
 
+    def test_promql_scoping_ignores_strings_and_does_not_duplicate_existing_label(self):
+        expression = (
+            'label_replace(SBK_Throughput{job="SBK_runner",note="x,sbk_endpoint_id=y"}, '
+            '"note", "SBK_fake", "job", "(.*)") '
+            '+ SBK_Latency{sbk_endpoint_id="existing",kind="read"}'
+        )
+        scoped = self.provisioner._scope_promql(expression, "selected")
+        self.assertIn(
+            'SBK_Throughput{job="SBK_runner",note="x,sbk_endpoint_id=y",'
+            'sbk_endpoint_id="selected"}',
+            scoped,
+        )
+        self.assertIn('"SBK_fake"', scoped)
+        self.assertEqual(1, scoped.count('sbk_endpoint_id="selected"'))
+        self.assertEqual(1, scoped.count('sbk_endpoint_id="existing"'))
+        self.assertIn('SBK_Latency{sbk_endpoint_id="existing",kind="read"}', scoped)
+
+    def test_comparison_legend_adds_every_identity_label_to_partial_legend(self):
+        node = {
+            "expr": "SBK_Throughput",
+            "legendFormat": "{{sbk_dashboard_name}} throughput",
+        }
+        self.provisioner._scope_comparison(node)
+        self.assertIn("{{sbk_dashboard_name}}", node["legendFormat"])
+        self.assertIn("{{sbk_kind}}", node["legendFormat"])
+        self.assertIn("{{sbk_endpoint_id}}", node["legendFormat"])
+
     def test_prometheus_discovery_has_endpoint_labels_and_metrics_path(self):
         path = self.directory / "prometheus/targets.json"
         PrometheusTargetDiscovery(path).write([target("first")])

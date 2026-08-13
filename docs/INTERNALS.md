@@ -46,6 +46,12 @@ effective configuration records and prints automatic selections, and a default G
 automatically selected Grafana port. `-continue true` bypasses fallback selection so compatible services can be
 health-checked and attached on the requested ports.
 
+Launcher start reservation uses exclusive state-file creation before any background supervisor is spawned. A
+same-port concurrent start therefore observes the live starting process rather than acquiring a second dashboard.
+Stop-all treats each port record independently: an unreadable record is reported and skipped without preventing
+cleanup of valid instances. Windows stop fallback matches the exact `python -m sbk_dashboard` child rather than its
+launcher watcher, and a closed background output pipe exits the log loop immediately.
+
 ## Composition and startup
 
 `main.main()` performs the outer error mapping: argument parsing and configuration `ValueError`s exit with status 2,

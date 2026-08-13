@@ -259,8 +259,8 @@ owned children. The same stop script must also stop that foreground instance whe
 
 ## Native Windows extraction smoke test
 
-The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows ZIP
-or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
+The Linux suite simulates Windows archive names and drive-letter traversal, but it does not prove native Windows
+archive or filesystem semantics. On a Windows runner or VM, create a disposable venv and data directory, then run:
 
 ```powershell
 py -3 -m venv $env:TEMP\sbk-dashboard-win-venv

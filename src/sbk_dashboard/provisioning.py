@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 import threading
 from importlib.resources import files
 from pathlib import Path
@@ -15,7 +14,8 @@ from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
 COMPARISON_DASHBOARD_UID = "sbk-comparison"
-SBK_SELECTOR = re.compile(r"(SBK_[A-Za-z0-9_]+)(?:\{([^}]*)\})?")
+SBK_METRIC_PREFIX = "SBK_"
+SBK_ENDPOINT_LABEL = "sbk_endpoint_id"
 
 
 class PrometheusTargetDiscovery:
@@ -142,13 +142,26 @@ class GrafanaDashboardProvisioner:
     def _scope_comparison(self, node: object) -> None:
         if isinstance(node, dict):
             expression = node.get("expr")
-            if isinstance(expression, str) and SBK_SELECTOR.search(expression):
-                node["expr"] = self._scope_promql(expression, "${sbk_endpoints:regex}", regex=True)
+            if isinstance(expression, str):
+                scoped, contains_sbk_metric = self._scope_promql_parts(
+                    expression, "${sbk_endpoints:regex}", regex=True
+                )
+            else:
+                scoped, contains_sbk_metric = "", False
+            if contains_sbk_metric:
+                node["expr"] = scoped
                 legend = node.get("legendFormat")
                 identity = "{{sbk_dashboard_name}} [{{sbk_kind}} · {{sbk_endpoint_id}}]"
                 if not isinstance(legend, str) or legend in {"", "__auto"}:
                     node["legendFormat"] = identity
-                elif "{{sbk_dashboard_name}}" not in legend:
+                elif not all(
+                    label in legend
+                    for label in (
+                        "{{sbk_dashboard_name}}",
+                        "{{sbk_kind}}",
+                        "{{sbk_endpoint_id}}",
+                    )
+                ):
                     node["legendFormat"] = f"{identity} — {legend}"
             for key, value in node.items():
                 if key not in {"expr", "legendFormat"}:
@@ -159,17 +172,108 @@ class GrafanaDashboardProvisioner:
 
     @staticmethod
     def _scope_promql(expression: str, target_id: str, *, regex: bool = False) -> str:
-        def replacement(match: re.Match[str]) -> str:
-            labels = match.group(2)
-            operator = "=~" if regex else "="
-            suffix = (
-                f',sbk_endpoint_id{operator}"{target_id}"'
-                if labels and labels.strip()
-                else f'sbk_endpoint_id{operator}"{target_id}"'
-            )
-            return f"{match.group(1)}{{{labels or ''}{suffix}}}"
+        return GrafanaDashboardProvisioner._scope_promql_parts(expression, target_id, regex)[0]
 
-        return SBK_SELECTOR.sub(replacement, expression)
+    @staticmethod
+    def _scope_promql_parts(
+        expression: str, target_id: str, regex: bool = False
+    ) -> tuple[str, bool]:
+        """Scope SBK metric selectors while ignoring quoted strings and existing endpoint labels."""
+        output: list[str] = []
+        index = 0
+        contains_sbk_metric = False
+        while index < len(expression):
+            character = expression[index]
+            if character in {'"', "'", "`"}:
+                end = GrafanaDashboardProvisioner._quoted_end(expression, index, character)
+                output.append(expression[index:end])
+                index = end
+                continue
+            if expression.startswith(SBK_METRIC_PREFIX, index) and (
+                index == 0 or not (expression[index - 1].isalnum() or expression[index - 1] == "_")
+            ):
+                metric_end = index + len(SBK_METRIC_PREFIX)
+                while metric_end < len(expression) and (
+                    expression[metric_end].isalnum() or expression[metric_end] == "_"
+                ):
+                    metric_end += 1
+                if metric_end > index + len(SBK_METRIC_PREFIX):
+                    contains_sbk_metric = True
+                    metric = expression[index:metric_end]
+                    labels = ""
+                    selector_end = metric_end
+                    if metric_end < len(expression) and expression[metric_end] == "{":
+                        selected_end = GrafanaDashboardProvisioner._selector_end(expression, metric_end)
+                        if selected_end is None:
+                            output.append(metric)
+                            index = metric_end
+                            continue
+                        selector_end = selected_end
+                        labels = expression[metric_end + 1 : selector_end - 1]
+                    if GrafanaDashboardProvisioner._has_endpoint_label(labels):
+                        output.append(expression[index:selector_end])
+                    else:
+                        operator = "=~" if regex else "="
+                        separator = "," if labels.strip() else ""
+                        output.append(
+                            f'{metric}{{{labels}{separator}{SBK_ENDPOINT_LABEL}{operator}"{target_id}"}}'
+                        )
+                    index = selector_end
+                    continue
+            output.append(character)
+            index += 1
+        return "".join(output), contains_sbk_metric
+
+    @staticmethod
+    def _quoted_end(expression: str, start: int, quote: str) -> int:
+        index = start + 1
+        while index < len(expression):
+            if quote != "`" and expression[index] == "\\":
+                index += 2
+                continue
+            index += 1
+            if expression[index - 1] == quote:
+                break
+        return index
+
+    @staticmethod
+    def _selector_end(expression: str, start: int) -> int | None:
+        index = start + 1
+        while index < len(expression):
+            if expression[index] in {'"', "'", "`"}:
+                index = GrafanaDashboardProvisioner._quoted_end(
+                    expression, index, expression[index]
+                )
+                continue
+            if expression[index] == "}":
+                return index + 1
+            index += 1
+        return None
+
+    @staticmethod
+    def _has_endpoint_label(labels: str) -> bool:
+        index = 0
+        while index < len(labels):
+            while index < len(labels) and (labels[index].isspace() or labels[index] == ","):
+                index += 1
+            name_start = index
+            while index < len(labels) and (labels[index].isalnum() or labels[index] == "_"):
+                index += 1
+            name = labels[name_start:index]
+            while index < len(labels) and labels[index].isspace():
+                index += 1
+            if name == SBK_ENDPOINT_LABEL and any(
+                labels.startswith(operator, index) for operator in ("=~", "!~", "!=", "=")
+            ):
+                return True
+            while index < len(labels) and labels[index] != ",":
+                if labels[index] in {'"', "'", "`"}:
+                    index = GrafanaDashboardProvisioner._quoted_end(
+                        labels, index, labels[index]
+                    )
+                else:
+                    index += 1
+        return False
 
 
 def write_dashboard_mappings(

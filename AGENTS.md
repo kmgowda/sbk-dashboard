@@ -126,6 +126,7 @@ runtime data as source material.
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
+| `scripts/sbk_dashboard_launcher.py` | Cross-platform foreground/background ownership, logs, and selective stop |
 | `Dockerfile`, `compose.yaml`, `compose.dev.yaml` | Non-root release image, production deployment, development build override |
 | `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |

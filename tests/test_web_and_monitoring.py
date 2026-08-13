@@ -113,6 +113,8 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"reportActivity('grafana')", script)
             self.assertIn(b"window.sessionStorage", script)
             self.assertIn(b"/api/comparison-dashboard", script)
+            self.assertIn(b"const MAX_COMPARISON_TARGETS = 8;", script)
+            self.assertNotIn(b"__MAX_COMPARISON_TARGETS__", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
             self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()

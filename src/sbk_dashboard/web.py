@@ -235,13 +235,13 @@ class DashboardHttpServer:
         target_ids = list(dict.fromkeys(values))
         if len(target_ids) != len(values):
             raise ValueError("Comparison endpoints must be unique")
-        if any(self.registry.find(target_id) is None for target_id in target_ids):
-            raise ValueError("Every comparison endpoint must be registered")
-        self._json(request, 200, {
-            "dashboardUrl": self.monitoring.comparison_dashboard_url(
+        with self._mutation_lock:
+            if any(self.registry.find(target_id) is None for target_id in target_ids):
+                raise ValueError("Every comparison endpoint must be registered")
+            dashboard_url = self.monitoring.comparison_dashboard_url(
                 target_ids, self._request_hostname(request)
             )
-        })
+        self._json(request, 200, {"dashboardUrl": dashboard_url})
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
@@ -301,6 +301,11 @@ class DashboardHttpServer:
                 body = body.replace(
                     b"__DEFAULT_TARGET_HOST__",
                     html.escape(self._default_target_host, quote=True).encode("utf-8"),
+                )
+            elif name == "app.js":
+                body = body.replace(
+                    b"__MAX_COMPARISON_TARGETS__",
+                    str(MAX_COMPARISON_TARGETS).encode("ascii"),
                 )
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
