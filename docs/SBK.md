@@ -147,8 +147,8 @@ different registered endpoints isolated.
 
 To compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
 checkboxes, and choose **Compare selected**. The selector displays name, type, and exporter address; chart legends
-use the immutable endpoint ID so historical series retain their existing Prometheus label set. Comparison uses
-wall-clock time and does not shift sequential historical runs to a common elapsed-time origin.
+show the registered dashboard name and type plus the immutable endpoint ID. Comparison uses wall-clock time and does
+not shift sequential historical runs to a common elapsed-time origin.
 
 ## Change the exporter port or path
 

@@ -230,9 +230,9 @@ A down endpoint is non-fatal. Existing Prometheus history remains queryable unti
 
 Select between two and eight endpoint checkboxes on the landing page, then choose **Compare selected**. The opened
 Grafana dashboard applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
-stable endpoint ID. The selector displays each endpoint's friendly name, benchmark type, and exporter address. The
-generated URL contains the selection and can be bookmarked or shared. No comparison definition is persisted
-separately.
+friendly dashboard name, benchmark type, and stable endpoint ID. For example: `Primary NVMe [SBK · f9720cad…] —
+Average Latency`. The selector also displays the exporter address. The generated URL contains the selection and can
+be bookmarked or shared. No comparison definition is persisted separately.
 
 Comparison is intended for concurrent or otherwise wall-clock-overlapping exporters. It does not align separate
 historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already

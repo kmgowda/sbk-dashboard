@@ -10,10 +10,12 @@ The Python rewrite preserves the external contract:
 - the exact canonical Grafana dashboard remains packaged.
 
 The comparison feature adds an optional `kind` field with values `SBK` or `SBM`. Existing registrations lacking the
-field continue to load as `SBK`, so no data migration is required. Reconciliation generates
-`sbk-comparison.json` without changing the label set of existing Prometheus series; endpoint IDs, dedicated dashboard
-UIDs, and historical samples remain unchanged. Comparison selections are carried in Grafana URLs and create no new
-persisted registry.
+field continue to load as `SBK`, so no registry migration is required. Reconciliation generates
+`sbk-comparison.json` and attaches `sbk_dashboard_name` and `sbk_kind` to newly scraped samples for readable legends.
+Samples retained from before this feature keep their original label set and remain queryable; a Grafana range that
+crosses the upgrade can show an older endpoint-ID-only series beside its newly named series. Endpoint IDs, dedicated
+dashboard UIDs, and stored historical samples remain unchanged. Comparison selections are carried in Grafana URLs
+and create no new persisted registry.
 
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.

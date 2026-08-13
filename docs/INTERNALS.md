@@ -122,6 +122,8 @@ compensating transaction across several atomically replaced files; there is no d
   "targets": ["127.0.0.1:9718"],
   "labels": {
     "sbk_endpoint_id": "f9720cad2e38eec6",
+    "sbk_dashboard_name": "SBK Dashboard",
+    "sbk_kind": "SBK",
     "sbk_metrics_path": "/metrics"
   }
 }
@@ -148,8 +150,9 @@ the canonical dashboard.
 
 The same reconciliation writes `sbk-comparison.json` with stable UID `sbk-comparison`. It adds a bounded
 multi-select variable containing registered endpoint IDs and rewrites all canonical `SBK_*` selectors with the
-variable's regex matcher. Variable choices display endpoint name, SBK/SBM kind, and exporter address, while legends
-use the immutable endpoint ID so existing Prometheus series keep their original label set and historical continuity.
+variable's regex matcher. Variable choices display endpoint name, SBK/SBM kind, and exporter address. Legends use
+the readable dashboard name and kind followed by the immutable endpoint ID, so duplicate display names remain
+distinguishable.
 `POST /api/comparison-dashboard` validates 2–8 unique registered IDs and returns a request-host-aware Grafana URL;
 it does not mutate registry or monitoring state.
 

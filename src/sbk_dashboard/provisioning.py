@@ -26,7 +26,12 @@ class PrometheusTargetDiscovery:
     def write(self, targets: list[BenchmarkTarget]) -> None:
         groups = [
             {"targets": [target.prometheus_address],
-             "labels": {"sbk_endpoint_id": target.id, "sbk_metrics_path": target.metrics_path}}
+             "labels": {
+                 "sbk_endpoint_id": target.id,
+                 "sbk_dashboard_name": target.name,
+                 "sbk_kind": target.kind,
+                 "sbk_metrics_path": target.metrics_path,
+             }}
             for target in targets
         ]
         with self._lock:
@@ -140,10 +145,11 @@ class GrafanaDashboardProvisioner:
             if isinstance(expression, str) and SBK_SELECTOR.search(expression):
                 node["expr"] = self._scope_promql(expression, "${sbk_endpoints:regex}", regex=True)
                 legend = node.get("legendFormat")
+                identity = "{{sbk_dashboard_name}} [{{sbk_kind}} · {{sbk_endpoint_id}}]"
                 if not isinstance(legend, str) or legend in {"", "__auto"}:
-                    node["legendFormat"] = "{{sbk_endpoint_id}}"
-                elif "{{sbk_endpoint_id}}" not in legend:
-                    node["legendFormat"] = f"{{{{sbk_endpoint_id}}}} — {legend}"
+                    node["legendFormat"] = identity
+                elif "{{sbk_dashboard_name}}" not in legend:
+                    node["legendFormat"] = f"{identity} — {legend}"
             for key, value in node.items():
                 if key not in {"expr", "legendFormat"}:
                     self._scope_comparison(value)

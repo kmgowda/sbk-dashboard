@@ -88,6 +88,8 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 2. Input is normalized and SHA-256 of lowercase `host:port` supplies a stable 16-hex-character endpoint ID.
 3. `targets.json` is atomically replaced.
 4. Prometheus file discovery receives the address, metrics path, and `sbk_endpoint_id` label.
+   The stable registered name and SBK/SBM kind are attached as `sbk_dashboard_name` and `sbk_kind` for readable,
+   endpoint-distinct comparison legends.
 5. The canonical dashboard is deep-copied without changing its panels or visualization settings.
 6. Every `SBK_*` PromQL selector receives the endpoint label.
 7. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.

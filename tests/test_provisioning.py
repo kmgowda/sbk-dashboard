@@ -79,6 +79,8 @@ class ProvisioningTest(unittest.TestCase):
         self.assertEqual(["first", "second"], [option["value"] for option in variable["options"]])
         self.assertIn("SBM two (SBM)", variable["options"][1]["text"])
         legends = _values_for_key(generated, "legendFormat")
+        self.assertTrue(all("{{sbk_dashboard_name}}" in legend for legend in legends))
+        self.assertTrue(all("{{sbk_kind}}" in legend for legend in legends))
         self.assertTrue(all("{{sbk_endpoint_id}}" in legend for legend in legends))
         self.assertEqual(53, sum(1 for _ in _panels(generated)))
         self.assertEqual(
@@ -92,6 +94,8 @@ class ProvisioningTest(unittest.TestCase):
         value = json.loads(path.read_text())
         self.assertEqual(["bench.example:9718"], value[0]["targets"])
         self.assertEqual("first", value[0]["labels"]["sbk_endpoint_id"])
+        self.assertEqual("first", value[0]["labels"]["sbk_dashboard_name"])
+        self.assertEqual("SBK", value[0]["labels"]["sbk_kind"])
         self.assertEqual("/metrics", value[0]["labels"]["sbk_metrics_path"])
 
 

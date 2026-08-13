@@ -209,8 +209,8 @@ across landing and Grafana categories, per-category capacity eviction, exact two
 30-second browser heartbeat/dashboard-click hooks. Native Prometheus and Grafana configuration and routing remain
 unchanged; direct native-server clients are deliberately not asserted as observable.
 
-Comparison regressions verify SBK/SBM kind compatibility, unchanged scrape label contracts, all 53 generated panels,
-complete regex scoping of every `SBK_*` selector, endpoint-ID legends, stable comparison UID, bounded
+Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
+complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, stable comparison UID, bounded
 2–8-ID API validation, request-host URL behavior, and survival of the shared comparison dashboard when endpoint
 clones are reconciled or removed. A native smoke test should run two concurrent exporters, select both on the landing
 page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
