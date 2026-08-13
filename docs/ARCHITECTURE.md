@@ -203,10 +203,13 @@ Illegal transitions fail immediately. Construction has no process side effects; 
 supervisor, joins it, and then stops Grafana and Prometheus in reverse dependency order.
 
 Each owned native process is launched by a dedicated lightweight Python guardian in its own POSIX session or Windows
-process group. The native PID, executable, creation time, and port are persisted to defend against PID reuse. Normal
-termination addresses the guardian group and captured native descendant tree, first gracefully and then forcibly
-after a bounded timeout. Descendants are enumerated again immediately before forced termination to reduce the
-Windows child-spawn race where process-group signals are unavailable.
+process group. On Windows, the guardian also creates a Job Object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, starts the native process suspended, assigns it to the job, and resumes it only
+after assignment succeeds. Later native descendants inherit that job, and Windows kills the complete tree if the
+guardian handle closes. The native PID, executable, creation time, and port are persisted to defend against PID
+reuse. Normal termination addresses the guardian cleanup domain and captured native descendant tree, first
+gracefully and then forcibly after a bounded timeout. Descendants are enumerated again immediately before forced
+termination to reduce the Windows child-spawn race where process-group signals are unavailable.
 
 The guardian independently validates the control-plane PID and creation time four times per second. If the main
 process disappears without running cleanup—including `SIGKILL` on POSIX or direct process termination on Windows—it
@@ -310,10 +313,11 @@ records ownership and authorizes acquisition, so the supervisor cannot launch th
 supervisor then confirms that the application survived its immediate startup window and that the watcher exists
 before the start command reports success.
 
-Native shutdown first signals each owned isolated process group and waits for graceful exit. It then force-kills
+Native shutdown first signals each owned isolated cleanup domain and waits for graceful exit. It then force-kills
 surviving descendants, checks the final wait result, and treats any survivor as an incomplete shutdown error. On
-POSIX, a final group kill also covers a descendant created after the initial process-tree snapshot. Attached
-services remain excluded from termination.
+POSIX, a final group kill also covers a descendant created after the initial process-tree snapshot. On Windows,
+closing the guardian's Job Object is the final kernel-enforced bound. Attached services remain excluded from
+termination.
 
 ## Authentication and container boundary
 
@@ -335,7 +339,9 @@ The image runs as UID/GID 10001, uses a digest-pinned official Python 3.12 slim 
 generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools, and stores the entire data root in
 `/var/lib/sbk-dashboard`. A persistent volume therefore preserves endpoint registrations,
 generated mappings/dashboards, Prometheus TSDB history, Grafana state, and process logs across replacement. `tini`
-forwards termination and reaps children, while the existing guardians retain hard-parent-death protection.
+forwards the image's `SIGTERM` stop signal and reaps children, while the existing guardians retain hard-parent-death
+protection. Compose grants 30 seconds for ordered cleanup; after that bound the container runtime kills every
+remaining process in the container PID namespace/cgroup, preventing a host orphan.
 
 Compose adds `host.docker.internal:host-gateway`, allowing container Prometheus to scrape an SBK exporter on the
 Docker host, and the image supplies that hostname as the landing form default. Direct host execution retains

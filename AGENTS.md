@@ -121,6 +121,7 @@ runtime data as source material.
 | `src/sbk_dashboard/monitoring.py` | Monitoring facade, configuration, reconciliation, supervision, target status |
 | `src/sbk_dashboard/processes.py` | Lifecycle state machine, ownership registry, health strategy, process trees/logs |
 | `src/sbk_dashboard/guardian.py` | Parent-death monitoring and orphaned native-process tree cleanup |
+| `src/sbk_dashboard/windows_job.py` | Windows kill-on-close Job Object containment and suspended launch |
 | `src/sbk_dashboard/provisioning.py` | Prometheus discovery and endpoint-scoped Grafana dashboard generation |
 | `src/sbk_dashboard/bootstrap.py` | Native download, verification, extraction, and installation |
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |

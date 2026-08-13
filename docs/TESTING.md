@@ -114,6 +114,10 @@ failure removes guardian state, a killed guardian cannot orphan its native child
 both the guarded native process and guardian. Guardian-handshake tests also reproduce a transient Windows
 `PermissionError`, verify that a subsequent read succeeds, and ensure persistent access denial times out with useful
 diagnostics.
+Windows Job Object unit tests verify the kill-on-close limit, process assignment, handle closure, primary-thread
+resume, and suspended creation flags on every platform. A native Windows smoke test must additionally kill the
+guardian and main dashboard independently and confirm Prometheus/Grafana plus descendants disappear within the
+bounded cleanup period; Linux simulation is not a native Job Object claim.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,

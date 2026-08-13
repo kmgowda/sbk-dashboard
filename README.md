@@ -467,7 +467,8 @@ avoid spurious Grafana failures on slower hosts while keeping Prometheus failure
 - Every stack, HTTP server, and native component has validated `new`, `starting`, `running`, `stopping`, `stopped`,
   and `failed` states. Shutdown is idempotent and reports incomplete child termination.
 - Owned POSIX services start in dedicated sessions/process groups. Shutdown addresses the group and recorded
-  descendants; Windows uses a new process group plus recursive process-tree termination.
+  descendants. Windows starts each native process suspended, assigns it to a kill-on-close Job Object, and only then
+  resumes it; recursive graceful/forceful cleanup remains the ordered shutdown path.
 - One small guardian process per owned native service closes the cleanup gap where the control plane cannot run a
   signal handler. It retains no samples or endpoint state and exits with its native child.
 - A single supervisor thread manages both native components and target health. HTTP worker threads are fixed and are

@@ -95,7 +95,16 @@ class LifecycleTest(unittest.TestCase):
             guardian = psutil.Process(service._process.pid)
             guardian.kill()
             guardian.wait(3)
-            self.assertTrue(psutil.pid_exists(first_native_pid))
+            if os.name == "nt":
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline and psutil.pid_exists(first_native_pid):
+                    time.sleep(0.05)
+                self.assertFalse(
+                    psutil.pid_exists(first_native_pid),
+                    "Windows Job Object did not kill the native child when its guardian exited",
+                )
+            else:
+                self.assertTrue(psutil.pid_exists(first_native_pid))
             self.assertTrue(service.supervise())
             self.assertFalse(psutil.pid_exists(first_native_pid))
             self.assertNotEqual(first_native_pid, service.pid)

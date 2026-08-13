@@ -5,11 +5,35 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import psutil
 
 
 class GuardianIntegrationTest(unittest.TestCase):
+    def test_windows_native_process_is_assigned_before_resume(self):
+        from sbk_dashboard import guardian
+
+        with tempfile.TemporaryDirectory() as temporary:
+            state_path = Path(temporary) / "native.json"
+            process = MagicMock(pid=123)
+            process.wait.return_value = 0
+            job = MagicMock()
+            with (
+                patch.object(guardian.os, "name", "nt"),
+                patch.object(guardian, "_parent_alive", return_value=True),
+                patch.object(guardian, "WindowsKillOnCloseJob", return_value=job),
+                patch.object(guardian.subprocess, "Popen", return_value=process) as popen,
+                patch.object(guardian, "atomic_json"),
+            ):
+                self.assertEqual(0, guardian.guard(1, 2.0, state_path, "Test", ["native.exe"]))
+            self.assertEqual(
+                guardian.CREATE_SUSPENDED | guardian.CREATE_NEW_PROCESS_GROUP,
+                popen.call_args.kwargs["creationflags"],
+            )
+            job.assign_and_resume.assert_called_once_with(123)
+            job.close.assert_called_once_with()
+
     def test_hard_parent_death_terminates_native_process_and_guardian(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

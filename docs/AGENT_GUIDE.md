@@ -29,7 +29,9 @@ endpoint.
 
 `processes.py` owns lifecycle state, process groups, trees, and bounded native logs. The separate `guardian.py`
 entry point is the lightweight child-process parent-death monitor; keep it independently runnable because it must
-clean native descendants even after the control plane is forcefully terminated.
+clean native descendants even after the control plane is forcefully terminated. On Windows, `windows_job.py`
+creates the guardian's kill-on-close Job Object before the native process is resumed; do not replace it with only
+`CREATE_NEW_PROCESS_GROUP`, which does not provide kernel-enforced descendant lifetime containment.
 
 ## Request and persistence flow
 

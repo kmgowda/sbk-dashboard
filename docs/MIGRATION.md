@@ -58,6 +58,12 @@ or persisted-data migration. Service managers may retain their existing stop tim
 shutdown remains graceful, while hard termination of only the main PID now triggers guardian cleanup. Attached
 `-continue true` services remain externally owned and are never guarded or terminated by sbk-dashboard.
 
+Windows-owned native services now additionally use a kill-on-close Job Object. Each native process starts suspended,
+is assigned to the job, and resumes only after assignment succeeds, so Prometheus, Grafana, and their descendants
+cannot escape during startup or survive closure of the guardian's job handle. This changes no command-line option,
+service definition, or persisted data. POSIX deployments retain their dedicated session/process-group cleanup, and
+containers retain the same application cleanup inside Docker's final PID-namespace/cgroup termination boundary.
+
 The landing page now displays total, up, and down endpoint counters derived from the existing target inventory API.
 This is a browser-only presentation change with no new endpoint, option, or persisted-data migration.
 

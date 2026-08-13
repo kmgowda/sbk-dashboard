@@ -16,6 +16,7 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 | `monitoring.py` | `ManagedMonitoringStack` | Generated native configuration, two services, supervisor, target status |
 | `processes.py` | lifecycle/process classes | Port ownership, guardians, process trees, PID records, bounded logs |
 | `guardian.py` | `guard()` | One owned native child and hard-parent-death cleanup |
+| `windows_job.py` | `WindowsKillOnCloseJob` | Suspended assignment to a kernel kill-on-close Job Object |
 | `web.py` | `DashboardHttpServer` | HTTP listener/thread, bounded worker pool, API transaction serialization |
 | `files.py` | `atomic_write()` | Temporary file, file `fsync`, replace, POSIX directory `fsync` |
 | `models.py` | immutable dataclasses | Endpoint identity, persisted schema, API status values |
@@ -215,6 +216,9 @@ restricted Windows socket inspection.
 Each owned `ManagedNativeService` launches a guardian in a new POSIX session or Windows process group. The guardian
 starts the real native command and atomically returns its PID. The control plane records native identity, waits for
 HTTP readiness, and continuously drains guardian/native combined output through a bounded rotating log pump.
+On Windows, the guardian first creates a kill-on-close Job Object, starts the native command suspended, assigns it
+to the job, and resumes its primary thread only after successful assignment. This removes the launch-to-assignment
+orphan window and gives inherited native descendants kernel-enforced lifetime containment.
 
 The single monitoring supervisor:
 
@@ -226,6 +230,8 @@ The single monitoring supervisor:
 If the control process disappears, the guardian detects PID/creation-time mismatch four times per second and
 terminates the native descendant tree. If a guardian disappears unexpectedly, the control plane's native PID check
 still detects and cleans the remaining tree during restart/shutdown.
+On Windows, guardian termination additionally closes the only Job Object handle, so the kernel terminates any
+surviving job member without waiting for polling or a later supervisor pass.
 
 ## Threads and processes
 

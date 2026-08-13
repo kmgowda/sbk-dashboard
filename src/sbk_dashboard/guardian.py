@@ -12,6 +12,11 @@ import psutil
 
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.processes import _terminate_psutil_tree
+from sbk_dashboard.windows_job import (
+    CREATE_NEW_PROCESS_GROUP,
+    CREATE_SUSPENDED,
+    WindowsKillOnCloseJob,
+)
 
 PARENT_POLL_SECONDS = 0.25
 LOGGER = logging.getLogger(__name__)
@@ -46,11 +51,30 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
         raise ValueError("Guardian native command must not be empty")
     if not _parent_alive(parent_pid, parent_started):
         return 1
+    job: WindowsKillOnCloseJob | None = None
+    process: subprocess.Popen[bytes] | None = None
     try:
-        process = subprocess.Popen(command, stdin=subprocess.DEVNULL)
+        if os.name == "nt":
+            job = WindowsKillOnCloseJob()
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                creationflags=CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP,
+            )
+            try:
+                job.assign_and_resume(process.pid)
+            except BaseException:
+                process.kill()
+                process.wait(timeout=5)
+                raise
+        else:
+            process = subprocess.Popen(command, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError) as error:
+        if job is not None:
+            job.close()
         LOGGER.error("Unable to launch guarded %s: %s", name, error)
         return 127
+    assert process is not None
     try:
         atomic_json(state_path, {"pid": process.pid})
         while True:
@@ -68,6 +92,8 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
                 return 0
     finally:
         state_path.unlink(missing_ok=True)
+        if job is not None:
+            job.close()
 
 
 def parser() -> argparse.ArgumentParser:
