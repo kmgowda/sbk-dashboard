@@ -655,20 +655,23 @@ class BoundedHttpServerTest(unittest.TestCase):
         server = BoundedThreadPoolHttpServer(("127.0.0.1", 0), Handler, 1, 0, 2)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
-        first = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
-        first.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        self.assertTrue(entered.wait(2))
-        second = socket.create_connection(("127.0.0.1", server.server_port), timeout=2)
-        second.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        self.assertIn(b"503 Service Unavailable", second.recv(1024))
-        second.close()
-        release.set()
-        self.assertIn(b"200 OK", first.recv(1024))
-        first.close()
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
-        server.close_pool()
+        try:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as first:
+                first.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                self.assertTrue(entered.wait(2))
+                # Admission is rejected immediately after accept, before an HTTP
+                # request is read. Sending request bytes races the server close and
+                # can produce WSAECONNABORTED instead of exposing the queued 503.
+                with socket.create_connection(("127.0.0.1", server.server_port), timeout=2) as second:
+                    self.assertIn(b"503 Service Unavailable", second.recv(1024))
+                release.set()
+                self.assertIn(b"200 OK", first.recv(1024))
+        finally:
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
+            server.close_pool()
         self.assertFalse(any(item.name.startswith("sbk-http-worker") for item in threading.enumerate()))
 
 
