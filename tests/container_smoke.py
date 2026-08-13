@@ -109,7 +109,7 @@ class ContainerSmoke:
                 self.target_endpoints = [(self.target_host, self.target_port)]
             else:
                 self.target_endpoints = self._start_test_exporters()
-            target_ids = self._first_start()
+            target_ids, comparison = self._first_start()
             self._stop_and_remove()
             self._assert_processes_stopped()
             self._start()
@@ -121,6 +121,13 @@ class ContainerSmoke:
                 self._wait_for_target_up(target["id"])
                 self._assert_metrics_and_panels(target["id"])
                 self._wait_for_dashboard(target["dashboardUrl"])
+            if comparison is not None:
+                repeated_comparison = self._comparison_dashboard(list(reversed(target_ids)))
+                if repeated_comparison != comparison:
+                    raise AssertionError(
+                        f"Persisted comparison dashboard was not reused: {repeated_comparison}"
+                    )
+                self._assert_comparison_dashboard(comparison, target_ids)
             self._capture_processes()
             self._stop_and_remove()
             self._assert_processes_stopped()
@@ -136,7 +143,7 @@ class ContainerSmoke:
             command("docker", "volume", "rm", "--force", self.volume, check=False)
             command("docker", "network", "rm", self.network, check=False)
 
-    def _first_start(self) -> list[str]:
+    def _first_start(self) -> tuple[list[str], dict[str, Any] | None]:
         self._start()
         self._wait_until_healthy()
         status, landing = request(f"http://127.0.0.1:{self.dashboard_port}/")
@@ -158,14 +165,18 @@ class ContainerSmoke:
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
             self._wait_for_dashboard(target["dashboardUrl"])
+        comparison = self._comparison_dashboard(target_ids) if len(target_ids) >= 2 else None
+        if comparison is not None:
+            self._assert_comparison_dashboard(comparison, target_ids)
         self._capture_processes()
-        return target_ids
+        return target_ids, comparison
 
     def _register_target(self, host: str, port: int, name: str) -> dict[str, Any]:
+        registration = {"name": name, "host": host, "port": port, "metricsPath": "/metrics"}
         status, payload = request(
             f"http://127.0.0.1:{self.dashboard_port}/api/targets",
             "POST",
-            {"name": name, "host": host, "port": port, "metricsPath": "/metrics"},
+            registration,
         )
         if status != 201:
             raise AssertionError(f"Target registration failed with HTTP {status}")
@@ -173,7 +184,56 @@ class ContainerSmoke:
         expected_prefix = f"http://127.0.0.1:{self.grafana_port}/d/sbk-"
         if not target["dashboardUrl"].startswith(expected_prefix):
             raise AssertionError(f"Grafana URL is not host-accessible: {target['dashboardUrl']}")
+        repeated_status, repeated_payload = request(
+            f"http://127.0.0.1:{self.dashboard_port}/api/targets", "POST", registration
+        )
+        repeated_target = json.loads(repeated_payload)
+        if repeated_status != 200 or repeated_target != target:
+            raise AssertionError(
+                "Exact repeated registration did not reuse its Docker dashboard: "
+                f"status={repeated_status}, target={repeated_target}"
+            )
         return target
+
+    def _comparison_dashboard(self, target_ids: list[str]) -> dict[str, Any]:
+        status, payload = request(
+            f"http://127.0.0.1:{self.dashboard_port}/api/comparison-dashboard",
+            "POST",
+            {"targetIds": target_ids},
+        )
+        comparison: dict[str, Any] = json.loads(payload)
+        if status != 200:
+            raise AssertionError(f"Comparison dashboard request failed with HTTP {status}")
+        return comparison
+
+    def _assert_comparison_dashboard(
+        self, comparison: dict[str, Any], target_ids: list[str]
+    ) -> None:
+        dashboard_id = comparison.get("dashboardId")
+        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/d/{dashboard_id}/"
+        if not isinstance(dashboard_id, str) or not dashboard_id.startswith("sbk-comparison-"):
+            raise AssertionError(f"Invalid comparison dashboard ID: {comparison}")
+        if not str(comparison.get("dashboardUrl", "")).startswith(expected_prefix):
+            raise AssertionError(f"Comparison URL is not host-accessible: {comparison}")
+        self._wait_for_dashboard(str(comparison["dashboardUrl"]))
+        dashboard = f"/var/lib/sbk-dashboard/monitoring/grafana/dashboards/{dashboard_id}.json"
+        verification_script = (
+            "import json\n"
+            f"root=json.load(open({dashboard!r}, encoding='utf-8'))\n"
+            "def panels(node):\n"
+            "    if isinstance(node, dict):\n"
+            "        return int('type' in node and 'title' in node) + sum(panels(v) for v in node.values())\n"
+            "    if isinstance(node, list):\n"
+            "        return sum(panels(v) for v in node)\n"
+            "    return 0\n"
+            "print(json.dumps({'panels': panels(root), "
+            "'ids': root.get('sbkDashboardComparisonEndpointIds')}))\n"
+        )
+        details = json.loads(
+            command("docker", "exec", self.name, "python", "-c", verification_script).stdout
+        )
+        if details != {"panels": 53, "ids": sorted(target_ids)}:
+            raise AssertionError(f"Invalid generated comparison dashboard: {details}")
 
     def _start(self) -> None:
         docker_arguments = [

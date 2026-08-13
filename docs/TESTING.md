@@ -64,8 +64,10 @@ dashboard container on randomly selected non-default loopback host ports, and a 
 by their literal container IPv4 and IPv6 addresses, proving that
 Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
 host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
-clean shutdown, absence of recorded native PIDs, and registration/dashboard persistence across a full restart. Its
-`finally` cleanup removes only those uniquely named containers, network, and volume.
+exact-registration reuse with HTTP 200, deterministic comparison ID/URL reuse in reversed order, its generated
+53-panel comparison file, comparison persistence across restart, clean shutdown, absence of recorded native PIDs,
+and registration/dashboard persistence across a full restart. Its `finally` cleanup removes only those uniquely
+named containers, network, and volume.
 
 For real SBK integration, expose a non-default host exporter port for at least 120 seconds:
 
