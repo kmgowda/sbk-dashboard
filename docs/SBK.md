@@ -107,6 +107,7 @@ Open the management page and add these values:
 | Field | Direct native dashboard | Dashboard in supplied Compose stack |
 |---|---|---|
 | Display name | Any meaningful run/source name | Any meaningful run/source name |
+| Benchmark type | `SBK` | `SBK` |
 | Host or IP | `127.0.0.1` when SBK is on the same host | `host.docker.internal` when SBK is on the Docker host |
 | Port | `9718` | `9718` |
 | Metrics path | `/metrics` | `/metrics` |
@@ -120,7 +121,7 @@ The same registration can be created through the API:
 ```bash
 curl --fail-with-body \
   -H 'Content-Type: application/json' \
-  --data '{"name":"SBK file write","host":"127.0.0.1","port":9718,"metricsPath":"/metrics"}' \
+  --data '{"name":"SBK file write","kind":"SBK","host":"127.0.0.1","port":9718,"metricsPath":"/metrics"}' \
   http://127.0.0.1:9721/api/targets
 ```
 
@@ -143,6 +144,11 @@ Target states have these meanings:
 The dashboard is based on SBK's `SBK_*` series. SBK identifies direct measurements with `component="sbk"` and
 includes storage class and read/write action labels. Prometheus adds `sbk_endpoint_id`, which keeps dashboards for
 different registered endpoints isolated.
+
+To compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
+checkboxes, and choose **Compare selected**. The selector displays name, type, and exporter address; chart legends
+use the immutable endpoint ID so historical series retain their existing Prometheus label set. Comparison uses
+wall-clock time and does not shift sequential historical runs to a common elapsed-time origin.
 
 ## Change the exporter port or path
 
@@ -195,7 +201,8 @@ the installed SBK release:
   -out GrpcLogger -sbm <sbm-host> -sbmport 9717
 ```
 
-Then register `<sbm-host>` on port `9719` with path `/metrics`. The aggregate series use `component="sbm"`, including
+Then register `<sbm-host>` with type `SBM` on port `9719` with path `/metrics`. The aggregate series use
+`component="sbm"`, including
 SBK-GEM runs, because SBM owns the aggregation and metrics endpoint. Consult the matching SBK release documentation
 for coordinator, node, and YML-launcher setup; those workload orchestration options are outside this dashboard.
 

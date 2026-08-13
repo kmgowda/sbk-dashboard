@@ -208,6 +208,7 @@ The landing-page form accepts:
 | Field | Meaning |
 |---|---|
 | Display name | Operator label; initially `SBK Dashboard`, while a deliberately blank value falls back to `host:port` |
+| Benchmark type | `SBK` or `SBM`; older registrations without this field continue to load as `SBK` |
 | Host or IP | DNS name, IPv4 literal, or IPv6 literal as reachable from Prometheus |
 | Port | SBK/SBM PrometheusLogger HTTP port, from 1 through 65535 |
 | Metrics path | Absolute HTTP path, normally `/metrics` |
@@ -224,6 +225,18 @@ Endpoint states mean:
 - `unknown`: a defensive state for unrecognized status data.
 
 A down endpoint is non-fatal. Existing Prometheus history remains queryable until retention removes it.
+
+## Compare live SBK and SBM results
+
+Select between two and eight endpoint checkboxes on the landing page, then choose **Compare selected**. The opened
+Grafana dashboard applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
+stable endpoint ID. The selector displays each endpoint's friendly name, benchmark type, and exporter address. The
+generated URL contains the selection and can be bookmarked or shared. No comparison definition is persisted
+separately.
+
+Comparison is intended for concurrent or otherwise wall-clock-overlapping exporters. It does not align separate
+historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already
+scraped samples remain subject to normal Prometheus retention.
 
 ## Use public and remote addresses
 

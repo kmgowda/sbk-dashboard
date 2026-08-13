@@ -78,8 +78,8 @@ h1 { margin: 18px 0 22px; font-size: clamp(34px, 4.5vw, 54px); line-height: .98;
 .list-heading { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .list-heading .icon-button { margin-left: auto; }
 label { display: block; margin: 0 0 17px; color: #aab8c8; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
-input { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; padding: 12px 13px; background: rgba(3, 12, 22, .7); color: var(--ink); outline: none; font: 14px ui-monospace, monospace; transition: border-color .2s, box-shadow .2s; }
-input:focus { border-color: rgba(46, 233, 203, .7); box-shadow: 0 0 0 3px rgba(46, 233, 203, .08); }
+input, select { width: 100%; margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; padding: 12px 13px; background: rgba(3, 12, 22, .7); color: var(--ink); outline: none; font: 14px ui-monospace, monospace; transition: border-color .2s, box-shadow .2s; }
+input:focus, select:focus { border-color: rgba(46, 233, 203, .7); box-shadow: 0 0 0 3px rgba(46, 233, 203, .08); }
 button { cursor: pointer; border: 0; font: inherit; }
 form > button { width: 100%; display: flex; justify-content: space-between; padding: 13px 15px; color: #041510; background: var(--cyan); border-radius: 9px; font-weight: 750; transition: transform .15s, box-shadow .15s; }
 form > button:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(46, 233, 203, .18); }
@@ -90,10 +90,16 @@ form > button:disabled { opacity: .5; cursor: wait; }
 .hint span { padding-left: 9px; border-left: 1px solid var(--line); }
 .icon-button { width: 34px; height: 34px; border-radius: 8px; color: #9cafc2; background: rgba(122, 156, 190, .08); border: 1px solid var(--line); font-size: 17px; }
 .icon-button:hover { color: var(--cyan); border-color: rgba(46, 233, 203, .4); }
+.comparison-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid rgba(46, 233, 203, .2); border-radius: 12px; background: rgba(46, 233, 203, .045); }
+.comparison-bar strong, .comparison-bar span { display: block; }.comparison-bar strong { font-size: 12px; }.comparison-bar span { margin-top: 4px; color: var(--muted); font-size: 10px; }
+.comparison-bar button { flex: none; padding: 10px 12px; border-radius: 8px; color: #06151a; background: var(--cyan); font-size: 11px; font-weight: 750; }
+.comparison-bar button:disabled { cursor: not-allowed; opacity: .4; }
 .target-list { display: grid; gap: 12px; }
-.target-card { display: grid; grid-template-columns: 1fr auto; gap: 15px; align-items: center; padding: 17px; background: rgba(15, 31, 49, .62); border: 1px solid var(--line); border-radius: 13px; transition: transform .15s, border-color .15s; }
+.target-card { display: grid; grid-template-columns: auto 1fr auto; gap: 15px; align-items: center; padding: 17px; background: rgba(15, 31, 49, .62); border: 1px solid var(--line); border-radius: 13px; transition: transform .15s, border-color .15s; }
+.compare-selector { margin: 0; }.compare-selector input { width: 17px; height: 17px; margin: 0; accent-color: var(--cyan); }
 .target-card:hover { transform: translateY(-1px); border-color: rgba(91, 151, 205, .35); }
-.target-card h3 { margin: 0 0 5px; font-size: 15px; }
+.target-card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 15px; }
+.kind-badge { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--cyan); font: 8px ui-monospace, monospace; }
 .endpoint { color: #7f94a9; font: 11px ui-monospace, monospace; }
 .status { display: inline-flex; align-items: center; gap: 6px; margin-left: 9px; font: 700 9px ui-monospace, monospace; text-transform: uppercase; }
 .status::before { content: ""; width: 6px; height: 6px; background: #788898; border-radius: 50%; }
@@ -149,6 +155,7 @@ td { padding: 11px; border-top: 1px solid var(--line); color: #a8b8c9; font-fami
     .server-state { display: none; }
     .hero { padding: 42px 0; }
     .register-panel, .targets-panel { padding: 22px 16px; }
+    .comparison-bar { align-items: stretch; flex-direction: column; }.comparison-bar button { width: 100%; }
     .target-card { grid-template-columns: auto 1fr; }
     .target-actions { grid-column: 1 / -1; }
     .dashboard-link { flex: 1; }

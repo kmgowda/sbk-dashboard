@@ -147,6 +147,10 @@ class ManagedMonitoringStack:
         dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
         return self.dashboard_provisioner.dashboard_url(target_id, dynamic_host)
 
+    def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
+        dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
+        return self.dashboard_provisioner.comparison_dashboard_url(target_ids, dynamic_host)
+
     def healthy(self) -> bool:
         return self.lifecycle.state == LifecycleState.RUNNING and bool(self._services) and all(
             service.healthy() for service in self._services

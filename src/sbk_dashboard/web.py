@@ -26,6 +26,7 @@ from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
+MAX_COMPARISON_TARGETS = 8
 MAX_TRACKED_CLIENTS = 10_000
 LANDING_ACTIVITY_SECONDS = 120.0
 GRAFANA_ACTIVITY_SECONDS = 300.0
@@ -168,6 +169,8 @@ class DashboardHttpServer:
                 self._activity(request, path[len("/api/activity/"):])
             elif path == "/api/targets":
                 self._targets(request)
+            elif path == "/api/comparison-dashboard":
+                self._comparison_dashboard(request)
             elif path.startswith("/api/targets/"):
                 self._target(request, path[len("/api/targets/"):])
             else:
@@ -204,7 +207,9 @@ class DashboardHttpServer:
         if isinstance(port, bool) or not isinstance(port, int):
             raise ValueError("Port must be between 1 and 65535")
         with self._mutation_lock:
-            target = self.registry.register(body.get("name"), body.get("host"), port, body.get("metricsPath"))
+            target = self.registry.register(
+                body.get("name"), body.get("host"), port, body.get("metricsPath"), body.get("kind")
+            )
             try:
                 self.monitoring.reconcile(self.registry.list())
             except Exception:
@@ -216,6 +221,27 @@ class DashboardHttpServer:
                 self._best_effort_reconcile("registration rollback")
                 raise
         self._json(request, 201, self._view(request, target))
+
+    def _comparison_dashboard(self, request: BaseHTTPRequestHandler) -> None:
+        self._require(request, "POST")
+        body = self._read_json(request)
+        values = body.get("targetIds")
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError("Target IDs must be an array of strings")
+        if len(values) < 2:
+            raise ValueError("Select at least two endpoints to compare")
+        if len(values) > MAX_COMPARISON_TARGETS:
+            raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
+        target_ids = list(dict.fromkeys(values))
+        if len(target_ids) != len(values):
+            raise ValueError("Comparison endpoints must be unique")
+        if any(self.registry.find(target_id) is None for target_id in target_ids):
+            raise ValueError("Every comparison endpoint must be registered")
+        self._json(request, 200, {
+            "dashboardUrl": self.monitoring.comparison_dashboard_url(
+                target_ids, self._request_hostname(request)
+            )
+        })
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
@@ -294,7 +320,7 @@ class DashboardHttpServer:
     def _view(self, request: BaseHTTPRequestHandler, target: BenchmarkTarget) -> dict[str, Any]:
         return {
             "id": target.id, "name": target.name, "host": target.host, "port": target.port,
-            "metricsPath": target.metrics_path, "createdAt": target.created_at,
+            "metricsPath": target.metrics_path, "kind": target.kind, "createdAt": target.created_at,
             "status": self.monitoring.status(target.id).api(),
             "dashboardUrl": self._dashboard_url(request, target.id),
         }

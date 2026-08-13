@@ -43,6 +43,12 @@ class FakeMonitoring:
         formatted = f"[{host}]" if ":" in host else host
         return f"http://{formatted}:3000/d/sbk-{target_id}/"
 
+    def comparison_dashboard_url(self, target_ids, browser_host=None):
+        host = browser_host or "grafana"
+        formatted = f"[{host}]" if ":" in host else host
+        query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in target_ids)
+        return f"http://{formatted}:3000/d/sbk-comparison/?{query}"
+
 
 class AssetRenderingTest(unittest.TestCase):
     def test_index_renders_validated_native_and_container_defaults(self):
@@ -87,6 +93,8 @@ class WebTest(unittest.TestCase):
             self.assertIn(b'id="target-count"', page)
             self.assertIn(b'id="up-count"', page)
             self.assertIn(b'id="down-count"', page)
+            self.assertIn(b'id="compare-selected"', page)
+            self.assertIn(b'<option value="SBM">SBM</option>', page)
             self.assertIn(b'aria-label="Endpoint status summary" aria-live="polite"', page)
             self.assertNotIn(b"NVMe endurance run", page)
             self.assertNotIn(b"__ASSET_VERSION__", page)
@@ -104,6 +112,7 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"reportActivity('landing');", script)
             self.assertIn(b"reportActivity('grafana')", script)
             self.assertIn(b"window.sessionStorage", script)
+            self.assertIn(b"/api/comparison-dashboard", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
             self.assertEqual("no-cache", response.headers["Cache-Control"])
             stylesheet = response.read()
@@ -131,6 +140,7 @@ class WebTest(unittest.TestCase):
             created = json.load(response)
             self.assertEqual(201, response.status)
             self.assertIn("dashboardUrl", created)
+            self.assertEqual("SBK", created["kind"])
         with urllib.request.urlopen(self.base + "/api/targets") as response:
             self.assertEqual(1, len(json.load(response)))
         for host, expected in (
@@ -152,6 +162,53 @@ class WebTest(unittest.TestCase):
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
         with urllib.request.urlopen(delete) as response:
             self.assertEqual(204, response.status)
+
+    def test_registers_sbm_and_builds_bounded_comparison_url(self):
+        target_ids = []
+        for port, kind in ((9718, "SBK"), (9719, "SBM")):
+            request = urllib.request.Request(
+                self.base + "/api/targets",
+                method="POST",
+                data=json.dumps({
+                    "name": f"{kind} run", "host": "127.0.0.1", "port": port,
+                    "metricsPath": "/metrics", "kind": kind,
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request) as response:
+                target_ids.append(json.load(response)["id"])
+        comparison = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": target_ids}).encode(),
+            headers={"Content-Type": "application/json", "Host": "dashboard.example:9721"},
+        )
+        with urllib.request.urlopen(comparison) as response:
+            body = json.load(response)
+        self.assertTrue(body["dashboardUrl"].startswith("http://dashboard.example:3000/d/sbk-comparison/"))
+        self.assertEqual(2, body["dashboardUrl"].count("var-sbk_endpoints="))
+        self.assertEqual({"SBK", "SBM"}, {target.kind for target in self.registry.list()})
+
+    def test_rejects_invalid_comparison_selections(self):
+        first = self.registry.register("One", "host", 9718, "/metrics")
+        payloads = (
+            {},
+            {"targetIds": [first.id]},
+            {"targetIds": [first.id, first.id]},
+            {"targetIds": [first.id, "missing"]},
+            {"targetIds": [str(index) for index in range(9)]},
+            {"targetIds": [first.id, 123]},
+        )
+        for payload in payloads:
+            request = urllib.request.Request(
+                self.base + "/api/comparison-dashboard",
+                method="POST",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with self.subTest(payload=payload), self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request)
+            self.assertEqual(400, caught.exception.code)
 
     def test_ui_uses_configured_container_default_target_host(self):
         self.server.close()
@@ -360,6 +417,18 @@ class MonitoringContinueTest(unittest.TestCase):
         self.assertEqual(
             "https://grafana.example/base/d/sbk-target/",
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
+        )
+        self.assertEqual(
+            "http://198.51.100.7:3000/d/sbk-comparison/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            ManagedMonitoringStack(dashboard, default).comparison_dashboard_url(
+                ["one", "two"], "198.51.100.7"
+            ),
+        )
+        self.assertEqual(
+            "https://grafana.example/base/d/sbk-comparison/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            ManagedMonitoringStack(dashboard, explicit).comparison_dashboard_url(
+                ["one", "two"], "198.51.100.7"
+            ),
         )
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):

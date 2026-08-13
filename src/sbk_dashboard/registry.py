@@ -43,12 +43,22 @@ class TargetRegistry:
         with self._lock:
             return self._targets.get(target_id)
 
-    def register(self, name: str | None, host: str | None, port: int, metrics_path: str | None) -> BenchmarkTarget:
+    def register(
+        self,
+        name: str | None,
+        host: str | None,
+        port: int,
+        metrics_path: str | None,
+        kind: str | None = None,
+    ) -> BenchmarkTarget:
         if name is not None and not isinstance(name, str):
             raise ValueError("Name must be a string")
         normalized_host = self._validate_host(host)
         normalized_port = self._validate_port(port)
         normalized_path = self._validate_path(metrics_path)
+        normalized_kind = kind.strip().upper() if isinstance(kind, str) else "SBK" if kind is None else ""
+        if normalized_kind not in {"SBK", "SBM"}:
+            raise ValueError("Kind must be SBK or SBM")
         target_id = endpoint_id(normalized_host, normalized_port)
         normalized_name = name.strip() if name and name.strip() else f"{normalized_host}:{normalized_port}"
         if len(normalized_name) > 100:
@@ -59,7 +69,7 @@ class TargetRegistry:
             if len(self._targets) >= self._max_targets:
                 raise ValueError(f"Endpoint limit of {self._max_targets} has been reached")
             target = BenchmarkTarget(
-                target_id, normalized_name, normalized_host, normalized_port, normalized_path, "SBK",
+                target_id, normalized_name, normalized_host, normalized_port, normalized_path, normalized_kind,
                 datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
             next_targets = dict(self._targets)

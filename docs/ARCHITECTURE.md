@@ -84,7 +84,7 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 
 ## Endpoint isolation
 
-1. The user submits a host, port, optional display name, and metrics path.
+1. The user submits a host, port, optional display name, SBK/SBM kind, and metrics path.
 2. Input is normalized and SHA-256 of lowercase `host:port` supplies a stable 16-hex-character endpoint ID.
 3. `targets.json` is atomically replaced.
 4. Prometheus file discovery receives the address, metrics path, and `sbk_endpoint_id` label.
@@ -92,6 +92,12 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 6. Every `SBK_*` PromQL selector receives the endpoint label.
 7. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
 8. `dashboard-mappings.json` records the deterministic relationship.
+
+Reconciliation also derives one `sbk-comparison.json` dashboard from the canonical dashboard. Its multi-value
+`sbk_endpoints` variable is populated from the bounded registration snapshot, and every `SBK_*` selector uses the
+regex matcher `sbk_endpoint_id=~"${sbk_endpoints:regex}"`. The comparison is stateless: the management API validates
+2–8 registered IDs and returns a Grafana URL containing repeated variable parameters. This keeps comparison choices
+request-specific and prevents a combinatorial collection of persisted dashboards.
 
 The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct
 endpoint and dashboard.

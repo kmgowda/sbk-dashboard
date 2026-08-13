@@ -146,6 +146,13 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
+The same reconciliation writes `sbk-comparison.json` with stable UID `sbk-comparison`. It adds a bounded
+multi-select variable containing registered endpoint IDs and rewrites all canonical `SBK_*` selectors with the
+variable's regex matcher. Variable choices display endpoint name, SBK/SBM kind, and exporter address, while legends
+use the immutable endpoint ID so existing Prometheus series keep their original label set and historical continuity.
+`POST /api/comparison-dashboard` validates 2–8 unique registered IDs and returns a request-host-aware Grafana URL;
+it does not mutate registry or monitoring state.
+
 Dashboard mappings persist deterministic default URLs. API responses do not blindly return that stored hostname:
 when `grafana-url` is still the default, the validated direct request `Host` supplies only the browser hostname while
 the configured Grafana scheme, port, and base path remain authoritative.

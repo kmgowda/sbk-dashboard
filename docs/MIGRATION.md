@@ -9,6 +9,12 @@ The Python rewrite preserves the external contract:
 - the monitoring directory, Prometheus TSDB, Grafana data, generated dashboards, and mappings remain in place;
 - the exact canonical Grafana dashboard remains packaged.
 
+The comparison feature adds an optional `kind` field with values `SBK` or `SBM`. Existing registrations lacking the
+field continue to load as `SBK`, so no data migration is required. Reconciliation generates
+`sbk-comparison.json` without changing the label set of existing Prometheus series; endpoint IDs, dedicated dashboard
+UIDs, and historical samples remain unchanged. Comparison selections are carried in Grafana URLs and create no new
+persisted registry.
+
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.
 

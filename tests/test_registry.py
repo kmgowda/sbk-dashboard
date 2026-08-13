@@ -35,6 +35,14 @@ class TargetRegistryTest(unittest.TestCase):
         registry.register("Two", "host", 9719, "/metrics")
         self.assertEqual(2, len(registry.list()))
 
+    def test_registers_sbm_kind_and_rejects_unknown_kind(self):
+        registry = TargetRegistry(self.directory)
+        target = registry.register("SBM run", "host", 9719, "/metrics", "sbm")
+        self.assertEqual("SBM", target.kind)
+        self.assertEqual("SBM", TargetRegistry(self.directory).find(target.id).kind)
+        with self.assertRaisesRegex(ValueError, "Kind must be SBK or SBM"):
+            registry.register("Unknown", "host", 9720, "/metrics", "other")
+
     def test_default_name_path_and_ipv6_address(self):
         target = TargetRegistry(self.directory).register(None, "[2001:db8::1]", 9718, None)
         self.assertEqual("2001:db8::1:9718", target.name)

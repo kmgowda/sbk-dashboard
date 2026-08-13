@@ -18,6 +18,7 @@ The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
+- A live comparison dashboard for any 2–8 selected SBK or SBM endpoints, with shareable URL-backed selection.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
@@ -511,11 +512,22 @@ networking and security guidance, and troubleshooting.
 ```bash
 curl -fsS -X POST http://localhost:9721/api/targets \
   -H 'Content-Type: application/json' \
-  --data '{"name":"NVMe benchmark","host":"benchmark-01.example","port":9718,"metricsPath":"/metrics"}'
+  --data '{"name":"NVMe benchmark","kind":"SBK","host":"benchmark-01.example","port":9718,"metricsPath":"/metrics"}'
 
 curl -fsS http://localhost:9721/api/targets
+
+curl -fsS -X POST http://localhost:9721/api/comparison-dashboard \
+  -H 'Content-Type: application/json' \
+  --data '{"targetIds":["<first-endpoint-id>","<second-endpoint-id>"]}'
+
 curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
 ```
+
+The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
+selected** to open the single live comparison dashboard. Selection is encoded in repeated Grafana
+`var-sbk_endpoints` URL parameters, so the comparison can be bookmarked or shared without creating another
+persistent registry. Live comparison uses wall-clock time; independently timed historical runs are not shifted to a
+common run-relative origin.
 
 ## Persistent files
 

@@ -8,12 +8,13 @@ import re
 import threading
 from importlib.resources import files
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
+COMPARISON_DASHBOARD_UID = "sbk-comparison"
 SBK_SELECTOR = re.compile(r"(SBK_[A-Za-z0-9_]+)(?:\{([^}]*)\})?")
 
 
@@ -49,13 +50,20 @@ class GrafanaDashboardProvisioner:
 
     def dashboard_url(self, target_id: str, browser_host: str | None = None) -> str:
         """Build a dashboard URL, optionally using the host through which the UI was reached."""
+        return f"{self._browser_base_url(browser_host)}/d/{self.dashboard_uid(target_id)}/"
+
+    def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
+        query = urlencode([("var-sbk_endpoints", target_id) for target_id in target_ids])
+        return f"{self._browser_base_url(browser_host)}/d/{COMPARISON_DASHBOARD_UID}/?{query}"
+
+    def _browser_base_url(self, browser_host: str | None) -> str:
         base_url = self.grafana_public_url
         if browser_host:
             parsed = urlsplit(base_url)
             formatted_host = f"[{browser_host}]" if ":" in browser_host else browser_host
             netloc = formatted_host if parsed.port is None else f"{formatted_host}:{parsed.port}"
             base_url = urlunsplit((parsed.scheme, netloc, parsed.path, "", "")).rstrip("/")
-        return f"{base_url}/d/{self.dashboard_uid(target_id)}/"
+        return base_url
 
     def generated_dashboard(self, target: BenchmarkTarget) -> dict[str, object]:
         dashboard = copy.deepcopy(self._canonical)
@@ -68,10 +76,45 @@ class GrafanaDashboardProvisioner:
         self._scope(dashboard, target.id)
         return dashboard
 
+    def generated_comparison_dashboard(self, targets: list[BenchmarkTarget]) -> dict[str, object]:
+        dashboard = copy.deepcopy(self._canonical)
+        dashboard["id"] = None
+        dashboard["uid"] = COMPARISON_DASHBOARD_UID
+        dashboard["title"] = "SBK/SBM Live Comparison"
+        dashboard["version"] = 1
+        tags = dashboard.setdefault("tags", [])
+        tags.extend(["sbk-dashboard-managed", "comparison"])
+        templating = dashboard.setdefault("templating", {})
+        variables = templating.setdefault("list", [])
+        options = [
+            {
+                "selected": False,
+                "text": f"{target.name} ({target.kind}) — {target.prometheus_address}",
+                "value": target.id,
+            }
+            for target in targets
+        ]
+        variables.append({
+            "name": "sbk_endpoints",
+            "label": "SBK/SBM endpoints",
+            "type": "custom",
+            "query": ",".join(target.id for target in targets),
+            "options": options,
+            "current": {"selected": False, "text": [], "value": []},
+            "multi": True,
+            "includeAll": False,
+            "hide": 0,
+            "skipUrlSync": False,
+        })
+        self._scope_comparison(dashboard)
+        return dashboard
+
     def reconcile(self, targets: list[BenchmarkTarget]) -> None:
         with self._lock:
             self.dashboard_directory.mkdir(parents=True, exist_ok=True)
-            expected: set[Path] = set()
+            comparison_path = self.dashboard_directory / f"{COMPARISON_DASHBOARD_UID}.json"
+            atomic_json(comparison_path, self.generated_comparison_dashboard(targets))
+            expected: set[Path] = {comparison_path}
             for target in targets:
                 path = self.dashboard_directory / f"{self.dashboard_uid(target.id)}.json"
                 expected.add(path)
@@ -91,14 +134,32 @@ class GrafanaDashboardProvisioner:
             for child in node:
                 self._scope(child, target_id)
 
+    def _scope_comparison(self, node: object) -> None:
+        if isinstance(node, dict):
+            expression = node.get("expr")
+            if isinstance(expression, str) and SBK_SELECTOR.search(expression):
+                node["expr"] = self._scope_promql(expression, "${sbk_endpoints:regex}", regex=True)
+                legend = node.get("legendFormat")
+                if not isinstance(legend, str) or legend in {"", "__auto"}:
+                    node["legendFormat"] = "{{sbk_endpoint_id}}"
+                elif "{{sbk_endpoint_id}}" not in legend:
+                    node["legendFormat"] = f"{{{{sbk_endpoint_id}}}} — {legend}"
+            for key, value in node.items():
+                if key not in {"expr", "legendFormat"}:
+                    self._scope_comparison(value)
+        elif isinstance(node, list):
+            for child in node:
+                self._scope_comparison(child)
+
     @staticmethod
-    def _scope_promql(expression: str, target_id: str) -> str:
+    def _scope_promql(expression: str, target_id: str, *, regex: bool = False) -> str:
         def replacement(match: re.Match[str]) -> str:
             labels = match.group(2)
+            operator = "=~" if regex else "="
             suffix = (
-                f',sbk_endpoint_id="{target_id}"'
+                f',sbk_endpoint_id{operator}"{target_id}"'
                 if labels and labels.strip()
-                else f'sbk_endpoint_id="{target_id}"'
+                else f'sbk_endpoint_id{operator}"{target_id}"'
             )
             return f"{match.group(1)}{{{labels or ''}{suffix}}}"
 
