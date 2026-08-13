@@ -119,12 +119,15 @@ The HTTP layer has one `_mutation_lock`, so create/delete and their monitoring r
 Registration proceeds as follows:
 
 1. bound request parsing and validation;
-2. atomic registry persistence;
-3. deterministic reconciliation of discovery, dashboards, mappings, and status;
-4. API rendering with a request-specific dashboard hostname; and
-5. HTTP 201.
+2. return the existing immutable target with HTTP 200 when all normalized registration fields exactly match;
+3. otherwise, atomic registry persistence for a new endpoint identity;
+4. deterministic reconciliation of discovery, dashboards, mappings, and status;
+5. API rendering with a request-specific dashboard hostname; and
+6. HTTP 201 for the new target.
 
-If step 3 fails, the new registration is removed, the prior snapshot is reconciled best-effort, and the request
+An exact repeat does not persist or reconcile and therefore cannot generate another dashboard. Different name,
+metrics path, or kind values for an existing `host:port` are rejected instead of mutating it. If reconciliation
+fails, the new registration is removed, the prior snapshot is reconciled best-effort, and the request
 fails. Deletion saves the immutable target, removes it, reconciles, and restores it on failure. This is a
 compensating transaction across several atomically replaced files; there is no database transaction coordinator.
 
@@ -163,13 +166,18 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
-The same reconciliation writes `sbk-comparison.json` with stable UID `sbk-comparison`. It adds a bounded
-multi-select variable containing registered endpoint IDs and rewrites all canonical `SBK_*` selectors with the
-variable's regex matcher. Variable choices display endpoint name, SBK/SBM kind, and exporter address. Legends use
-the readable dashboard name and kind followed by the immutable endpoint ID, so duplicate display names remain
-distinguishable.
-`POST /api/comparison-dashboard` validates 2–8 unique registered IDs and returns a request-host-aware Grafana URL;
-it does not mutate registry or monitoring state.
+`POST /api/comparison-dashboard` validates 2–8 unique registered IDs, sorts the set, and derives a stable
+`sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
+selection's canonical-dashboard clone and returns a request-host-aware Grafana URL. Repeating the same set in any
+order reuses the UID and file. The dashboard adds a multi-select variable containing only the selected endpoint IDs
+and rewrites all canonical `SBK_*` selectors with the variable's regex matcher. Variable choices display endpoint
+name, SBK/SBM kind, and exporter address. Legends use the readable dashboard name and kind followed by the immutable
+endpoint ID, so duplicate display names remain distinguishable.
+
+Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
+selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains
+entries whose endpoints remain registered, and removes malformed entries or entries containing a deleted endpoint.
+Comparison definitions do not alter endpoint registration or mapping persistence.
 
 Dashboard mappings persist deterministic default URLs. API responses do not blindly return that stored hostname:
 when `grafana-url` is still the default, the validated direct request `Host` supplies only the browser hostname while
@@ -232,6 +240,12 @@ terminates the native descendant tree. If a guardian disappears unexpectedly, th
 still detects and cleans the remaining tree during restart/shutdown.
 On Windows, guardian termination additionally closes the only Job Object handle, so the kernel terminates any
 surviving job member without waiting for polling or a later supervisor pass.
+
+`main.select_native_ports()` classifies port sources before native-tool bootstrap. Built-in defaults use
+`PortProcessManager.find_available()` and may receive a bounded fallback; CLI/environment ports use
+`require_available()` and fail with listener identity without stopping it. `ManagedMonitoringStack._start()` passes
+per-service replacement policy into the final two-port inspection, preserving the same rule if a listener appears
+between selection and acquisition. Continue mode retains the requested ports for compatible attachment.
 
 ## Threads and processes
 

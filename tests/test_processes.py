@@ -276,6 +276,59 @@ class LifecycleTest(unittest.TestCase):
             PortProcessManager.find_available(9090, "127.0.0.1")
         self.assertEqual(3, available.call_count)
 
+    def test_user_supplied_busy_port_reports_owner_and_never_stops_it(self):
+        listener = SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            laddr=SimpleNamespace(port=19090),
+            pid=42,
+        )
+        owner = MagicMock(pid=42)
+        owner.exe.return_value = "/opt/prometheus/prometheus"
+        with (
+            patch.object(PortProcessManager, "available", return_value=False),
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.psutil.Process", return_value=owner),
+            self.assertRaisesRegex(
+                OSError,
+                r"Prometheus port 19090.*PID 42 \(/opt/prometheus/prometheus\).*"
+                r"environment SBK_DASHBOARD_PROMETHEUS_PORT.*no process was stopped",
+            ),
+        ):
+            PortProcessManager.require_available(
+                "Prometheus",
+                19090,
+                "127.0.0.1",
+                "environment SBK_DASHBOARD_PROMETHEUS_PORT",
+            )
+        owner.terminate.assert_not_called()
+        owner.kill.assert_not_called()
+
+    def test_replacement_check_rejects_busy_user_port_even_for_expected_executable(self):
+        listener = SimpleNamespace(
+            status=psutil.CONN_LISTEN,
+            laddr=SimpleNamespace(port=19090),
+            pid=42,
+        )
+        owner = MagicMock(pid=42)
+        owner.exe.return_value = "/opt/prometheus/prometheus"
+        with (
+            patch("sbk_dashboard.processes.psutil.net_connections", return_value=[listener]),
+            patch("sbk_dashboard.processes.psutil.Process", return_value=owner),
+            self.assertRaisesRegex(OSError, "already in use by PID 42"),
+        ):
+            PortProcessManager._inspect(
+                "Prometheus",
+                "prometheus",
+                19090,
+                "127.0.0.1",
+                {"prometheus"},
+                MagicMock(),
+                [],
+                allow_replacement=False,
+            )
+        owner.terminate.assert_not_called()
+        owner.kill.assert_not_called()
+
     def test_windows_port_probe_requests_exclusive_address_use(self):
         connection_context, connection = self._socket_context()
         probe_context, probe = self._socket_context()

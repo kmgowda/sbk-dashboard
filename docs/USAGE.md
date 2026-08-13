@@ -246,9 +246,11 @@ The landing-page form accepts:
 | Port | SBK/SBM PrometheusLogger HTTP port, from 1 through 65535 |
 | Metrics path | Absolute HTTP path, normally `/metrics` |
 
-Identity is based only on normalized `host:port`. A different display name or metrics path does not create another
-identity (and a duplicate registration is rejected), while the same host on a second port produces an independent
-dashboard.
+Identity is based only on normalized `host:port`. Repeating the same normalized host, port, display name, metrics
+path, and benchmark type is idempotent: the existing endpoint and dashboard ID are returned and no duplicate
+dashboard is generated. If the same `host:port` is submitted with a different name, metrics path, or benchmark type,
+the request is rejected rather than silently changing the existing registration. The same host on a second port
+produces an independent dashboard.
 
 Endpoint states mean:
 
@@ -265,11 +267,14 @@ Select between two and eight endpoint checkboxes on the landing page, then choos
 Grafana dashboard applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
 friendly dashboard name, benchmark type, and stable endpoint ID. For example: `Primary NVMe [SBK · f9720cad…] —
 Average Latency`. The selector also displays the exporter address. The generated URL contains the selection and can
-be bookmarked or shared. No comparison definition is persisted separately.
+be bookmarked or shared. The normalized endpoint set deterministically produces one
+`sbk-comparison-<16-hex>` ID: repeating the same selection in any order reuses the same dashboard ID and URL.
+Generated comparison files are a bounded cache of 128 entries rather than a separate user-managed registry.
 
 Comparison is intended for concurrent or otherwise wall-clock-overlapping exporters. It does not align separate
 historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already
-scraped samples remain subject to normal Prometheus retention.
+scraped samples remain subject to normal Prometheus retention and removes cached comparisons containing that
+endpoint during reconciliation.
 
 ## Use public and remote addresses
 
@@ -319,8 +324,15 @@ container-managed history and registrations is intended.
 
 ## Existing native services
 
-The default `-continue false` mode verifies both configured listener owners before replacing either one. It refuses
-to stop unrelated or unidentified processes.
+Startup identifies each native port as the built-in default, a command-line/environment value, or a bounded
+automatic fallback selected because the default was occupied. If `-prometheus-port`, `-grafana-port`,
+`SBK_DASHBOARD_PROMETHEUS_PORT`, or `SBK_DASHBOARD_GRAFANA_PORT` supplies a port that is already in use, startup
+reports the bind address and listener PID/executable when available, stops no process, and exits. Prometheus and
+Grafana must also use distinct ports.
+
+The default `-continue false` mode rechecks both ports immediately before starting either service, so a listener
+that appears after initial selection cannot cause an operator-supplied port to be replaced. It also refuses to stop
+unrelated or unidentified processes.
 
 `-continue true` attaches only when the configured Prometheus and Grafana health endpoints are already compatible:
 

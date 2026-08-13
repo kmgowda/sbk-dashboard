@@ -85,6 +85,8 @@ runtime data as source material.
 
 - Constructors have no native-process side effects. `start()` acquires resources; `close()` is idempotent.
 - Validate both configured port owners before stopping either existing service.
+- CLI/environment Prometheus and Grafana ports are authoritative and non-replaceable: if occupied, report the
+  identifiable owner and fail without stopping it. Only unspecified built-in defaults may receive automatic fallback.
 - With `-continue false`, replace only verified Prometheus/Grafana listeners. Never kill unrelated or unidentified
   processes.
 - With `-continue true`, attach only to healthy compatible services; attached services are observed but never

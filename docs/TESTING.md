@@ -118,6 +118,10 @@ Windows Job Object unit tests verify the kill-on-close limit, process assignment
 resume, and suspended creation flags on every platform. A native Windows smoke test must additionally kill the
 guardian and main dashboard independently and confirm Prometheus/Grafana plus descendants disappear within the
 bounded cleanup period; Linux simulation is not a native Job Object claim.
+Native-port tests verify startup reporting for available defaults, automatic fallbacks, CLI values, and environment
+values; occupied operator-supplied ports report identifiable owners and stop no process. A second acquisition-time
+test verifies that even an expected Prometheus/Grafana executable cannot be replaced on an operator-supplied port
+if it appears after initial selection. Continue-mode tests retain compatible attachment behavior.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,
@@ -133,6 +137,12 @@ placeholder reaches the browser.
 Target-health regressions also start with a registered endpoint absent from a successful Prometheus target response,
 verify it transitions from initial `pending` to `down`, and then publish an active healthy target to verify recovery
 to `up` and exact summary counts in both states.
+
+Registration regressions submit the same normalized host, port, metrics path, display name, and kind repeatedly and
+verify that the first request creates one endpoint with HTTP 201 while every exact repeat returns that same endpoint
+and dashboard with HTTP 200. Conflicting metadata for the same `host:port` remains rejected. Comparison regressions
+likewise verify that the same endpoint set in any order returns the same deterministic comparison dashboard ID and
+URL.
 
 Reconciliation-generation regressions block a Prometheus status response while replacing the target set and verify
 that the obsolete response cannot remove the new endpoint's `pending` state or restore a deleted endpoint. Command
@@ -214,9 +224,9 @@ across landing and Grafana categories, per-category capacity eviction, exact two
 unchanged; direct native-server clients are deliberately not asserted as observable.
 
 Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
-complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, stable comparison UID, bounded
-2–8-ID API validation, request-host URL behavior, and survival of the shared comparison dashboard when endpoint
-clones are reconciled or removed. A native smoke test should run two concurrent exporters, select both on the landing
+complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
+comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-host URL behavior, and removal of cached
+comparisons when an endpoint is removed. A native smoke test should run two concurrent exporters, select both on the landing
 page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
 
 ## venv and Conda checks

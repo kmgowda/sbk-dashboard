@@ -6,6 +6,15 @@ from sbk_dashboard.config import RuntimePlatform, load_download_config, parse_co
 
 
 class ConfigurationTest(unittest.TestCase):
+    def test_native_port_source_distinguishes_defaults_cli_and_environment(self):
+        defaults = parse_configuration([], {}).monitoring
+        command_line = parse_configuration(["-prometheus-port", "19090"], {}).monitoring
+        environment = parse_configuration([], {"SBK_DASHBOARD_GRAFANA_PORT": "13000"}).monitoring
+        self.assertFalse(defaults.port_was_supplied("prometheus"))
+        self.assertFalse(defaults.port_was_supplied("grafana"))
+        self.assertTrue(command_line.port_was_supplied("prometheus"))
+        self.assertTrue(environment.port_was_supplied("grafana"))
+
     def test_defaults(self):
         config = parse_configuration([], {})
         self.assertEqual(9721, config.dashboard.port)

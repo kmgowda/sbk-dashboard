@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import re
@@ -46,8 +47,15 @@ class FakeMonitoring:
     def comparison_dashboard_url(self, target_ids, browser_host=None):
         host = browser_host or "grafana"
         formatted = f"[{host}]" if ":" in host else host
-        query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in target_ids)
-        return f"http://{formatted}:3000/d/sbk-comparison/?{query}"
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in normalized)
+        return f"http://{formatted}:3000/d/sbk-comparison-{digest}/?{query}"
+
+    def comparison_dashboard_id(self, target_ids):
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        return f"sbk-comparison-{digest}"
 
 
 class AssetRenderingTest(unittest.TestCase):
@@ -143,6 +151,16 @@ class WebTest(unittest.TestCase):
             self.assertEqual(201, response.status)
             self.assertIn("dashboardUrl", created)
             self.assertEqual("SBK", created["kind"])
+        repeated_request = urllib.request.Request(
+            self.base + "/api/targets", method="POST", data=json.dumps({
+                "name": " Run ", "kind": "sbk", "host": "127.0.0.1", "port": 9718,
+                "metricsPath": "/metrics",
+            }).encode(), headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(repeated_request) as response:
+            repeated = json.load(response)
+            self.assertEqual(200, response.status)
+        self.assertEqual(created, repeated)
         with urllib.request.urlopen(self.base + "/api/targets") as response:
             self.assertEqual(1, len(json.load(response)))
         for host, expected in (
@@ -187,8 +205,22 @@ class WebTest(unittest.TestCase):
         )
         with urllib.request.urlopen(comparison) as response:
             body = json.load(response)
-        self.assertTrue(body["dashboardUrl"].startswith("http://dashboard.example:3000/d/sbk-comparison/"))
+        self.assertTrue(body["dashboardId"].startswith("sbk-comparison-"))
+        self.assertTrue(
+            body["dashboardUrl"].startswith(
+                f"http://dashboard.example:3000/d/{body['dashboardId']}/"
+            )
+        )
         self.assertEqual(2, body["dashboardUrl"].count("var-sbk_endpoints="))
+        repeated = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": list(reversed(target_ids))}).encode(),
+            headers={"Content-Type": "application/json", "Host": "dashboard.example:9721"},
+        )
+        with urllib.request.urlopen(repeated) as response:
+            repeated_body = json.load(response)
+        self.assertEqual(body, repeated_body)
         self.assertEqual({"SBK", "SBM"}, {target.kind for target in self.registry.list()})
 
     def test_rejects_invalid_comparison_selections(self):
@@ -412,6 +444,13 @@ class MonitoringContinueTest(unittest.TestCase):
             Path("unused"), data / "unused", 19090, 3000, "https://grafana.example/base",
             {"grafana-url": "command line"},
         )
+        first = BenchmarkTarget("one", "One", "bench.example", 9718, "/metrics", "SBK", "now")
+        second = BenchmarkTarget("two", "Two", "bench.example", 9719, "/metrics", "SBM", "now")
+        default_stack = ManagedMonitoringStack(dashboard, default)
+        explicit_stack = ManagedMonitoringStack(dashboard, explicit)
+        default_stack._targets = (first, second)
+        explicit_stack._targets = (first, second)
+        comparison_uid = default_stack.dashboard_provisioner.comparison_dashboard_uid(["one", "two"])
         self.assertEqual(
             "http://198.51.100.7:3000/d/sbk-target/",
             ManagedMonitoringStack(dashboard, default).dashboard_url("target", "198.51.100.7"),
@@ -421,16 +460,12 @@ class MonitoringContinueTest(unittest.TestCase):
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
         self.assertEqual(
-            "http://198.51.100.7:3000/d/sbk-comparison/?var-sbk_endpoints=one&var-sbk_endpoints=two",
-            ManagedMonitoringStack(dashboard, default).comparison_dashboard_url(
-                ["one", "two"], "198.51.100.7"
-            ),
+            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            default_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
         self.assertEqual(
-            "https://grafana.example/base/d/sbk-comparison/?var-sbk_endpoints=one&var-sbk_endpoints=two",
-            ManagedMonitoringStack(dashboard, explicit).comparison_dashboard_url(
-                ["one", "two"], "198.51.100.7"
-            ),
+            f"https://grafana.example/base/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            explicit_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):
@@ -532,6 +567,35 @@ class MonitoringContinueTest(unittest.TestCase):
         command = ManagedMonitoringStack(dashboard, monitoring)._prometheus_command()
         self.assertIn("--web.listen-address=127.0.0.1:19090", command)
         self.assertIn("--storage.tsdb.retention.time=7d", command)
+
+    def test_stack_never_replaces_operator_supplied_native_ports(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            Path("prometheus"),
+            data / "grafana",
+            19090,
+            13000,
+            "http://localhost:13000",
+            {
+                "prometheus-port": "command line",
+                "grafana-port": "environment SBK_DASHBOARD_GRAFANA_PORT",
+            },
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        with (
+            mock.patch.object(stack, "_prepare_configuration"),
+            mock.patch.object(stack, "reconcile"),
+            mock.patch.object(stack, "_validate_prometheus_configuration"),
+            mock.patch(
+                "sbk_dashboard.monitoring.PortProcessManager.terminate_existing",
+                side_effect=OSError("busy user port"),
+            ) as terminate,
+            self.assertRaisesRegex(OSError, "busy user port"),
+        ):
+            stack.start([])
+        self.assertFalse(terminate.call_args.kwargs["replace_prometheus"])
+        self.assertFalse(terminate.call_args.kwargs["replace_grafana"])
 
     def test_promtool_validates_generated_configuration_and_rejects_failure(self):
         data = Path(self.temporary.name)

@@ -134,6 +134,11 @@ class MonitoringConfig:
     def with_tools(self, prometheus_binary: Path, grafana_home: Path) -> MonitoringConfig:
         return replace(self, prometheus_binary=prometheus_binary, grafana_home=grafana_home)
 
+    def port_was_supplied(self, component: str) -> bool:
+        """Return whether an operator selected this native port by CLI or environment."""
+        source = self.sources.get(f"{component}-port", "default")
+        return source == "command line" or source.startswith("environment ")
+
     def with_runtime_ports(self, prometheus_port: int, grafana_port: int) -> MonitoringConfig:
         sources = dict(self.sources)
         if prometheus_port != self.prometheus_port:
@@ -205,10 +210,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("-retention", "--retention-days", dest="retention", metavar="days",
                         help="Prometheus retention days (default: 7)")
     result.add_argument("-prometheus-bin", metavar="path", help="Prometheus executable")
-    result.add_argument("-prometheus-port", metavar="port", help="managed Prometheus port (default: 9090)")
+    result.add_argument(
+        "-prometheus-port",
+        metavar="port",
+        help="managed Prometheus port (default: 9090; supplied busy ports fail startup)",
+    )
     result.add_argument("-prometheus-bind", metavar="address", help="Prometheus bind address (default: 127.0.0.1)")
     result.add_argument("-grafana-home", metavar="directory", help="Grafana installation home")
-    result.add_argument("-grafana-port", metavar="port", help="managed Grafana port (default: 3000)")
+    result.add_argument(
+        "-grafana-port",
+        metavar="port",
+        help="managed Grafana port (default: 3000; supplied busy ports fail startup)",
+    )
     result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
     result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")

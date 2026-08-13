@@ -65,12 +65,16 @@ Endpoint registration is a serialized compensating transaction:
 validate request
       |
       v
+existing exact registration? -- yes --> return existing dashboard (HTTP 200)
+      |
+      no
+      v
 atomically persist targets.json
       |
       v
 rewrite discovery + dashboard clones + mappings + status snapshot
       |
-      +-- success --> HTTP 201
+      +-- success --> new dashboard (HTTP 201)
       |
       `-- failure --> restore previous registry + best-effort reconcile + HTTP 500
 ```
@@ -86,20 +90,23 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 
 1. The user submits a host, port, optional display name, SBK/SBM kind, and metrics path.
 2. Input is normalized and SHA-256 of lowercase `host:port` supplies a stable 16-hex-character endpoint ID.
-3. `targets.json` is atomically replaced.
-4. Prometheus file discovery receives the address, metrics path, and `sbk_endpoint_id` label.
+3. An exact normalized repeat returns the existing registration without rewriting state or creating another
+   dashboard; conflicting metadata for the same identity is rejected.
+4. `targets.json` is atomically replaced for a new identity.
+5. Prometheus file discovery receives the address, metrics path, and `sbk_endpoint_id` label.
    The stable registered name and SBK/SBM kind are attached as `sbk_dashboard_name` and `sbk_kind` for readable,
    endpoint-distinct comparison legends.
-5. The canonical dashboard is deep-copied without changing its panels or visualization settings.
-6. Every `SBK_*` PromQL selector receives the endpoint label.
-7. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
-8. `dashboard-mappings.json` records the deterministic relationship.
+6. The canonical dashboard is deep-copied without changing its panels or visualization settings.
+7. Every `SBK_*` PromQL selector receives the endpoint label.
+8. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
+9. `dashboard-mappings.json` records the deterministic relationship.
 
-Reconciliation also derives one `sbk-comparison.json` dashboard from the canonical dashboard. Its multi-value
-`sbk_endpoints` variable is populated from the bounded registration snapshot, and every `SBK_*` selector uses the
-regex matcher `sbk_endpoint_id=~"${sbk_endpoints:regex}"`. The comparison is stateless: the management API validates
-2–8 registered IDs and returns a Grafana URL containing repeated variable parameters. This keeps comparison choices
-request-specific and prevents a combinatorial collection of persisted dashboards.
+The comparison API normalizes 2–8 unique registered endpoint IDs by sorting them and derives
+`sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard clone
+for the selection; the same set in any order therefore reuses the same Grafana UID, file, and URL. Its multi-value
+`sbk_endpoints` variable contains only that selection, and every `SBK_*` selector uses the regex matcher
+`sbk_endpoint_id=~"${sbk_endpoints:regex}"`. Generated comparisons form a bounded 128-entry cache. Oldest entries
+are evicted deterministically, and reconciliation removes cached comparisons containing deleted registrations.
 
 The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct
 endpoint and dashboard.
@@ -318,6 +325,13 @@ surviving descendants, checks the final wait result, and treats any survivor as 
 POSIX, a final group kill also covers a descendant created after the initial process-tree snapshot. On Windows,
 closing the guardian's Job Object is the final kernel-enforced bound. Attached services remain excluded from
 termination.
+
+Native port selection precedes tool bootstrap. An available unspecified port retains its built-in default; an
+occupied unspecified default receives a bounded deterministic fallback. CLI/environment ports are authoritative
+and must be available and distinct. They are checked once during selection and again atomically with existing-owner
+inspection before either service is replaced, so a late listener produces a detailed startup failure and is never
+terminated. `-continue true` deliberately bypasses availability selection because those listeners must exist and
+pass compatibility health checks before attachment.
 
 ## Authentication and container boundary
 

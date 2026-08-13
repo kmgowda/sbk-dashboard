@@ -23,10 +23,10 @@ from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.network import normalize_host
 from sbk_dashboard.processes import LifecycleController, LifecycleState
+from sbk_dashboard.provisioning import MAX_COMPARISON_TARGETS, MIN_COMPARISON_TARGETS
 from sbk_dashboard.registry import TargetRegistry
 
 MAX_REQUEST_BYTES = 64 * 1024
-MAX_COMPARISON_TARGETS = 8
 MAX_TRACKED_CLIENTS = 10_000
 LANDING_ACTIVITY_SECONDS = 120.0
 GRAFANA_ACTIVITY_SECONDS = 300.0
@@ -207,20 +207,22 @@ class DashboardHttpServer:
         if isinstance(port, bool) or not isinstance(port, int):
             raise ValueError("Port must be between 1 and 65535")
         with self._mutation_lock:
-            target = self.registry.register(
+            registration = self.registry.register_with_status(
                 body.get("name"), body.get("host"), port, body.get("metricsPath"), body.get("kind")
             )
-            try:
-                self.monitoring.reconcile(self.registry.list())
-            except Exception:
+            target = registration.target
+            if registration.created:
                 try:
-                    if not self.registry.remove(target.id):
-                        raise OSError("Registered target disappeared before rollback")
-                except Exception as rollback_error:
-                    raise OSError("Unable to roll back failed target registration") from rollback_error
-                self._best_effort_reconcile("registration rollback")
-                raise
-        self._json(request, 201, self._view(request, target))
+                    self.monitoring.reconcile(self.registry.list())
+                except Exception:
+                    try:
+                        if not self.registry.remove(target.id):
+                            raise OSError("Registered target disappeared before rollback")
+                    except Exception as rollback_error:
+                        raise OSError("Unable to roll back failed target registration") from rollback_error
+                    self._best_effort_reconcile("registration rollback")
+                    raise
+        self._json(request, 201 if registration.created else 200, self._view(request, target))
 
     def _comparison_dashboard(self, request: BaseHTTPRequestHandler) -> None:
         self._require(request, "POST")
@@ -228,7 +230,7 @@ class DashboardHttpServer:
         values = body.get("targetIds")
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError("Target IDs must be an array of strings")
-        if len(values) < 2:
+        if len(values) < MIN_COMPARISON_TARGETS:
             raise ValueError("Select at least two endpoints to compare")
         if len(values) > MAX_COMPARISON_TARGETS:
             raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
@@ -241,7 +243,8 @@ class DashboardHttpServer:
             dashboard_url = self.monitoring.comparison_dashboard_url(
                 target_ids, self._request_hostname(request)
             )
-        self._json(request, 200, {"dashboardUrl": dashboard_url})
+            dashboard_id = self.monitoring.comparison_dashboard_id(target_ids)
+        self._json(request, 200, {"dashboardId": dashboard_id, "dashboardUrl": dashboard_url})
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")

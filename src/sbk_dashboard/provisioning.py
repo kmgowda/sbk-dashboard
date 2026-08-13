@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import threading
 from importlib.resources import files
@@ -13,7 +14,11 @@ from sbk_dashboard.files import atomic_json
 from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
-COMPARISON_DASHBOARD_UID = "sbk-comparison"
+COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
+MIN_COMPARISON_TARGETS = 2
+MAX_COMPARISON_TARGETS = 8
+MAX_COMPARISON_DASHBOARDS = 128
+MAX_GENERATED_DASHBOARD_BYTES = 2 * 1024 * 1024
 SBK_METRIC_PREFIX = "SBK_"
 SBK_ENDPOINT_LABEL = "sbk_endpoint_id"
 
@@ -57,9 +62,17 @@ class GrafanaDashboardProvisioner:
         """Build a dashboard URL, optionally using the host through which the UI was reached."""
         return f"{self._browser_base_url(browser_host)}/d/{self.dashboard_uid(target_id)}/"
 
+    @staticmethod
+    def comparison_dashboard_uid(target_ids: list[str]) -> str:
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        return f"{COMPARISON_DASHBOARD_PREFIX}{digest}"
+
     def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
-        query = urlencode([("var-sbk_endpoints", target_id) for target_id in target_ids])
-        return f"{self._browser_base_url(browser_host)}/d/{COMPARISON_DASHBOARD_UID}/?{query}"
+        normalized = sorted(set(target_ids))
+        query = urlencode([("var-sbk_endpoints", target_id) for target_id in normalized])
+        uid = self.comparison_dashboard_uid(normalized)
+        return f"{self._browser_base_url(browser_host)}/d/{uid}/?{query}"
 
     def _browser_base_url(self, browser_host: str | None) -> str:
         base_url = self.grafana_public_url
@@ -82,11 +95,21 @@ class GrafanaDashboardProvisioner:
         return dashboard
 
     def generated_comparison_dashboard(self, targets: list[BenchmarkTarget]) -> dict[str, object]:
+        targets = sorted(targets, key=lambda target: target.id)
+        target_ids = [target.id for target in targets]
+        if (
+            not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
+            or len(set(target_ids)) != len(target_ids)
+        ):
+            raise ValueError(
+                f"Comparison dashboards require {MIN_COMPARISON_TARGETS}–{MAX_COMPARISON_TARGETS} unique endpoints"
+            )
         dashboard = copy.deepcopy(self._canonical)
         dashboard["id"] = None
-        dashboard["uid"] = COMPARISON_DASHBOARD_UID
+        dashboard["uid"] = self.comparison_dashboard_uid(target_ids)
         dashboard["title"] = "SBK/SBM Live Comparison"
         dashboard["version"] = 1
+        dashboard["sbkDashboardComparisonEndpointIds"] = target_ids
         tags = dashboard.setdefault("tags", [])
         tags.extend(["sbk-dashboard-managed", "comparison"])
         templating = dashboard.setdefault("templating", {})
@@ -105,7 +128,11 @@ class GrafanaDashboardProvisioner:
             "type": "custom",
             "query": ",".join(target.id for target in targets),
             "options": options,
-            "current": {"selected": False, "text": [], "value": []},
+            "current": {
+                "selected": True,
+                "text": [option["text"] for option in options],
+                "value": target_ids,
+            },
             "multi": True,
             "includeAll": False,
             "hide": 0,
@@ -114,19 +141,71 @@ class GrafanaDashboardProvisioner:
         self._scope_comparison(dashboard)
         return dashboard
 
+    def ensure_comparison_dashboard(self, targets: list[BenchmarkTarget]) -> str:
+        """Atomically provision and reuse the deterministic dashboard for one endpoint set."""
+        dashboard = self.generated_comparison_dashboard(targets)
+        uid = str(dashboard["uid"])
+        with self._lock:
+            self.dashboard_directory.mkdir(parents=True, exist_ok=True)
+            atomic_json(self.dashboard_directory / f"{uid}.json", dashboard)
+            self._prune_comparison_dashboards(uid)
+        return uid
+
     def reconcile(self, targets: list[BenchmarkTarget]) -> None:
         with self._lock:
             self.dashboard_directory.mkdir(parents=True, exist_ok=True)
-            comparison_path = self.dashboard_directory / f"{COMPARISON_DASHBOARD_UID}.json"
-            atomic_json(comparison_path, self.generated_comparison_dashboard(targets))
-            expected: set[Path] = {comparison_path}
+            expected: set[Path] = set()
             for target in targets:
                 path = self.dashboard_directory / f"{self.dashboard_uid(target.id)}.json"
                 expected.add(path)
                 atomic_json(path, self.generated_dashboard(target))
+            targets_by_id = {target.id: target for target in targets}
+            for path in self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"):
+                comparison_ids = self._comparison_target_ids(path)
+                if comparison_ids is None or any(target_id not in targets_by_id for target_id in comparison_ids):
+                    continue
+                expected.add(path)
             for path in self.dashboard_directory.glob("sbk-*.json"):
                 if path not in expected:
                     path.unlink(missing_ok=True)
+            self._prune_comparison_dashboards("")
+
+    @staticmethod
+    def _comparison_target_ids(path: Path) -> list[str] | None:
+        try:
+            with path.open("rb") as source:
+                content = source.read(MAX_GENERATED_DASHBOARD_BYTES + 1)
+            if len(content) > MAX_GENERATED_DASHBOARD_BYTES:
+                return None
+            value = json.loads(content.decode("utf-8"))
+            target_ids = value.get("sbkDashboardComparisonEndpointIds")
+        except (OSError, UnicodeDecodeError, ValueError, AttributeError):
+            return None
+        if (
+            not isinstance(target_ids, list)
+            or not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
+            or any(not isinstance(target_id, str) for target_id in target_ids)
+            or target_ids != sorted(set(target_ids))
+            or value.get("uid") != GrafanaDashboardProvisioner.comparison_dashboard_uid(target_ids)
+        ):
+            return None
+        return target_ids
+
+    def _prune_comparison_dashboards(self, retained_uid: str) -> None:
+        paths = list(self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"))
+        if len(paths) <= MAX_COMPARISON_DASHBOARDS:
+            return
+        candidates: list[tuple[int, str, Path]] = []
+        for path in paths:
+            if path.stem == retained_uid:
+                continue
+            try:
+                candidates.append((path.stat().st_mtime_ns, path.name, path))
+            except OSError:
+                continue
+        remove_count = len(paths) - MAX_COMPARISON_DASHBOARDS
+        for _modified, _name, path in sorted(candidates)[:remove_count]:
+            path.unlink(missing_ok=True)
 
     def _scope(self, node: object, target_id: str) -> None:
         if isinstance(node, dict):

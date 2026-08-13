@@ -18,7 +18,8 @@ The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
-- A live comparison dashboard for any 2–8 selected SBK or SBM endpoints, with shareable URL-backed selection.
+- A deterministic live comparison dashboard for any 2–8 selected SBK or SBM endpoints, with a reusable ID and
+  shareable URL for the same endpoint set.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
@@ -335,10 +336,10 @@ from Grafana's local listen address.
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus retention days (default 7)
 -prometheus-bin <path>        Prometheus executable (PATH, then download)
--prometheus-port <port>       Prometheus port (default 9090; auto-selects if omitted and occupied)
+-prometheus-port <port>       Prometheus port (default 9090; omitted default auto-selects; supplied busy port fails)
 -prometheus-bind <address>    Prometheus bind address (default 127.0.0.1)
 -grafana-home <path>          Grafana home (system path, then download)
--grafana-port <port>          Grafana port (default 3000; auto-selects if omitted and occupied)
+-grafana-port <port>          Grafana port (default 3000; omitted default auto-selects; supplied busy port fails)
 -grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
@@ -419,9 +420,15 @@ Pass it using `-monitoring-properties /path/to/monitoring-download.properties`. 
 
 ## Existing-process behavior
 
-By default, `-continue false` verifies the owners of the configured Prometheus and Grafana ports before stopping
-anything. It stops only executables named `prometheus`, `grafana`, or `grafana-server`; an unrelated or unidentified
-listener fails startup safely.
+At startup, sbk-dashboard reports whether each Prometheus/Grafana port is the available built-in default, was
+supplied through the command line/environment, or was selected automatically because the built-in default was busy.
+An occupied CLI/environment port fails startup with the bind address and identifiable listener PID/executable; the
+listener is never stopped, even when it is another Prometheus or Grafana process. Choose another explicit port or
+use an unspecified default to allow bounded automatic fallback.
+
+With `-continue false`, the application still validates both native ports immediately before acquisition. This
+second check closes the selection-to-launch race and refuses replacement of operator-supplied ports. Unrelated or
+unidentified listeners always fail startup safely.
 
 Use `-continue true` to attach to healthy compatible services already on the configured ports:
 
@@ -526,11 +533,17 @@ curl -fsS -X POST http://localhost:9721/api/comparison-dashboard \
 curl -i -X DELETE http://localhost:9721/api/targets/<endpoint-id>
 ```
 
+Repeating the first request with the same normalized host, port, name, metrics path, and kind returns HTTP 200 with
+the existing endpoint and dashboard ID; the initial creation returns HTTP 201. No duplicate dashboard is generated.
+Conflicting metadata for an already registered `host:port` is rejected instead of silently replacing its scrape
+configuration.
+
 The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
-selected** to open the single live comparison dashboard. Selection is encoded in repeated Grafana
-`var-sbk_endpoints` URL parameters, so the comparison can be bookmarked or shared without creating another
-persistent registry. Live comparison uses wall-clock time; independently timed historical runs are not shifted to a
-common run-relative origin.
+selected** to open a live comparison dashboard. The sorted endpoint-ID set produces a deterministic
+`sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
+same ID and URL. Selection is also encoded in repeated Grafana `var-sbk_endpoints` URL parameters for bookmarking
+and sharing. The generated cache is bounded to 128 comparison dashboards. Live comparison uses wall-clock time;
+independently timed historical runs are not shifted to a common run-relative origin.
 
 ## Persistent files
 

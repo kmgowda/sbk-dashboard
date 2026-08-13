@@ -196,15 +196,17 @@ class PortProcessManager:
         registry: ManagedProcessRegistry,
         prometheus_bind_address: str = "0.0.0.0",
         grafana_bind_address: str = "0.0.0.0",
+        replace_prometheus: bool = True,
+        replace_grafana: bool = True,
     ) -> None:
         candidates: list[tuple[str, int, str, list[psutil.Process]]] = []
         cls._inspect(
             "Prometheus", "prometheus", prometheus_port, prometheus_bind_address,
-            {"prometheus"}, registry, candidates,
+            {"prometheus"}, registry, candidates, replace_prometheus,
         )
         cls._inspect(
             "Grafana", "grafana", grafana_port, grafana_bind_address,
-            {"grafana", "grafana-server"}, registry, candidates,
+            {"grafana", "grafana-server"}, registry, candidates, replace_grafana,
         )
         stopped: set[int] = set()
         for name, port, _bind_address, processes in candidates:
@@ -231,6 +233,7 @@ class PortProcessManager:
         valid_names: set[str],
         registry: ManagedProcessRegistry,
         candidates: list[tuple[str, int, str, list[psutil.Process]]],
+        allow_replacement: bool = True,
     ) -> None:
         try:
             connections = [
@@ -243,17 +246,27 @@ class PortProcessManager:
                 return
             owned = registry.find(component, port)
             if owned is None:
+                if not allow_replacement:
+                    raise OSError(
+                        cls._configured_port_occupied_message(name, port, bind_address, [])
+                    ) from error
                 raise OSError(
                     f"Port {port} is occupied, but listener discovery is unavailable; no process was stopped"
                 ) from error
             processes = [owned]
         else:
             if not connections:
+                if not allow_replacement and not cls.available(port, bind_address):
+                    raise OSError(cls._configured_port_occupied_message(name, port, bind_address, []))
                 return
             pids = {connection.pid for connection in connections if connection.pid}
             if not pids:
                 owned = registry.find(component, port)
                 if owned is None:
+                    if not allow_replacement:
+                        raise OSError(
+                            cls._configured_port_occupied_message(name, port, bind_address, [])
+                        )
                     raise OSError(
                         f"Port {port} is occupied, but its owner cannot be identified safely; no process was stopped"
                     )
@@ -263,6 +276,8 @@ class PortProcessManager:
                     processes = [psutil.Process(pid) for pid in pids]
                 except psutil.Error as error:
                     raise OSError(f"Listener process disappeared from port {port}; no process was stopped") from error
+        if not allow_replacement:
+            raise OSError(cls._configured_port_occupied_message(name, port, bind_address, processes))
         for process in processes:
             try:
                 command = process.exe()
@@ -278,6 +293,68 @@ class PortProcessManager:
                     f"Port {port} is owned by unrelated process {process.pid} ({description}); no process was stopped"
                 )
         candidates.append((name, port, bind_address, processes))
+
+    @classmethod
+    def require_available(
+        cls,
+        name: str,
+        port: int,
+        bind_address: str,
+        source: str,
+    ) -> None:
+        """Reject an occupied operator-selected port without stopping its owner."""
+        if cls.available(port, bind_address):
+            return
+        processes: list[psutil.Process] = []
+        try:
+            connections = [
+                connection
+                for connection in psutil.net_connections(kind="tcp")
+                if connection.status == psutil.CONN_LISTEN
+                and getattr(connection.laddr, "port", None) == port
+            ]
+            processes = [psutil.Process(pid) for pid in sorted({item.pid for item in connections if item.pid})]
+        except (psutil.Error, OSError):
+            processes = []
+        detail = cls._occupied_port_message(name, port, bind_address, processes)
+        raise OSError(
+            f"{detail}; this port was user supplied via {source}. Choose an available {name} port; "
+            "no process was stopped"
+        )
+
+    @staticmethod
+    def _occupied_port_message(
+        name: str,
+        port: int,
+        bind_address: str,
+        processes: list[psutil.Process],
+    ) -> str:
+        owners: list[str] = []
+        for process in processes:
+            try:
+                command = process.exe()
+            except psutil.Error:
+                try:
+                    command = process.name()
+                except psutil.Error:
+                    command = "unknown command"
+            owners.append(f"PID {process.pid} ({command or 'unknown command'})")
+        owner_detail = ", ".join(owners) if owners else "an unidentified listener"
+        return f"{name} port {port} on bind address {bind_address} is already in use by {owner_detail}"
+
+    @classmethod
+    def _configured_port_occupied_message(
+        cls,
+        name: str,
+        port: int,
+        bind_address: str,
+        processes: list[psutil.Process],
+    ) -> str:
+        return (
+            f"{cls._occupied_port_message(name, port, bind_address, processes)}; "
+            f"the configured {name} port is user supplied and cannot be replaced. "
+            f"Choose an available {name} port; no process was stopped"
+        )
 
     @staticmethod
     def available(port: int, bind_address: str = "0.0.0.0") -> bool:

@@ -29,6 +29,29 @@ class TargetRegistryTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already registered"):
             TargetRegistry(self.directory).register("Again", "host.example", 9718, "/other")
 
+    def test_exact_normalized_registration_is_idempotent(self):
+        registry = TargetRegistry(self.directory)
+        first = registry.register_with_status(" Same run ", "HOST.Example.", 9718, None, "sbk")
+        repeated = registry.register_with_status("Same run", "host.example", 9718, "/metrics", "SBK")
+        self.assertTrue(first.created)
+        self.assertFalse(repeated.created)
+        self.assertEqual(first.target, repeated.target)
+        self.assertEqual(1, len(registry.list()))
+
+    def test_same_endpoint_with_conflicting_metadata_is_rejected(self):
+        registry = TargetRegistry(self.directory)
+        registry.register("Same run", "host.example", 9718, "/metrics", "SBK")
+        for name, path, kind in (
+            ("Other run", "/metrics", "SBK"),
+            ("Same run", "/other", "SBK"),
+            ("Same run", "/metrics", "SBM"),
+        ):
+            with self.subTest(name=name, path=path, kind=kind), self.assertRaisesRegex(
+                ValueError, "already registered with different"
+            ):
+                registry.register(name, "HOST.EXAMPLE.", 9718, path, kind)
+        self.assertEqual(1, len(registry.list()))
+
     def test_same_host_different_port(self):
         registry = TargetRegistry(self.directory)
         registry.register("One", "host", 9718, "/metrics")

@@ -40,8 +40,11 @@ def main(arguments: list[str] | None = None) -> None:
         configure_logging(configuration.dashboard.log_level)
         LOGGER.info("Runtime platform: %s", configuration.downloads.platform.id)
         LOGGER.info("Monitoring download properties: %s", configuration.downloads.source)
-        monitoring = NativeToolBootstrap().resolve(configuration.monitoring, configuration.downloads)
-        monitoring = select_native_ports(monitoring, configuration.dashboard.continue_existing)
+        monitoring = select_native_ports(
+            configuration.monitoring,
+            configuration.dashboard.continue_existing,
+        )
+        monitoring = NativeToolBootstrap().resolve(monitoring, configuration.downloads)
         run(configuration, monitoring)
     except KeyboardInterrupt:
         return
@@ -126,6 +129,8 @@ def select_native_ports(
 ) -> MonitoringConfig:
     """Select non-conflicting native ports only when their built-in defaults were used."""
     if continue_existing:
+        _log_native_port_selection("Prometheus", monitoring, "prometheus", continue_existing=True)
+        _log_native_port_selection("Grafana", monitoring, "grafana", continue_existing=True)
         return monitoring
     selected_prometheus = monitoring.prometheus_port
     if monitoring.sources["prometheus-port"] == "default":
@@ -139,6 +144,13 @@ def select_native_ports(
                 monitoring.prometheus_port,
                 selected_prometheus,
             )
+    elif monitoring.port_was_supplied("prometheus"):
+        PortProcessManager.require_available(
+            "Prometheus",
+            monitoring.prometheus_port,
+            monitoring.prometheus_bind_address,
+            monitoring.sources["prometheus-port"],
+        )
 
     selected_grafana = monitoring.grafana_port
     if monitoring.sources["grafana-port"] == "default":
@@ -153,7 +165,43 @@ def select_native_ports(
                 monitoring.grafana_port,
                 selected_grafana,
             )
-    return monitoring.with_runtime_ports(selected_prometheus, selected_grafana)
+    elif monitoring.port_was_supplied("grafana"):
+        PortProcessManager.require_available(
+            "Grafana",
+            monitoring.grafana_port,
+            monitoring.grafana_bind_address,
+            monitoring.sources["grafana-port"],
+        )
+    if selected_prometheus == selected_grafana:
+        raise OSError(
+            f"Prometheus and Grafana cannot both use port {selected_prometheus}; "
+            "supply distinct available native ports"
+        )
+    selected = monitoring.with_runtime_ports(selected_prometheus, selected_grafana)
+    _log_native_port_selection("Prometheus", selected, "prometheus")
+    _log_native_port_selection("Grafana", selected, "grafana")
+    return selected
+
+
+def _log_native_port_selection(
+    name: str,
+    monitoring: MonitoringConfig,
+    component: str,
+    continue_existing: bool = False,
+) -> None:
+    port = getattr(monitoring, f"{component}_port")
+    bind_address = getattr(monitoring, f"{component}_bind_address")
+    source = monitoring.sources[f"{component}-port"]
+    if source == "default":
+        reason = "built-in default"
+    elif source.startswith("automatic fallback from "):
+        original = source.removeprefix("automatic fallback from ")
+        reason = f"automatically selected because default port {original} was already in use"
+    else:
+        reason = f"user supplied via {source}"
+    if continue_existing:
+        reason += "; reserved for -continue true compatibility/health attachment"
+    LOGGER.info("%s port: %s on %s (%s)", name, port, bind_address, reason)
 
 
 def print_runtime(arguments: list[str]) -> None:
