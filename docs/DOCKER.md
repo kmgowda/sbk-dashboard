@@ -15,7 +15,7 @@ docker compose ps
 ```
 
 `compose.yaml` contains no `build` section. It pulls
-`kmgowda/sbk-dashboard:1.26.8.1` from Docker Hub when missing and reuses the local image afterward. Prometheus,
+`kmgowda/sbk-dashboard:1.26.8.2` from Docker Hub when missing and reuses the local image afterward. Prometheus,
 Grafana, and the Python wheel are already installed in that image; they are never downloaded during container
 startup. Override the pinned image only when deliberately testing another published build:
 
@@ -56,7 +56,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.1
+  kmgowda/sbk-dashboard:1.26.8.2
 ```
 
 Use a pinned release in production instead of `latest`. The image runs as UID/GID 10001, uses `tini` as PID 1,
@@ -97,7 +97,7 @@ docker run --detach --name sbk-dashboard \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.1 \
+  kmgowda/sbk-dashboard:1.26.8.2 \
   -retention 14 -status-seconds 30
 ```
 
@@ -161,8 +161,8 @@ topology remain inherited from `compose.yaml`.
 Build and smoke-test the local architecture directly:
 
 ```bash
-docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.1 .
-python tests/container_smoke.py --image sbk-dashboard:1.26.8.1
+docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.2 .
+python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
 ```
 
 Build both published architectures with Buildx without publishing them:

@@ -69,7 +69,11 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
     previous_handlers: dict[
         signal.Signals, int | Callable[[int, FrameType | None], object] | None
     ] = {}
-    for signum in (signal.SIGINT, signal.SIGTERM):
+    shutdown_signals = [signal.SIGINT, signal.SIGTERM]
+    break_signal = vars(signal).get("SIGBREAK")
+    if isinstance(break_signal, signal.Signals):
+        shutdown_signals.append(break_signal)
+    for signum in shutdown_signals:
         with suppress(ValueError):
             previous_handlers[signum] = signal.signal(signum, stop)
     try:

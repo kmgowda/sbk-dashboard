@@ -13,6 +13,8 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("docs/INTERNALS.md", readme)
         self.assertIn("SBK_DASHBOARD_DEFAULT_TARGET_HOST", readme)
         self.assertIn("host.docker.internal", readme)
+        self.assertIn("start-sbk-dashboard.sh", readme)
+        self.assertIn("Start-SbkDashboard.ps1", readme)
 
     def test_detailed_documents_exist_and_cross_link(self):
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -32,6 +34,9 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("host.docker.internal", docker)
         self.assertIn("docker compose pull", docker)
         self.assertIn("compose.dev.yaml", docker)
+        self.assertIn("SBK_DASHBOARD_LAUNCHER_DIR", usage)
+        self.assertIn("SBK_DASHBOARD_STOP_TIMEOUT", usage)
+        self.assertIn("require Python 3.10 or newer", usage)
         self.assertIn("DOCKER_HUB.md", docker)
         self.assertIn("docker buildx imagetools inspect", docker_hub)
         self.assertIn("DOCKERHUB_USERNAME", docker_hub)

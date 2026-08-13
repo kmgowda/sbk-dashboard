@@ -82,7 +82,7 @@ RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-
     test -x /opt/grafana/bin/grafana
 
 FROM ${PYTHON_BASE} AS runtime
-ARG APPLICATION_VERSION=1.26.8.1
+ARG APPLICATION_VERSION=1.26.8.2
 ARG VCS_REF=unknown
 LABEL org.opencontainers.image.title="SBK Dashboard" \
       org.opencontainers.image.description="SBK/SBM performance dashboard with managed Prometheus and Grafana" \

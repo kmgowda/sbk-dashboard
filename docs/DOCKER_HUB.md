@@ -12,7 +12,7 @@ Desktop can run the same Linux container build on macOS or Windows.
 
 The release build publishes two tags:
 
-- `kmgowda/sbk-dashboard:1.26.8.1` is the immutable version tag used by `compose.yaml`.
+- `kmgowda/sbk-dashboard:1.26.8.2` is the immutable version tag used by `compose.yaml`.
 - `kmgowda/sbk-dashboard:latest` is a convenient pointer to the newest stable release.
 
 Each tag points to one multi-architecture manifest containing:
@@ -63,7 +63,7 @@ export SBK_VCS_REF="$(git rev-parse HEAD)"
 printf 'Version: %s\nImage: %s\nCommit: %s\n' "$SBK_VERSION" "$SBK_IMAGE" "$SBK_VCS_REF"
 ```
 
-For the current release, the version output should be `1.26.8.1`. Stop if the version or commit is not the one you
+For the current release, the version output should be `1.26.8.2`. Stop if the version or commit is not the one you
 intend to publish.
 
 ## 3. Build locally with Docker Compose
@@ -262,7 +262,7 @@ docker compose logs --follow sbk-dashboard
 To pull a specific version explicitly:
 
 ```bash
-docker pull kmgowda/sbk-dashboard:1.26.8.1
+docker pull kmgowda/sbk-dashboard:1.26.8.2
 ```
 
 Run the image without a source checkout or Compose:
@@ -276,7 +276,7 @@ docker run --detach \
   --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.1
+  kmgowda/sbk-dashboard:1.26.8.2
 ```
 
 Check the container and its health endpoint:
@@ -292,7 +292,7 @@ Back up persistent data before an important production upgrade. Then pull the ne
 container against the same named volume:
 
 ```bash
-export SBK_DASHBOARD_IMAGE="kmgowda/sbk-dashboard:1.26.8.1"
+export SBK_DASHBOARD_IMAGE="kmgowda/sbk-dashboard:1.26.8.2"
 docker compose pull
 docker compose up --detach
 docker compose ps
@@ -339,7 +339,7 @@ Confirm the version exists in Docker Hub and the repository is public. Inspect t
 on `latest`:
 
 ```bash
-docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.1
+docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.2
 ```
 
 ### Only one architecture appears

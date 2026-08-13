@@ -15,6 +15,7 @@ from sbk_dashboard.main import (
     print_runtime,
     run,
 )
+from sbk_dashboard.version import VERSION
 
 
 class MainTest(unittest.TestCase):
@@ -43,8 +44,8 @@ class MainTest(unittest.TestCase):
         ):
             main(["-v"])
         self.assertEqual(0, stopped.exception.code)
-        self.assertEqual("sbk-dashboard 1.26.8.1\n", output.getvalue())
-        self.assertIn("SBK Dashboard version: 1.26.8.1", error.getvalue())
+        self.assertEqual(f"sbk-dashboard {VERSION}\n", output.getvalue())
+        self.assertIn(f"SBK Dashboard version: {VERSION}", error.getvalue())
 
     def test_invalid_configuration_exits_with_usage_error(self):
         error = io.StringIO()
@@ -65,7 +66,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("/ ____|  _ \\| |/ /", text)
         self.assertIn("|_____/|____/|_|\\_\\", text)
         self.assertIn("Supplied arguments: (none)", text)
-        self.assertIn("SBK Dashboard version: 1.26.8.1", text)
+        self.assertIn(f"SBK Dashboard version: {VERSION}", text)
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)
@@ -80,7 +81,7 @@ class MainTest(unittest.TestCase):
             print_runtime([])
         text = "\n".join(captured.output)
         self.assertIn("Unable to load startup banner: missing banner", text)
-        self.assertIn("SBK Dashboard version: 1.26.8.1", text)
+        self.assertIn(f"SBK Dashboard version: {VERSION}", text)
 
     def test_dashboard_links_always_include_loopback(self):
         links = dashboard_links(9721)

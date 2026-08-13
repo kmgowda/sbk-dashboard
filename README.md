@@ -8,7 +8,7 @@ Prometheus and Grafana are official native child processes—not Python librarie
 verified installation, configuration, readiness, reconciliation, health, and shutdown. The application can run
 directly in Python/Conda or as a Linux container; container packaging does not change that process architecture.
 
-The current release is `1.26.8.1`. Releases use `Major.Year.Month.Minor`, and
+The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 `src/sbk_dashboard/version.py` is the single source used by package metadata, startup logging, and `-v` output.
 
 ## Features
@@ -126,7 +126,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.1
+  kmgowda/sbk-dashboard:1.26.8.2
 ```
 
 See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,
@@ -213,6 +213,22 @@ custom `-data` directory, or a Docker volume. See the [usage guide](docs/USAGE.m
 ```bash
 sbk-dashboard
 ```
+
+Detached launchers are also provided. They reuse an active venv or Conda environment, otherwise prefer the project
+`.venv`, and pass every additional dashboard option through unchanged and in the same order:
+
+```bash
+./scripts/start-sbk-dashboard.sh
+./scripts/stop-sbk-dashboard.sh
+```
+
+```powershell
+.\scripts\Start-SbkDashboard.ps1
+.\scripts\Stop-SbkDashboard.ps1
+```
+
+See [the usage guide](docs/USAGE.md#start-and-stop-scripts) for environment selection, logs, PID-reuse protection,
+custom arguments, and shutdown timeouts.
 
 Run it in the foreground for interactive use and stop it cleanly with `Ctrl+C`. The shutdown path stops HTTP
 admission first, then Grafana and Prometheus in reverse dependency order. For unattended operation, use the host

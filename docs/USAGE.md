@@ -127,6 +127,53 @@ On first start the control plane:
 SSH, service, CI, and headless sessions intentionally skip browser launch. Open the printed URL manually, normally
 `http://localhost:9721/`.
 
+## Start and stop scripts
+
+The repository includes detached start/stop scripts for direct host installations. They select Python in this
+order: an active virtual environment, an active Conda environment, the repository's `.venv`, and finally Python on
+`PATH`. The selected environment must already contain `sbk-dashboard`; the scripts never install or alter an
+environment automatically.
+
+Before starting, the scripts print the selected Python executable and environment, require Python 3.10 or newer,
+verify the `psutil` runtime dependency, import `sbk-dashboard`, and print its detected version. A missing or outdated
+Python, broken active environment, missing dependency, or missing application produces concrete venv/Conda or wheel
+installation guidance and exits without acquiring any launcher or native-process resources.
+
+On Linux or macOS:
+
+```bash
+./scripts/start-sbk-dashboard.sh
+./scripts/stop-sbk-dashboard.sh
+```
+
+On Windows PowerShell:
+
+```powershell
+.\scripts\Start-SbkDashboard.ps1
+.\scripts\Stop-SbkDashboard.ps1
+```
+
+Every argument after the start-script name is passed unchanged and in the same order to the `sbk-dashboard`
+application. Quote values containing spaces according to the current shell. For example:
+
+```bash
+./scripts/start-sbk-dashboard.sh -data /srv/sbk-dashboard -retention 14
+```
+
+```powershell
+.\scripts\Start-SbkDashboard.ps1 -data C:\sbk-dashboard-data -retention 14
+```
+
+Launcher state records both the PID and process creation time, so a reused PID cannot identify an unrelated process.
+Bounded rotating logs and launcher state default to `~/.sbk-dashboard/launcher` on Linux/macOS and
+`%LOCALAPPDATA%\SBK Dashboard\launcher` on Windows. Set `SBK_DASHBOARD_LAUNCHER_DIR` to override that location.
+The launcher drains output continuously and rotates at 10 MiB with three backups.
+The stop scripts request normal control-plane shutdown and wait up to 45 seconds; set
+`SBK_DASHBOARD_STOP_TIMEOUT` to a value from 1 through 300 seconds when a different bound is required. If graceful
+shutdown exceeds that bound, the launcher forcefully cleans up only its recorded process tree. An independent
+parent-death watcher provides the same bounded cleanup if the launcher is killed, including forced termination;
+interrupting the start script before its startup handshake completes also tears down everything it acquired.
+
 ## Add an endpoint
 
 For the complete benchmark-side workflow—including selecting SBK's `PrometheusLogger`, changing `-context`, Docker
@@ -186,6 +233,9 @@ For a foreground native installation, press `Ctrl+C`. A normal shutdown:
 
 Wait for completion before running `deactivate` or `conda deactivate`. A later `sbk-dashboard` invocation reloads
 registrations, mappings, Grafana state, and Prometheus TSDB from the same data directory.
+
+For a dashboard launched by the supplied detached scripts, use the matching stop script documented above. The stop
+script only addresses a process whose PID and creation time match its launcher state.
 
 For Docker:
 
