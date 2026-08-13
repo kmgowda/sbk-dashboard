@@ -63,7 +63,8 @@ clean native descendants even after the control plane is forcefully terminated.
 
 ## Runtime data layout
 
-The default data root is `~/.sbk-dashboard`; tests must override it:
+The management-port 9721 default data root is `~/.sbk-dashboard`; non-default management ports use
+`~/.sbk-dashboard/instances/<port>`. Tests must override it:
 
 ```text
 <data>/
@@ -115,9 +116,9 @@ Important defaults:
 |---|---|
 | Management port | 9721 |
 | Management bind | 0.0.0.0 |
-| Prometheus port | 9090 |
+| Prometheus port | 9090, or a bounded automatic fallback when unspecified and occupied |
 | Prometheus bind | 127.0.0.1 |
-| Grafana port | 3000 |
+| Grafana port | 3000, or a bounded automatic fallback when unspecified and occupied |
 | Grafana bind | 0.0.0.0 |
 | Authentication | false |
 | Continue existing processes | false |

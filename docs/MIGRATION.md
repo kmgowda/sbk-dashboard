@@ -111,3 +111,9 @@ enables IPv6 on its bridge so literal IPv6 targets can be scraped when the Docke
 Release 1.26.8.2 switched the published-image workflow to Docker Hub, added source-archive foreground/background
 launchers for Linux, macOS, and Windows, and changed only the container endpoint-form default to
 `host.docker.internal`. Direct Python/Conda target defaults and persisted registrations remain unchanged.
+
+The multi-instance launcher extension keeps the historical default-port data root and launcher filenames. An
+instance using a non-default management port now defaults to `~/.sbk-dashboard/instances/<port>`. If the built-in
+Prometheus 9090 or Grafana 3000 port is occupied, and that native port was not supplied by CLI or environment,
+startup chooses and reports a bounded fallback port instead of replacing the listener. Existing deployments that
+explicitly configure native ports or data directories retain their exact values.

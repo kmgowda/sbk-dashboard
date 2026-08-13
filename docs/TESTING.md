@@ -232,21 +232,22 @@ conda run -p /tmp/sbk-dashboard-conda sbk-dashboard -h
 On Windows, substitute `Scripts\\python.exe` and `Scripts\\sbk-dashboard.exe` for the venv paths.
 
 The automated launcher tests use a disposable fake application to verify foreground console logging, background
-file logging, shared stop behavior, active-environment precedence, duplicate-start behavior, PID creation-time
-validation, and bounded log rotation. For a native launcher
+file logging, help while an instance is running, independent per-port ownership, automatic native-port fallback,
+selective and default stop behavior, active-environment precedence, duplicate-start behavior, PID creation-time
+validation, bounded log rotation, and forceful descendant cleanup. For a native launcher
 smoke test, activate the venv or Conda environment, use unique non-default ports and a temporary data directory, and
 run the matching pair:
 
 ```bash
 ./scripts/start-sbk-dashboard-background.sh -port 19721 -prometheus-port 19090 -grafana-port 13000 \
   -data /tmp/sbk-dashboard-launcher-test
-./scripts/stop-sbk-dashboard.sh
+./scripts/stop-sbk-dashboard.sh -port 19721
 ```
 
 ```powershell
 .\scripts\Start-SbkDashboardBackground.ps1 -port 19721 -prometheus-port 19090 -grafana-port 13000 `
   -data $env:TEMP\sbk-dashboard-launcher-test
-.\scripts\Stop-SbkDashboard.ps1
+.\scripts\Stop-SbkDashboard.ps1 -port 19721
 ```
 
 Confirm the recorded launcher PID and all owned native descendants exit before removing only that disposable data

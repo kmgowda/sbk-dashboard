@@ -30,6 +30,7 @@ GUARDIAN_START_TIMEOUT_SECONDS = 5
 LOG_RETRY_INITIAL_SECONDS = 1.0
 LOG_RETRY_MAXIMUM_SECONDS = 300.0
 MAX_LOCAL_PROBE_ADDRESSES = 256
+AUTO_PORT_SEARCH_ATTEMPTS = 1000
 LOGGER = logging.getLogger(__name__)
 
 SocketAddress = tuple[str, int] | tuple[str, int, int, int]
@@ -300,6 +301,29 @@ class PortProcessManager:
             return True
         except OSError:
             return False
+
+    @classmethod
+    def find_available(
+        cls,
+        preferred_port: int,
+        bind_address: str,
+        excluded: set[int] | None = None,
+    ) -> int:
+        """Return the preferred port or a bounded deterministic fallback."""
+        unavailable = set() if excluded is None else set(excluded)
+        if preferred_port not in unavailable and cls.available(preferred_port, bind_address):
+            return preferred_port
+        candidate = preferred_port
+        for _ in range(AUTO_PORT_SEARCH_ATTEMPTS):
+            candidate = 1024 if candidate >= 65535 else candidate + 1
+            if candidate in unavailable:
+                continue
+            if cls.available(candidate, bind_address):
+                return candidate
+        raise OSError(
+            f"No available port was found for {bind_address} after "
+            f"{AUTO_PORT_SEARCH_ATTEMPTS} attempts following port {preferred_port}"
+        )
 
     @staticmethod
     def _resolve_endpoints(bind_address: str, port: int) -> tuple[_SocketEndpoint, ...]:
@@ -913,6 +937,11 @@ def _terminate_owned_process(process: subprocess.Popen[bytes], name: str) -> Non
         except subprocess.TimeoutExpired as error:
             raise OSError(f"Unable to stop managed {name} process {process.pid}") from error
     _finish_descendants(descendants)
+    if os.name != "nt":
+        # The guardian is the process-group leader. Captured descendants received their bounded graceful
+        # wait above; now kill any late group member that was created after the initial tree snapshot.
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def _terminate_psutil_tree(process: psutil.Process, name: str) -> None:
@@ -958,4 +987,7 @@ def _finish_descendants(descendants: list[psutil.Process]) -> None:
     for process in alive:
         with suppress(psutil.Error):
             process.kill()
-    psutil.wait_procs(alive, timeout=1)
+    _, alive = psutil.wait_procs(alive, timeout=1)
+    if alive:
+        identifiers = ", ".join(str(process.pid) for process in alive)
+        raise OSError(f"Unable to stop managed descendant process(es): {identifiers}")

@@ -21,6 +21,7 @@ import psutil
 from sbk_dashboard.bootstrap import NativeToolBootstrap
 from sbk_dashboard.config import MonitoringConfig, ParsedConfiguration, parse_configuration, parser
 from sbk_dashboard.monitoring import ManagedMonitoringStack
+from sbk_dashboard.processes import PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
 from sbk_dashboard.version import VERSION
 from sbk_dashboard.web import DashboardHttpServer
@@ -40,6 +41,7 @@ def main(arguments: list[str] | None = None) -> None:
         LOGGER.info("Runtime platform: %s", configuration.downloads.platform.id)
         LOGGER.info("Monitoring download properties: %s", configuration.downloads.source)
         monitoring = NativeToolBootstrap().resolve(configuration.monitoring, configuration.downloads)
+        monitoring = select_native_ports(monitoring, configuration.dashboard.continue_existing)
         run(configuration, monitoring)
     except KeyboardInterrupt:
         return
@@ -119,6 +121,41 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
             raise OSError("Incomplete shutdown: " + "; ".join(shutdown_errors))
 
 
+def select_native_ports(
+    monitoring: MonitoringConfig, continue_existing: bool = False
+) -> MonitoringConfig:
+    """Select non-conflicting native ports only when their built-in defaults were used."""
+    if continue_existing:
+        return monitoring
+    selected_prometheus = monitoring.prometheus_port
+    if monitoring.sources["prometheus-port"] == "default":
+        selected_prometheus = PortProcessManager.find_available(
+            monitoring.prometheus_port,
+            monitoring.prometheus_bind_address,
+        )
+        if selected_prometheus != monitoring.prometheus_port:
+            LOGGER.warning(
+                "Default Prometheus port %s is unavailable; selected port %s",
+                monitoring.prometheus_port,
+                selected_prometheus,
+            )
+
+    selected_grafana = monitoring.grafana_port
+    if monitoring.sources["grafana-port"] == "default":
+        selected_grafana = PortProcessManager.find_available(
+            monitoring.grafana_port,
+            monitoring.grafana_bind_address,
+            {selected_prometheus},
+        )
+        if selected_grafana != monitoring.grafana_port:
+            LOGGER.warning(
+                "Default Grafana port %s is unavailable; selected port %s",
+                monitoring.grafana_port,
+                selected_grafana,
+            )
+    return monitoring.with_runtime_ports(selected_prometheus, selected_grafana)
+
+
 def print_runtime(arguments: list[str]) -> None:
     try:
         banner = files("sbk_dashboard").joinpath("resources/banner.txt").read_text(encoding="utf-8").rstrip()
@@ -148,7 +185,7 @@ def print_effective(configuration: ParsedConfiguration, monitoring: MonitoringCo
         "grafana-home": monitoring.grafana_home, "grafana-port": monitoring.grafana_port,
         "grafana-bind": monitoring.grafana_bind_address, "grafana-url": monitoring.grafana_public_url,
     }
-    sources = {**dashboard.sources, **configuration.monitoring.sources}
+    sources = {**dashboard.sources, **monitoring.sources}
     for name, value in values.items():
         LOGGER.info("  %s=%s [%s]", name, value, sources[name])
     LOGGER.info(

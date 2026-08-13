@@ -234,6 +234,39 @@ class LifecycleTest(unittest.TestCase):
         connection.connect_ex.assert_called_once_with(("127.0.0.1", 19090))
         connection.bind.assert_not_called()
 
+    def test_find_available_port_uses_bounded_next_port_fallback(self):
+        with patch.object(
+            PortProcessManager,
+            "available",
+            side_effect=lambda port, _bind: port == 9092,
+        ) as available:
+            self.assertEqual(9092, PortProcessManager.find_available(9090, "127.0.0.1"))
+        self.assertEqual(
+            [
+                call(9090, "127.0.0.1"),
+                call(9091, "127.0.0.1"),
+                call(9092, "127.0.0.1"),
+            ],
+            available.call_args_list,
+        )
+
+    def test_find_available_port_skips_an_excluded_port(self):
+        with patch.object(PortProcessManager, "available", return_value=True) as available:
+            self.assertEqual(
+                3001,
+                PortProcessManager.find_available(3000, "0.0.0.0", {3000}),
+            )
+        available.assert_called_once_with(3001, "0.0.0.0")
+
+    def test_find_available_port_search_is_bounded(self):
+        with (
+            patch.object(PortProcessManager, "available", return_value=False) as available,
+            patch("sbk_dashboard.processes.AUTO_PORT_SEARCH_ATTEMPTS", 2),
+            self.assertRaisesRegex(OSError, "after 2 attempts"),
+        ):
+            PortProcessManager.find_available(9090, "127.0.0.1")
+        self.assertEqual(3, available.call_count)
+
     def test_windows_port_probe_requests_exclusive_address_use(self):
         connection_context, connection = self._socket_context()
         probe_context, probe = self._socket_context()
@@ -485,6 +518,17 @@ class LifecycleTest(unittest.TestCase):
 
 
 class TerminationTest(unittest.TestCase):
+    def test_finish_descendants_reports_process_that_survives_force(self):
+        from sbk_dashboard.processes import _finish_descendants
+
+        child = MagicMock(pid=12)
+        with (
+            patch("sbk_dashboard.processes.psutil.wait_procs", side_effect=[([], [child]), ([], [child])]),
+            self.assertRaisesRegex(OSError, "12"),
+        ):
+            _finish_descendants([child])
+        child.kill.assert_called_once_with()
+
     def test_terminate_psutil_tree_continues_when_a_child_disappears(self):
         from sbk_dashboard.processes import _terminate_psutil_tree
 

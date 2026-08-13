@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $ScriptDirectory = $PSScriptRoot
 $ProjectDirectory = Split-Path -Parent $ScriptDirectory
+$DashboardArguments = @($args)
 
 if ($env:VIRTUAL_ENV) {
     $Python = Join-Path $env:VIRTUAL_ENV 'Scripts\python.exe'
@@ -35,5 +36,5 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-& $Python (Join-Path $ScriptDirectory 'sbk_dashboard_launcher.py') stop
+& $Python (Join-Path $ScriptDirectory 'sbk_dashboard_launcher.py') stop @DashboardArguments
 exit $LASTEXITCODE

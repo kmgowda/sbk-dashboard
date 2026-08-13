@@ -14,6 +14,7 @@ from sbk_dashboard.main import (
     print_effective,
     print_runtime,
     run,
+    select_native_ports,
 )
 from sbk_dashboard.version import VERSION
 
@@ -73,6 +74,57 @@ class MainTest(unittest.TestCase):
         self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_default_native_ports_fall_back_and_update_default_grafana_url(self, available):
+        available.side_effect = [19090, 13000]
+        monitoring = select_native_ports(parse_configuration([], {}).monitoring)
+        self.assertEqual(19090, monitoring.prometheus_port)
+        self.assertEqual(13000, monitoring.grafana_port)
+        self.assertEqual("http://localhost:13000", monitoring.grafana_public_url)
+        self.assertEqual("automatic fallback from 9090", monitoring.sources["prometheus-port"])
+        self.assertEqual("automatic fallback from 3000", monitoring.sources["grafana-port"])
+        self.assertEqual("automatic Grafana port", monitoring.sources["grafana-url"])
+        self.assertEqual(
+            [call(9090, "127.0.0.1"), call(3000, "0.0.0.0", {19090})],
+            available.call_args_list,
+        )
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_explicit_native_ports_and_grafana_url_are_authoritative(self, available):
+        parsed = parse_configuration(
+            [
+                "-prometheus-port",
+                "19090",
+                "-grafana-port",
+                "13000",
+                "-grafana-url",
+                "https://grafana.example/base",
+            ],
+            {},
+        )
+        monitoring = select_native_ports(parsed.monitoring)
+        self.assertEqual(19090, monitoring.prometheus_port)
+        self.assertEqual(13000, monitoring.grafana_port)
+        self.assertEqual("https://grafana.example/base", monitoring.grafana_public_url)
+        available.assert_not_called()
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_continue_mode_preserves_default_ports_for_health_checked_attachment(self, available):
+        original = parse_configuration(["-continue", "true"], {}).monitoring
+        self.assertIs(original, select_native_ports(original, continue_existing=True))
+        available.assert_not_called()
+
+    @patch("sbk_dashboard.main.PortProcessManager.find_available")
+    def test_explicit_grafana_url_survives_automatic_port_fallback(self, available):
+        available.side_effect = [9090, 13000]
+        original = parse_configuration(
+            ["-grafana-url", "https://grafana.example/base"], {}
+        ).monitoring
+        selected = select_native_ports(original)
+        self.assertEqual(13000, selected.grafana_port)
+        self.assertEqual("https://grafana.example/base", selected.grafana_public_url)
+        self.assertEqual("command line", selected.sources["grafana-url"])
 
     @patch("sbk_dashboard.main.files")
     def test_runtime_continues_when_banner_cannot_be_read(self, resource_files):

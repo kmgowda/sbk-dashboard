@@ -36,7 +36,15 @@ PID and creation time, and authorizes acquisition with a bounded marker handshak
 start `python -m sbk_dashboard` and its parent-death watcher. A reverse marker is emitted only after both processes
 exist and the application has survived the immediate-exit window; the initiating command reports success only after
 that confirmation. The shared stop path tolerates process exit between identity validation and signaling, waits or
-force-cleans the captured tree, and removes only the matching ownership record.
+force-cleans the captured tree, and removes only the matching ownership record. Ownership records and background
+logs are keyed by management port (with legacy filenames retained for port 9721). Informational start requests do
+not acquire state. A stop request without a port enumerates all ownership records; `-port`/`--port` limits cleanup to
+one record. For a non-default management port, configuration derives an isolated default data directory. After
+native tools are resolved and immediately before stack startup, built-in Prometheus/Grafana ports are retained when
+available or replaced by bounded deterministic fallbacks. CLI/environment port values are never changed. The
+effective configuration records and prints automatic selections, and a default Grafana public URL follows an
+automatically selected Grafana port. `-continue true` bypasses fallback selection so compatible services can be
+health-checked and attached on the requested ports.
 
 ## Composition and startup
 

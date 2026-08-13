@@ -240,7 +240,9 @@ For a detached process with bounded rotating file logs, use the background start
 ```
 
 See [the usage guide](docs/USAGE.md#start-and-stop-scripts) for environment selection, logs, PID-reuse protection,
-custom arguments, and shutdown timeouts.
+multiple port-isolated instances, custom arguments, and shutdown timeouts. `--help` and `--version` remain available
+while an instance is running. With no arguments the stop script stops every launcher-managed instance; `-port
+<port>` stops only the instance on that management port.
 
 Stop the foreground script cleanly with `Ctrl+C`, or use the stop script for either launch mode. The shutdown path stops HTTP
 admission first, then Grafana and Prometheus in reverse dependency order. For unattended operation, use the host
@@ -250,13 +252,13 @@ Defaults:
 
 - Management UI: `http://localhost:9721/`
 - Management bind: `0.0.0.0` (all IPv4 interfaces)
-- Prometheus: `http://127.0.0.1:9090/` (loopback only)
-- Grafana: `http://localhost:3000/`
+- Prometheus: `http://127.0.0.1:9090/` when available; otherwise the next suitable port (loopback only)
+- Grafana: `http://localhost:3000/` when available; otherwise the next suitable port
 - Grafana bind: `0.0.0.0` (all IPv4 interfaces)
 - Endpoint form display name: initially `SBK Dashboard`; if cleared, registration falls back to `host:port`
 - Endpoint form host/IP: `127.0.0.1` for native/Conda execution; `host.docker.internal` in the container image
 - Authentication: disabled
-- Data directory: `~/.sbk-dashboard`
+- Data directory: `~/.sbk-dashboard` on management port 9721; `~/.sbk-dashboard/instances/<port>` on other ports
 - Prometheus retention: 7 days
 - Scrape interval: 5 seconds
 - Existing-process continuation: disabled
@@ -333,10 +335,10 @@ from Grafana's local listen address.
 -data, --data-dir <path>      Persistent data directory
 -retention, --retention-days  Prometheus retention days (default 7)
 -prometheus-bin <path>        Prometheus executable (PATH, then download)
--prometheus-port <port>       Prometheus port (default 9090)
+-prometheus-port <port>       Prometheus port (default 9090; auto-selects if omitted and occupied)
 -prometheus-bind <address>    Prometheus bind address (default 127.0.0.1)
 -grafana-home <path>          Grafana home (system path, then download)
--grafana-port <port>          Grafana port (default 3000)
+-grafana-port <port>          Grafana port (default 3000; auto-selects if omitted and occupied)
 -grafana-bind <address>       Grafana bind address (default 0.0.0.0)
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL

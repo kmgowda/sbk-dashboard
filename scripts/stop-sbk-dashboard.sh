@@ -34,4 +34,4 @@ if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10)
     exit 1
 fi
 
-exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" stop
+exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" stop "$@"

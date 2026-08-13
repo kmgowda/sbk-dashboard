@@ -46,6 +46,27 @@ class ConfigurationTest(unittest.TestCase):
             self.assertEqual(15, config.dashboard.status_interval_seconds)
             self.assertEqual("command line", config.dashboard.sources["status-seconds"])
 
+    def test_long_port_option_is_supported_and_reported(self):
+        config = parse_configuration(["--port", "19721"], {})
+        self.assertEqual(19721, config.dashboard.port)
+        self.assertEqual("command line", config.dashboard.sources["port"])
+        self.assertEqual(
+            Path.home() / ".sbk-dashboard" / "instances" / "19721",
+            config.dashboard.data_directory,
+        )
+
+    def test_explicit_data_directory_remains_authoritative_on_nondefault_port(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = parse_configuration(
+                ["-port", "19721"],
+                {"SBK_DASHBOARD_DATA_DIR": temporary},
+            )
+            self.assertEqual(Path(temporary).resolve(), config.dashboard.data_directory)
+            self.assertEqual(
+                "environment SBK_DASHBOARD_DATA_DIR",
+                config.dashboard.sources["data"],
+            )
+
     def test_environment_overrides_defaults(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = parse_configuration([], {
