@@ -13,13 +13,88 @@ from unittest.mock import Mock, patch
 
 import psutil
 
-from scripts import sbk_dashboard_launcher
+from scripts import sbk_dashboard_bootstrap, sbk_dashboard_launcher
 
 ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "scripts" / "sbk_dashboard_launcher.py"
 
 
 class LauncherScriptTest(unittest.TestCase):
+    def test_bootstrap_installs_missing_application_dependencies(self):
+        completed = subprocess.CompletedProcess([], 0)
+        with (
+            patch.object(
+                sbk_dashboard_bootstrap,
+                "missing_modules",
+                side_effect=[["psutil", "sbk_dashboard"], []],
+            ),
+            patch.object(
+                sbk_dashboard_bootstrap.subprocess,
+                "run",
+                side_effect=[completed, completed],
+            ) as run,
+        ):
+            sbk_dashboard_bootstrap.ensure_application(ROOT)
+        self.assertEqual(
+            [sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[1].args[0]
+        )
+
+    def test_bootstrap_installs_pip_before_application_when_needed(self):
+        missing_pip = subprocess.CompletedProcess([], 1)
+        completed = subprocess.CompletedProcess([], 0)
+        with (
+            patch.object(
+                sbk_dashboard_bootstrap, "missing_modules", side_effect=[["psutil"], []]
+            ),
+            patch.object(
+                sbk_dashboard_bootstrap.subprocess,
+                "run",
+                side_effect=[missing_pip, completed, completed],
+            ) as run,
+        ):
+            sbk_dashboard_bootstrap.ensure_application(ROOT)
+        self.assertEqual(
+            [sys.executable, "-m", "ensurepip", "--upgrade"], run.call_args_list[1].args[0]
+        )
+        self.assertEqual(
+            [sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[2].args[0]
+        )
+
+    def test_bootstrap_creates_project_environment_before_installing(self):
+        with (
+            patch.object(sbk_dashboard_bootstrap, "environment_is_active", return_value=False),
+            patch.object(sbk_dashboard_bootstrap, "executable_exists", return_value=False),
+            patch.object(
+                sbk_dashboard_bootstrap,
+                "ensure_project_environment",
+                side_effect=RuntimeError("exec replacement"),
+            ) as create,
+            patch.object(sbk_dashboard_bootstrap, "ensure_application") as install,
+            self.assertRaisesRegex(RuntimeError, "exec replacement"),
+        ):
+            sbk_dashboard_bootstrap.main(["foreground", "--help"])
+        create.assert_called_once_with(ROOT, ["foreground", "--help"])
+        install.assert_not_called()
+
+    def test_bootstrap_reuses_active_environment_and_preserves_arguments(self):
+        with (
+            patch.object(sbk_dashboard_bootstrap, "environment_is_active", return_value=True),
+            patch.object(sbk_dashboard_bootstrap, "ensure_application") as install,
+            patch.object(sbk_dashboard_bootstrap.os, "execv") as execute,
+        ):
+            self.assertEqual(0, sbk_dashboard_bootstrap.main(["background", "-port", "19721"]))
+        install.assert_called_once_with(ROOT)
+        self.assertEqual(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "sbk_dashboard_launcher.py"),
+                "background",
+                "-port",
+                "19721",
+            ],
+            execute.call_args.args[1],
+        )
+
     def test_environment_report_is_actionable_when_application_is_missing(self):
         missing = ModuleNotFoundError("No module named 'sbk_dashboard'", name="sbk_dashboard")
         output = io.StringIO()
@@ -236,6 +311,9 @@ class LauncherScriptTest(unittest.TestCase):
         ):
             self.assertLess(content.index("VIRTUAL_ENV"), content.index("CONDA_PREFIX"))
             self.assertIn(".venv", content)
+        for content in (start_shell, background_shell, start_powershell, background_powershell):
+            self.assertIn("sbk_dashboard_bootstrap.py", content)
+        for content in (stop_shell, stop_powershell):
             self.assertIn("sbk_dashboard_launcher.py", content)
         self.assertIn('foreground "$@"', start_shell)
         self.assertIn('background "$@"', background_shell)
@@ -260,6 +338,7 @@ class LauncherScriptTest(unittest.TestCase):
             "Start-SbkDashboardBackground.ps1",
             "Stop-SbkDashboard.ps1",
             "docker_safe_extract.py",
+            "sbk_dashboard_bootstrap.py",
             "sbk_dashboard_launcher.py",
             "start-sbk-dashboard.sh",
             "start-sbk-dashboard-background.sh",

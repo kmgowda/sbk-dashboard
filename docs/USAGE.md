@@ -134,14 +134,16 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 The repository and source archive include foreground, background, and stop scripts for direct host installations.
 They are not installed by the wheel; a wheel installation always provides the `sbk-dashboard` console command.
 The helper scripts select Python in this order: an active virtual environment, an active Conda environment, the
-repository's `.venv`, and finally Python on
-`PATH`. The selected environment must already contain `sbk-dashboard`; the scripts never install or alter an
-environment automatically.
+repository's `.venv`, and finally Python on `PATH`. An active environment is reused. If no environment is active and
+the repository `.venv` does not contain an executable Python, a supported Python on `PATH` creates or repairs it.
+When `sbk-dashboard`, `psutil`, or pip is missing, the start scripts install pip where possible and then install the
+project plus its runtime dependencies into the selected environment. Dependency installation may require access to
+the configured Python package index. The stop script uses the already prepared environment and never installs.
 
 Before starting, the scripts print the selected Python executable and environment, require Python 3.10 or newer,
-verify the `psutil` runtime dependency, import `sbk-dashboard`, and print its detected version. A missing or outdated
-Python, broken active environment, missing dependency, or missing application produces concrete venv/Conda or wheel
-installation guidance and exits without acquiring any launcher or native-process resources.
+prepare missing dependencies, import `sbk-dashboard`, and print its detected version. A missing or outdated Python,
+broken active environment, unavailable venv/pip support, or failed package installation produces a concrete error
+and exits without acquiring any launcher or native-process resources.
 
 On Linux or macOS:
 

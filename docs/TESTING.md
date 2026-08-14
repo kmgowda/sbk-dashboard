@@ -7,7 +7,7 @@ Create either supported development environment and execute:
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests scripts
-mypy src scripts/sbk_dashboard_launcher.py
+mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
@@ -232,6 +232,10 @@ comparisons when an endpoint is removed. A native smoke test should run two conc
 page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
 
 ## venv and Conda checks
+
+Launcher bootstrap tests verify active venv/Conda precedence, project `.venv` creation when only Python is present,
+automatic installation when `psutil` or `sbk-dashboard` is missing, pip bootstrapping, argument preservation, and
+failure before launcher acquisition when environment preparation cannot complete.
 
 Validate both installers rather than assuming their activation semantics are equivalent:
 

@@ -216,9 +216,11 @@ custom `-data` directory, or a Docker volume. See the [usage guide](docs/USAGE.m
 sbk-dashboard
 ```
 
-Cross-platform launchers reuse an active venv or Conda environment, otherwise prefer the project `.venv`, and pass
-every additional dashboard option through unchanged and in the same order. The default start script stays in the
-foreground and prints application logs to the console:
+Cross-platform launchers reuse an active venv or Conda environment, otherwise prefer or create the project `.venv`,
+and pass every additional dashboard option through unchanged and in the same order. Python 3.10 or newer is the
+only prerequisite: when `sbk-dashboard` or `psutil` is missing, the start scripts install the project and its runtime
+dependencies into the selected environment automatically. The default start script stays in the foreground and
+prints application logs to the console:
 
 ```bash
 ./scripts/start-sbk-dashboard.sh
@@ -584,7 +586,7 @@ Code-level component ownership and call paths are documented separately in
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests scripts
-mypy src scripts/sbk_dashboard_launcher.py
+mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest

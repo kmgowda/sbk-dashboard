@@ -2,6 +2,7 @@ include scripts/Start-SbkDashboard.ps1
 include scripts/Start-SbkDashboardBackground.ps1
 include scripts/Stop-SbkDashboard.ps1
 include scripts/docker_safe_extract.py
+include scripts/sbk_dashboard_bootstrap.py
 include scripts/sbk_dashboard_launcher.py
 include scripts/start-sbk-dashboard.sh
 include scripts/start-sbk-dashboard-background.sh

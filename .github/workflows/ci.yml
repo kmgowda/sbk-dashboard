@@ -25,7 +25,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: ruff check src tests scripts
-      - run: mypy src scripts/sbk_dashboard_launcher.py
+      - run: mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
       - run: python -W error::ResourceWarning -m unittest discover -s tests -q
       - run: coverage erase
       - run: coverage run -m pytest -q

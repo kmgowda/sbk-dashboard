@@ -139,3 +139,9 @@ Exact repeated endpoint registration is now idempotent. Submitting the same norm
 display name, and SBK/SBM kind returns the existing endpoint and dashboard rather than a duplicate-registration
 error. The initial API request returns HTTP 201 and repeats return HTTP 200. Existing endpoint IDs and persisted
 registrations are unchanged; conflicting metadata for an existing `host:port` is still rejected.
+
+Source-archive start scripts now require only Python 3.10 or newer with venv support. They continue to prefer an
+active venv, active Conda environment, and existing project `.venv`, but now create the project `.venv` when no
+environment is available and install missing pip, `sbk-dashboard`, and `psutil` before launch. This may modify the
+selected active environment and may require package-index access. The installed console command and stop scripts do
+not auto-install, and no application data or endpoint migration is involved.

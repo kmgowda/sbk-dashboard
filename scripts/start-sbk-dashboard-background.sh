@@ -19,10 +19,7 @@ elif command -v python3 >/dev/null 2>&1; then
 else
     echo "Python 3.10 or newer is required, but python3 was not found." >&2
     echo "Install Python from https://www.python.org/downloads/ or your Linux/macOS package manager." >&2
-    echo "Then create and install the project environment:" >&2
-    echo "  python3 -m venv .venv" >&2
-    echo "  . .venv/bin/activate" >&2
-    echo "  python -m pip install ." >&2
+    echo "Install Python with its venv module, then rerun this script." >&2
     exit 1
 fi
 
@@ -43,4 +40,4 @@ if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10)
 fi
 
 echo "Selected $ENVIRONMENT"
-exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" background "$@"
+exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_bootstrap.py" background "$@"
