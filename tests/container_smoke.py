@@ -110,7 +110,7 @@ class ContainerSmoke:
             else:
                 self.target_endpoints = self._start_test_exporters()
             target_ids, comparison = self._first_start()
-            self._stop_and_remove()
+            self._kill_and_remove()
             self._assert_processes_stopped()
             self._start()
             self._wait_until_healthy()
@@ -151,6 +151,7 @@ class ContainerSmoke:
             raise AssertionError("Landing page is not reachable from the Docker host")
         if b'value="host.docker.internal"' not in landing:
             raise AssertionError("Container landing page does not default to the Docker host gateway")
+        self._assert_runtime_hardening()
         bindings = json.loads(
             command(
                 "docker", "inspect", "--format", "{{json .NetworkSettings.Ports}}", self.name
@@ -244,6 +245,9 @@ class ContainerSmoke:
             self.name,
             "--network",
             self.network,
+            "--read-only",
+            "--tmpfs",
+            "/tmp:size=64m,mode=1777",
             "--volume",
             f"{self.volume}:/var/lib/sbk-dashboard",
             "--publish",
@@ -370,6 +374,33 @@ class ContainerSmoke:
             if expected not in output:
                 raise AssertionError(f"Missing managed process {expected}:\n{output}")
         self.captured_pids.update(identifiers)
+
+    def _assert_runtime_hardening(self) -> None:
+        details = json.loads(command("docker", "inspect", self.name).stdout)[0]
+        if details["Config"]["User"] != "10001:10001":
+            raise AssertionError(f"Container user is not fixed non-root UID/GID 10001: {details['Config']['User']}")
+        if details["HostConfig"]["ReadonlyRootfs"] is not True:
+            raise AssertionError("Container root filesystem is not read-only")
+        script = (
+            "import json, os\n"
+            "paths=['/opt/prometheus/prometheus','/opt/grafana/bin/grafana']\n"
+            "print(json.dumps([{'path':p,'uid':os.stat(p).st_uid,'writable':os.access(p,os.W_OK)} "
+            "for p in paths]))\n"
+        )
+        native_files = json.loads(
+            command("docker", "exec", self.name, "python", "-c", script).stdout
+        )
+        if any(item["uid"] != 0 or item["writable"] for item in native_files):
+            raise AssertionError(f"Native installations are not immutable root-owned content: {native_files}")
+
+    def _kill_and_remove(self) -> None:
+        command("docker", "kill", "--signal", "KILL", self.name)
+        exit_code = command(
+            "docker", "inspect", "--format", "{{.State.ExitCode}}", self.name
+        ).stdout.strip()
+        if exit_code != "137":
+            raise AssertionError(f"Forced container termination returned unexpected exit={exit_code}")
+        command("docker", "rm", self.name)
 
     def _stop_and_remove(self) -> None:
         command("docker", "stop", "--time", "30", self.name)

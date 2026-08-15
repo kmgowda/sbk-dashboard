@@ -254,6 +254,12 @@ to make a test convenient.
 7. Update `docs/DOCKER.md`, and remove only the exact disposable containers/volumes/files created by validation.
 8. Keep production `compose.yaml` image-only. Put local source builds in `compose.dev.yaml`; neither file may change
    the one-control-plane/two-native-child runtime topology.
+9. Keep published ports host-only by default while authentication is disabled, keep `/opt` native installations
+   root-owned, and prove the application works with a read-only root filesystem.
+10. Hash-pin container-only Python build/runtime dependencies, scan the runnable image for fixed high/critical
+    vulnerabilities, and sign release digests without granting signing credentials to pull-request jobs.
+11. Test both graceful stop and `SIGKILL` recovery against the same persistent volume. Resource overlays may bound
+    CPU, memory, and PIDs but must not change image acquisition, networking, persistence, or process topology.
 
 ## Debugging guide
 

@@ -5,9 +5,9 @@ services:
     image: ${SBK_DASHBOARD_IMAGE:-kmgowda/sbk-dashboard:1.26.8.2}
     pull_policy: missing
     ports:
-      # Authentication is disabled. Set SBK_DASHBOARD_PUBLISH_HOST=127.0.0.1 for host-only access.
-      - "${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:9721:9721"
-      - "${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:3000:3000"
+      # Authentication is disabled. Set SBK_DASHBOARD_PUBLISH_HOST=0.0.0.0 only on a protected network.
+      - "${SBK_DASHBOARD_PUBLISH_HOST:-127.0.0.1}:9721:9721"
+      - "${SBK_DASHBOARD_PUBLISH_HOST:-127.0.0.1}:3000:3000"
     volumes:
       - sbk-dashboard-data:/var/lib/sbk-dashboard
     extra_hosts:
@@ -18,6 +18,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
 
 volumes:
   sbk-dashboard-data:

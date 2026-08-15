@@ -31,11 +31,11 @@ Open these host URLs:
 - Landing page: `http://localhost:9721/`
 - Grafana: `http://localhost:3000/`
 
-The container is headless and cannot open a browser process on the Docker host. By default, Compose publishes ports
-9721 and 3000 on every host interface. Because authentication is disabled, set
-`SBK_DASHBOARD_PUBLISH_HOST=127.0.0.1` before `docker compose up` for host-only access, or protect both ports with a
-firewall, trusted network, or authenticated reverse proxy. Publishing the ports makes the UI and every generated
-dashboard link available to the host browser immediately. Opening the landing page
+The container is headless and cannot open a browser process on the Docker host. Compose publishes ports 9721 and
+3000 on host loopback by default. Because authentication is disabled, set `SBK_DASHBOARD_PUBLISH_HOST=0.0.0.0` only
+for deliberate network-wide access protected by a firewall, trusted network, or authenticated reverse proxy.
+Publishing the ports makes the UI and every generated dashboard link available to the host browser immediately.
+Opening the landing page
 through a public IP or DNS name produces generated Grafana links with that same hostname and port 3000.
 
 Inspect or stop the deployment with:
@@ -56,17 +56,28 @@ Release tags publish `linux/amd64` and `linux/arm64` images to Docker Hub. Run a
 
 ```bash
 docker run --detach --name sbk-dashboard --restart unless-stopped \
-  --publish 9721:9721 --publish 3000:3000 \
+  --read-only --tmpfs /tmp:size=64m,mode=1777 \
+  --publish 127.0.0.1:9721:9721 --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
   kmgowda/sbk-dashboard:1.26.8.2
 ```
 
-Use a pinned release in production instead of `latest`. The image runs as UID/GID 10001, uses `tini` as PID 1,
+Use a pinned release in production instead of `latest`; use its immutable manifest digest where change control
+requires byte-identical deployment. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
 digest so AMD64 and ARM64 builds resolve the same reviewed manifest. Native archive downloads are checksum-verified,
 time-bounded, retried, and capped at the same 2 GiB per-download maximum as automatic native installation.
+Python build tools and the Linux AMD64/ARM64 `psutil` wheels are exact-version and SHA-256 pinned. The build verifies
+that the installed application version equals the OCI `APPLICATION_VERSION` label input.
+
+Resolve an immutable digest after pulling or publishing:
+
+```bash
+docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.2
+SBK_DASHBOARD_IMAGE='kmgowda/sbk-dashboard:1.26.8.2@sha256:<manifest-digest>' docker compose up --detach
+```
 
 ## Register endpoints
 
@@ -133,15 +144,45 @@ For a bind mount, create the directory in advance and make it writable by UID/GI
 or volume while the container is stopped for a consistent Prometheus/Grafana snapshot. Never copy runtime PID state
 from a running instance into another simultaneously running instance.
 
+## Optional resource limits
+
+The base Compose definition does not assume that a small development host and a high-cardinality production host
+have the same capacity. Apply the optional overlay to select explicit bounds:
+
+```bash
+docker compose -f compose.yaml -f compose.resources.yaml up --detach
+```
+
+Its defaults are 4 GiB memory, 2 CPUs, and 512 PIDs. Override them when necessary:
+
+```bash
+SBK_DASHBOARD_MEMORY_LIMIT=8g \
+SBK_DASHBOARD_CPU_LIMIT=4 \
+SBK_DASHBOARD_PIDS_LIMIT=768 \
+docker compose -f compose.yaml -f compose.resources.yaml up --detach
+```
+
+Select limits from observed Prometheus cardinality and Grafana query load. An OOM kill is a hard termination; the
+next start recovers persisted state, but graceful shutdown remains preferable.
+
 ## Security and operations
 
 Authentication is not implemented. Restrict ports 9721 and 3000 with host firewall/security-group rules, a trusted
 network, or an authenticated reverse proxy. Prometheus 9090 is intentionally neither exposed nor published.
 
-The Compose definition drops all Linux capabilities and enables `no-new-privileges`. Do not add privileged mode or
-mount the Docker socket. Native child logs and control-plane state remain bounded according to normal
-sbk-dashboard settings. The image health check reports unhealthy when the management/native stack health endpoint
-cannot respond successfully.
+The Compose definition drops all Linux capabilities, enables `no-new-privileges`, makes the image root filesystem
+read-only, and provides a bounded temporary `/tmp`. Only the `/var/lib/sbk-dashboard` volume is persistent and
+writable. Prometheus and Grafana installations under `/opt` remain root-owned and non-writable by UID 10001. Do not
+add privileged mode or mount the Docker socket. Native child logs and control-plane state remain bounded according
+to normal sbk-dashboard settings. The image health check reports unhealthy when the management/native stack health
+endpoint cannot respond successfully.
+
+Release CI scans the runnable AMD64 image with pinned Trivy and fails for fixed `HIGH` or `CRITICAL` OS/library
+vulnerabilities. `.trivyignore.yaml` contains only target-scoped, explained, expiring exceptions for findings still
+present in the newest official native builds; an expired exception fails the next build. Published
+multi-architecture digests carry BuildKit SBOM/provenance attestations and a keyless Cosign signature issued from
+the tagged GitHub Actions workflow. Verify the digest and signature as documented in `DOCKER_HUB.md`; a version tag
+alone is human-readable but remains registry-mutable.
 
 Graceful `docker stop` sends the declared `SIGTERM` through `tini`; the Python lifecycle closes Grafana and
 Prometheus in reverse dependency order and removes ownership records. The existing guardian processes provide
@@ -184,9 +225,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 Docker cannot load a multi-platform image into the classic local image store. For a runnable local image, build one
 host platform with `--load`; for a release manifest, use the authenticated `--push` workflow in `DOCKER_HUB.md`.
 
-The live smoke test validates host port access, registration, a generated Grafana dashboard, persistent state over
-a full restart, graceful exit, and absence of surviving native child PIDs. The real-SBK mode is documented in
-`docs/TESTING.md`.
+The live smoke test validates host port access, read-only-root execution, immutable native tools, registration, a
+generated Grafana dashboard, persistent state after `SIGKILL`, stale-ownership recovery, graceful exit, and absence
+of surviving native child PIDs. The real-SBK mode is documented in `docs/TESTING.md`.
 
 Prometheus and Grafana downloads are separate Docker stages backed by independent checksum-validated BuildKit cache
 mounts, allowing cold downloads to run in parallel.

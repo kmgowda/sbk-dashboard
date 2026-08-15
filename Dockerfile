@@ -1,20 +1,26 @@
 # syntax=docker/dockerfile:1
 
 ARG PYTHON_BASE=python:3.12.13-slim-trixie@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
-ARG PROMETHEUS_VERSION=3.10.0
-ARG PROMETHEUS_AMD64_SHA256=41c50d97bb6a181623fc89d3fe61d0cc68ee69cc93da9091b8bba005f9690122
-ARG PROMETHEUS_ARM64_SHA256=f6fc81c7955b6e1ddd532c62b55896f7e7a61d997a3817ac3534114f2dd33ab1
-ARG GRAFANA_VERSION=12.4.1
-ARG GRAFANA_BUILD=22846628243
-ARG GRAFANA_AMD64_SHA256=55d6d71c813dd7426fe0b8d3a237e8d4ee4bf8a806ff90494207e146473ceb41
-ARG GRAFANA_ARM64_SHA256=7338a20b4757e5e37a25fb42855828f7627bc830c293d77da1cf6279103044ac
+ARG PROMETHEUS_VERSION=3.13.2
+ARG PROMETHEUS_AMD64_SHA256=0e8c4d46101bd025ea8265e377d2caabc57f488fc1be1c367f37db69ea41be6f
+ARG PROMETHEUS_ARM64_SHA256=7cecb17a6f41d59814e1a0581a1f81f79051ad5973d1ecf39e23a9f747d6572a
+ARG GRAFANA_VERSION=13.1.3
+ARG GRAFANA_BUILD=31135815010
+ARG GRAFANA_AMD64_SHA256=e0fd22aa63901ebc961ee64195da60eef8624a831683ca10b26c7b068082e92b
+ARG GRAFANA_ARM64_SHA256=83eef49ccc6529da5ef3ffd2bc76dadfa66cca9a9684278bf858346cf2271b5d
 ARG NATIVE_DOWNLOAD_MAX_BYTES=2147483648
 
 FROM ${PYTHON_BASE} AS package-builder
 WORKDIR /source
+COPY requirements/container-build.txt requirements/container-runtime.txt /requirements/
 COPY LICENSE README.md pyproject.toml ./
 COPY src ./src
-RUN python -m pip wheel --disable-pip-version-check --wheel-dir /wheels .
+RUN python -m pip install --disable-pip-version-check --no-cache-dir --require-hashes \
+      --requirement /requirements/container-build.txt \
+    && python -m pip wheel --disable-pip-version-check --no-cache-dir --require-hashes --no-deps \
+      --wheel-dir /wheels --requirement /requirements/container-runtime.txt \
+    && python -m pip wheel --disable-pip-version-check --no-cache-dir --no-build-isolation --no-deps \
+      --wheel-dir /wheels .
 
 FROM ${PYTHON_BASE} AS native-download-base
 COPY scripts/docker_safe_extract.py /usr/local/bin/docker-safe-extract
@@ -101,9 +107,12 @@ RUN apt-get update \
 COPY --from=package-builder /wheels /tmp/wheels
 RUN python -m pip install --disable-pip-version-check --no-cache-dir --no-index \
       --find-links /tmp/wheels /tmp/wheels/sbk_dashboard-*.whl \
+    && installed_version="$(python -c 'from sbk_dashboard.version import VERSION; print(VERSION)')" \
+    && test "${installed_version}" = "${APPLICATION_VERSION}" \
     && rm -rf /tmp/wheels
-COPY --from=prometheus-tools --chown=10001:10001 /opt/prometheus /opt/prometheus
-COPY --from=grafana-tools --chown=10001:10001 /opt/grafana /opt/grafana
+# Native installations are executable by the application user but remain immutable root-owned image content.
+COPY --from=prometheus-tools /opt/prometheus /opt/prometheus
+COPY --from=grafana-tools /opt/grafana /opt/grafana
 ENV HOME=/var/lib/sbk-dashboard \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

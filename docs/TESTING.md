@@ -45,12 +45,13 @@ Compose hardening, and build-context exclusions:
 PYTHONPATH=src python -m unittest tests.test_container -v
 docker compose config --quiet
 docker compose -f compose.yaml -f compose.dev.yaml config --quiet
+docker compose -f compose.yaml -f compose.resources.yaml config --quiet
 python tests/compose_contract.py
 ```
 
 The first resolved configuration must contain the pinned Docker Hub image and no build definition. The merged
 development configuration must retain the same ports, volume, network, security, and lifecycle settings while
-adding only the local image/build policy.
+adding only the local image/build policy. The resource overlay must add only its CPU, memory, and PID limits.
 
 Build and run the live Linux smoke test:
 
@@ -65,8 +66,9 @@ by their literal container IPv4 and IPv6 addresses, proving that
 Prometheus receives both unchanged addresses and scrapes both successfully. The test also validates landing/Grafana
 host access, endpoint-scoped metrics, both generated 53-panel dashboards, publication of only ports 9721 and 3000,
 exact-registration reuse with HTTP 200, deterministic comparison ID/URL reuse in reversed order, its generated
-53-panel comparison file, comparison persistence across restart, clean shutdown, absence of recorded native PIDs,
-and registration/dashboard persistence across a full restart. Its `finally` cleanup removes only those uniquely
+53-panel comparison file, root-owned non-writable native installations, read-only-root operation, comparison
+persistence after `SIGKILL`, stale-ownership recovery, clean shutdown, absence of recorded native PIDs, and
+registration/dashboard persistence across a full restart. Its `finally` cleanup removes only those uniquely
 named containers, network, and volume.
 
 For real SBK integration, expose a non-default host exporter port for at least 120 seconds:
@@ -94,7 +96,10 @@ after a full container restart. Stop SBK and remove only `/tmp/sbk-dashboard-con
 
 CI uses the stable `ubuntu-24.04` runner, builds/runs Linux AMD64, and builds Linux ARM64 under QEMU. A successful
 QEMU build is not a native ARM runtime claim. Docker Desktop behavior on macOS/Windows and native ARM execution still
-require their respective smoke tests.
+require their respective smoke tests. Before runtime validation, CI scans the loaded AMD64 image with pinned Trivy
+and rejects fixed high/critical OS, Python, and native Go-binary vulnerabilities. Reviewed exceptions must name
+exact target paths, explain the decision, and expire in `.trivyignore.yaml`; do not extend an expiry without
+checking for newer official Prometheus and Grafana builds first.
 
 Container contract tests also keep the Dockerfile Grafana build number, archive checksums, download-size cap,
 application version build arguments, stable Linux runner labels, and best-effort pull-request cache export aligned

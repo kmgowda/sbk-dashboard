@@ -356,12 +356,21 @@ network policy. Independent cached Prometheus and Grafana build stages reduce bu
 runtime services or transferring lifecycle ownership away from the Python process.
 
 The image runs as UID/GID 10001, uses a digest-pinned official Python 3.12 slim image on the current Debian stable
-generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools, and stores the entire data root in
-`/var/lib/sbk-dashboard`. A persistent volume therefore preserves endpoint registrations,
+generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools as immutable root-owned content, and
+stores the entire writable data root in `/var/lib/sbk-dashboard`. Compose makes the remaining root filesystem
+read-only and supplies only a bounded temporary `/tmp`. A persistent volume therefore preserves endpoint registrations,
 generated mappings/dashboards, Prometheus TSDB history, Grafana state, and process logs across replacement. `tini`
 forwards the image's `SIGTERM` stop signal and reaps children, while the existing guardians retain hard-parent-death
 protection. Compose grants 30 seconds for ordered cleanup; after that bound the container runtime kills every
 remaining process in the container PID namespace/cgroup, preventing a host orphan.
+
+Compose publishes management and Grafana on host loopback by default. Network-wide publication is an explicit
+operator choice because authentication remains disabled. `compose.resources.yaml` is an optional overlay that adds
+CPU, memory, and PID limits without changing topology or imposing one resource profile on every deployment.
+
+Container builds hash-pin Python build/runtime inputs, verify the installed package version against the OCI version
+argument, and scan the runnable image for fixed high/critical vulnerabilities. Tagged release builds attach SBOM
+and provenance attestations and keylessly sign the published multi-architecture digest through GitHub OIDC.
 
 Compose adds `host.docker.internal:host-gateway`, allowing container Prometheus to scrape an SBK exporter on the
 Docker host, and the image supplies that hostname as the landing form default. Direct host execution retains
