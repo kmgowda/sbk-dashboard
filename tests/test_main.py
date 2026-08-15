@@ -73,7 +73,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("status-seconds=60 [default]", text)
         self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
-        self.assertIn("monitoring-properties=packaged monitoring-download.properties [default]", text)
+        self.assertIn("monitoring-properties=packaged native-artifacts.json [default]", text)
 
     @patch("sbk_dashboard.main.PortProcessManager.find_available")
     def test_default_native_ports_fall_back_and_update_default_grafana_url(self, available):

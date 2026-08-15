@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 import signal
@@ -28,9 +29,42 @@ except ModuleNotFoundError as error:
         "Or install the release wheel into this environment."
     ) from error
 
+try:
+    from sbk_dashboard.contracts import (
+        DEFAULT_DASHBOARD_PORT,
+        DEFAULT_HOME_DIRECTORY_NAME,
+        LAUNCHER_DIRECTORY_ENVIRONMENT,
+        PORTABLE_HOME_ENVIRONMENT,
+        PROCESS_CREATE_TIME_TOLERANCE_SECONDS,
+    )
+    from sbk_dashboard.endpoint_policy import MAX_TCP_PORT, MIN_TCP_PORT, valid_port
+except ModuleNotFoundError as error:
+    if error.name not in {"sbk_dashboard", "sbk_dashboard.contracts"}:
+        raise
+    source = Path(__file__).resolve().parents[1] / "src" / "sbk_dashboard"
+
+    def load_policy_module(name: str) -> Any:
+        spec = importlib.util.spec_from_file_location(f"_sbk_launcher_{name}", source / f"{name}.py")
+        if spec is None or spec.loader is None:
+            raise SystemExit(f"Unable to load launcher policy module: {name}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    contracts = load_policy_module("contracts")
+    endpoint_policy = load_policy_module("endpoint_policy")
+    DEFAULT_DASHBOARD_PORT = contracts.DEFAULT_DASHBOARD_PORT
+    DEFAULT_HOME_DIRECTORY_NAME = contracts.DEFAULT_HOME_DIRECTORY_NAME
+    LAUNCHER_DIRECTORY_ENVIRONMENT = contracts.LAUNCHER_DIRECTORY_ENVIRONMENT
+    PORTABLE_HOME_ENVIRONMENT = contracts.PORTABLE_HOME_ENVIRONMENT
+    PROCESS_CREATE_TIME_TOLERANCE_SECONDS = contracts.PROCESS_CREATE_TIME_TOLERANCE_SECONDS
+    MAX_TCP_PORT = endpoint_policy.MAX_TCP_PORT
+    MIN_TCP_PORT = endpoint_policy.MIN_TCP_PORT
+    valid_port = endpoint_policy.valid_port
+
 STATE_FILE = "sbk-dashboard.json"
 LOG_FILE = "sbk-dashboard.log"
-DEFAULT_DASHBOARD_PORT = 9721
 DEFAULT_STOP_TIMEOUT_SECONDS = 45.0
 LOG_MAX_BYTES = 10 * 1024 * 1024
 LOG_BACKUPS = 3
@@ -42,10 +76,10 @@ FORCE_CLEANUP_SECONDS = 10.0
 
 
 def state_directory() -> Path:
-    override = os.environ.get("SBK_DASHBOARD_LAUNCHER_DIR")
+    override = os.environ.get(LAUNCHER_DIRECTORY_ENVIRONMENT)
     if override:
         return Path(override).expanduser().resolve()
-    portable_home = os.environ.get("SBK_DASHBOARD_HOME", "").strip()
+    portable_home = os.environ.get(PORTABLE_HOME_ENVIRONMENT, "").strip()
     if portable_home:
         return Path(portable_home).expanduser().resolve() / "launcher"
     if os.name == "nt":
@@ -53,7 +87,8 @@ def state_directory() -> Path:
         legacy = base / "SBK Dashboard" / "launcher"
         if legacy.exists():
             return legacy
-    return Path.home() / ".sbk-dashboard" / "launcher"
+        return base / DEFAULT_HOME_DIRECTORY_NAME / "launcher"
+    return Path.home().resolve() / DEFAULT_HOME_DIRECTORY_NAME / "launcher"
 
 
 def state_path(port: int = DEFAULT_DASHBOARD_PORT) -> Path:
@@ -118,7 +153,10 @@ def matching_process(state: dict[str, Any] | None) -> psutil.Process | None:
         pid = int(state["pid"])
         created = float(state["create_time"])
         process = psutil.Process(pid)
-        if abs(process.create_time() - created) > 0.01 or process.status() == psutil.STATUS_ZOMBIE:
+        if (
+            abs(process.create_time() - created) > PROCESS_CREATE_TIME_TOLERANCE_SECONDS
+            or process.status() == psutil.STATUS_ZOMBIE
+        ):
             return None
         return process
     except (KeyError, TypeError, ValueError, psutil.Error):
@@ -142,7 +180,10 @@ def remove_owned_state(pid: int, create_time: float, port: int = DEFAULT_DASHBOA
     if state is None:
         return
     try:
-        matches = int(state["pid"]) == pid and abs(float(state["create_time"]) - create_time) <= 0.01
+        matches = (
+            int(state["pid"]) == pid
+            and abs(float(state["create_time"]) - create_time) <= PROCESS_CREATE_TIME_TOLERANCE_SECONDS
+        )
     except (KeyError, TypeError, ValueError):
         return
     if matches:
@@ -237,9 +278,9 @@ def management_port(arguments: list[str]) -> int:
     try:
         port = int(selected)
     except ValueError as error:
-        raise SystemExit("Dashboard port must be between 1 and 65535.") from error
-    if not 1 <= port <= 65535:
-        raise SystemExit("Dashboard port must be between 1 and 65535.")
+        raise SystemExit(f"Dashboard port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}.") from error
+    if not valid_port(port):
+        raise SystemExit(f"Dashboard port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}.")
     return port
 
 

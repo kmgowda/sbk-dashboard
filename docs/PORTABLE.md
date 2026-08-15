@@ -20,6 +20,10 @@ Run one root command after clone or extraction:
 On PowerShell replace `./sbk-dashboard` with `.\sbk-dashboard.ps1`. Command Prompt uses `sbk-dashboard.cmd`.
 Application options after the command are preserved exactly.
 
+The thin OS-specific wrappers delegate interpreter selection and minimum-version checks to one shared Unix helper
+or one shared PowerShell helper. This keeps active-venv/Conda precedence and bootstrap behavior identical across
+foreground, background, stop, and repair commands.
+
 The bootstrap validates Python 3.10+, reuses an active venv or Conda environment, and otherwise creates a private
 venv. It installs pip with `ensurepip` if necessary, installs the local application and `psutil`, then executes the
 normal cross-platform launcher. It acquires no launcher state or native process until preparation succeeds.

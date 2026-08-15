@@ -428,7 +428,7 @@ the Python implementation. Prometheus time-based retention is the only sample-re
 
 ## Automatic native installation
 
-The packaged `monitoring-download.properties` contains pinned Prometheus and Grafana URLs, checksums, archive
+The packaged `native-artifacts.json` manifest contains pinned Prometheus and Grafana URLs, checksums, archive
 layouts, and executable names for:
 
 - `linux-x86_64` and `linux-arm64`
@@ -458,7 +458,7 @@ prometheus.executable=prometheus
 prometheus.archive.format=tar.gz
 ```
 
-Pass it using `-monitoring-properties /path/to/monitoring-download.properties`. Platform-qualified values such as
+Pass an external compatibility override using `-monitoring-properties /path/to/monitoring-download.properties`. Platform-qualified values such as
 `prometheus.windows-x86_64.download.url` are also supported. Unspecified values retain packaged defaults.
 
 ## Existing-process behavior

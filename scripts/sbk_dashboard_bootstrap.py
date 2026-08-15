@@ -8,7 +8,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -19,7 +18,21 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
-MINIMUM_PYTHON = (3, 10)
+SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+if str(SCRIPT_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIRECTORY))
+
+from python_requirement import ensure_supported  # noqa: E402
+
+PROJECT_DIRECTORY = SCRIPT_DIRECTORY.parent
+SOURCE_DIRECTORY = PROJECT_DIRECTORY / "src"
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+from sbk_dashboard.contracts import PORTABLE_HOME_ENVIRONMENT  # noqa: E402
+from sbk_dashboard.layout import PortableHomeLayout  # noqa: E402
+from sbk_dashboard.platforms import portable_platform_id  # noqa: E402
+
 REQUIRED_MODULES = ("psutil", "sbk_dashboard")
 LOCK_WAIT_SECONDS = 180.0
 LOCK_STALE_SECONDS = 600.0
@@ -34,12 +47,11 @@ WINDOWS_ERROR_INVALID_PARAMETER = 87
 
 def dashboard_home(environment: dict[str, str] | None = None) -> Path:
     values = os.environ if environment is None else environment
-    selected = values.get("SBK_DASHBOARD_HOME", "").strip()
-    home = Path(selected).expanduser() if selected else Path.home() / ".sbk-dashboard"
-    resolved = home.resolve()
-    if resolved == Path(resolved.anchor) or resolved == Path.home().resolve():
-        raise SystemExit("SBK_DASHBOARD_HOME must be a dedicated subdirectory, not a filesystem or home root.")
-    return resolved
+    selected = values.get(PORTABLE_HOME_ENVIRONMENT, "").strip()
+    try:
+        return PortableHomeLayout.from_value(selected).root
+    except ValueError as error:
+        raise SystemExit(f"{error}.") from error
 
 
 def project_version(project_directory: Path) -> str:
@@ -51,17 +63,10 @@ def project_version(project_directory: Path) -> str:
 
 
 def platform_id() -> str:
-    operating_system = {"darwin": "macos", "win32": "windows", "linux": "linux"}.get(sys.platform)
-    if operating_system is None:
-        raise SystemExit(f"Unsupported operating system: {sys.platform}.")
-    machine = platform.machine().lower()
-    if machine in {"arm64", "aarch64"}:
-        architecture = "arm64"
-    elif machine in {"amd64", "x86_64", "x64"}:
-        architecture = "amd64"
-    else:
-        raise SystemExit(f"Unsupported processor architecture: {platform.machine()}.")
-    return f"{operating_system}-{architecture}"
+    try:
+        return portable_platform_id()
+    except ValueError as error:
+        raise SystemExit(f"{error}.") from error
 
 
 def source_fingerprint(project_directory: Path) -> str:
@@ -367,7 +372,7 @@ def prepare_active_environment(project_directory: Path, home: Path, version: str
 
 
 def launch(python: Path, script_directory: Path, selected: list[str], home: Path) -> None:
-    os.environ["SBK_DASHBOARD_HOME"] = str(home)
+    os.environ[PORTABLE_HOME_ENVIRONMENT] = str(home)
     os.environ.setdefault("PIP_CACHE_DIR", str(home / "cache" / "pip"))
     launcher = script_directory / "sbk_dashboard_launcher.py"
     os.execv(str(python), [str(python), str(launcher), *selected])
@@ -377,8 +382,7 @@ def main(arguments: list[str] | None = None) -> int:
     selected = list(sys.argv[1:] if arguments is None else arguments)
     if not selected or selected[0] not in {"foreground", "background", "stop", "repair"}:
         raise SystemExit("Usage: sbk_dashboard_bootstrap.py {foreground|background|stop|repair} [dashboard options]")
-    if sys.version_info < MINIMUM_PYTHON:
-        raise SystemExit(f"Python 3.10 or newer is required; selected interpreter reports {sys.version.split()[0]}.")
+    ensure_supported()
     script_directory = Path(__file__).resolve().parent
     project_directory = script_directory.parent
     home = dashboard_home()

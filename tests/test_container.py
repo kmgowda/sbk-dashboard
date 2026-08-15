@@ -1,4 +1,4 @@
-import re
+import json
 import unittest
 from pathlib import Path
 
@@ -20,9 +20,9 @@ class ContainerContractTest(unittest.TestCase):
         cls.resources_compose = (ROOT / "compose.resources.yaml").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/container.yml").read_text(encoding="utf-8")
         cls.ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        cls.properties = (
-            ROOT / "src/sbk_dashboard/resources/monitoring-download.properties"
-        ).read_text(encoding="utf-8")
+        cls.native_manifest = json.loads(
+            (ROOT / "src/sbk_dashboard/resources/native-artifacts.json").read_text(encoding="utf-8")
+        )
         cls.container_build_requirements = (
             ROOT / "requirements/container-build.txt"
         ).read_text(encoding="utf-8")
@@ -85,36 +85,21 @@ class ContainerContractTest(unittest.TestCase):
         self.assertNotIn("--chown=10001:10001 /opt/grafana", self.dockerfile)
 
     def test_image_native_versions_and_checksums_match_packaged_bootstrap(self):
-        expected = {
-            "PROMETHEUS_AMD64_SHA256": self._property(
-                "prometheus.linux-x86_64.download.sha256"
-            ),
-            "PROMETHEUS_ARM64_SHA256": self._property(
-                "prometheus.linux-arm64.download.sha256"
-            ),
-            "GRAFANA_AMD64_SHA256": self._property("grafana.linux-x86_64.download.sha256"),
-            "GRAFANA_ARM64_SHA256": self._property("grafana.linux-arm64.download.sha256"),
-        }
-        for argument, checksum in expected.items():
-            self.assertEqual(checksum, self._argument(argument), argument)
-        self.assertIn(
-            f"ARG PROMETHEUS_VERSION={self._url_version('prometheus.linux-x86_64.download.url', 'prometheus')}",
-            self.dockerfile,
-        )
-        self.assertIn(
-            f"ARG GRAFANA_VERSION={self._url_version('grafana.linux-x86_64.download.url', 'grafana')}",
-            self.dockerfile,
-        )
-        grafana_builds = {
-            self._grafana_build("grafana.linux-x86_64.download.url"),
-            self._grafana_build("grafana.linux-arm64.download.url"),
-        }
-        self.assertEqual(1, len(grafana_builds))
-        self.assertEqual(grafana_builds.pop(), self._argument("GRAFANA_BUILD"))
-        self.assertEqual(
-            self._property("download.max.bytes"), self._argument("NATIVE_DOWNLOAD_MAX_BYTES")
-        )
-        self.assertEqual(2, self.dockerfile.count('--max-filesize "${NATIVE_DOWNLOAD_MAX_BYTES}"'))
+        artifacts = self.native_manifest["artifacts"]
+        self.assertEqual({"prometheus", "grafana"}, set(artifacts))
+        for tool in artifacts.values():
+            self.assertEqual(
+                {"linux-x86_64", "linux-arm64", "macos-x86_64", "macos-arm64",
+                 "windows-x86_64", "windows-arm64"},
+                set(tool),
+            )
+        self.assertNotIn("PROMETHEUS_VERSION", self.dockerfile)
+        self.assertNotIn("GRAFANA_VERSION", self.dockerfile)
+        self.assertNotIn("_SHA256", self.dockerfile)
+        self.assertIn("COPY src/sbk_dashboard/resources/native-artifacts.json", self.dockerfile)
+        self.assertIn("COPY scripts/resolve_native_artifact.py", self.dockerfile)
+        self.assertEqual(7, self.dockerfile.count("/usr/local/bin/resolve-native-artifact"))
+        self.assertEqual(2, self.dockerfile.count('--max-filesize "${max_download_bytes}"'))
         self.assertIn("FROM native-download-base AS prometheus-tools", self.dockerfile)
         self.assertIn("FROM native-download-base AS grafana-tools", self.dockerfile)
         self.assertIn("id=sbk-dashboard-prometheus-downloads", self.dockerfile)
@@ -183,31 +168,6 @@ class ContainerContractTest(unittest.TestCase):
         self.assertNotRegex(self.workflow + self.ci_workflow, r"uses: [^\s]+@v\d+(?:\s|$)")
         self.assertIn("windows-2022", self.ci_workflow)
         self.assertNotIn("windows-latest", self.ci_workflow)
-
-    def _argument(self, name):
-        match = re.search(rf"^ARG {re.escape(name)}=([^\s]+)$", self.dockerfile, re.MULTILINE)
-        self.assertIsNotNone(match, name)
-        return match.group(1)
-
-    def _property(self, name):
-        match = re.search(rf"^{re.escape(name)}=(.+)$", self.properties, re.MULTILINE)
-        self.assertIsNotNone(match, name)
-        return match.group(1).strip()
-
-    def _url_version(self, name, tool):
-        url = self._property(name)
-        match = re.search(rf"/{re.escape(tool)}[-_/](?:release/)?v?(\d+\.\d+\.\d+)", url)
-        if match is None:
-            match = re.search(r"/v?(\d+\.\d+\.\d+)/", url)
-        self.assertIsNotNone(match, url)
-        return match.group(1)
-
-    def _grafana_build(self, name):
-        url = self._property(name)
-        match = re.search(r"grafana_\d+\.\d+\.\d+_(\d+)_linux_", url)
-        self.assertIsNotNone(match, url)
-        return match.group(1)
-
 
 if __name__ == "__main__":
     unittest.main()

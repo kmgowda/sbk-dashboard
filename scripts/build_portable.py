@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import platform
 import shutil
 import subprocess
 import sys
@@ -16,6 +15,11 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE_DIRECTORY = ROOT / "src"
+if str(SOURCE_DIRECTORY) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIRECTORY))
+
+from sbk_dashboard.platforms import portable_platform_id  # noqa: E402
 
 
 def application_version() -> str:
@@ -25,9 +29,7 @@ def application_version() -> str:
 
 
 def current_platform() -> str:
-    operating_system = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
-    architecture = "arm64" if platform.machine().lower() in {"arm64", "aarch64"} else "amd64"
-    return f"{operating_system}-{architecture}"
+    return portable_platform_id()
 
 
 def sha256(path: Path) -> str:

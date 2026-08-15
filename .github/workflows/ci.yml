@@ -26,6 +26,7 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: ruff check src tests scripts
       - run: mypy
+      - run: python scripts/sync_release_metadata.py
       - run: python -W error::ResourceWarning -m unittest discover -s tests -q
       - run: coverage erase
       - run: coverage run -m pytest -q

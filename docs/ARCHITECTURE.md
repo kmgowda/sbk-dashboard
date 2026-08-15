@@ -33,6 +33,13 @@ modules and are never embedded in the Python interpreter.
 There is one Prometheus process and one Grafana process per `sbk-dashboard` instance. There is not one native process
 per endpoint. This is significantly less expensive and lets Prometheus query data across endpoints when required.
 
+Operational values have explicit owners rather than scattered literals. `contracts.py` owns application defaults
+and bounded environment settings, `endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns
+OS/architecture normalization, and `layout.py` owns persistent path construction. The packaged
+`native-artifacts.json` manifest is the sole built-in Prometheus/Grafana artifact catalog consumed by both direct
+bootstrap and Docker builds. Protocol syntax, schema versions, HTTP status codes, and test fixture values remain
+local constants when they are intrinsic to their owning boundary rather than operator configuration.
+
 ## Control-plane lifecycle
 
 Startup is dependency ordered. The management port is not opened until the native monitoring stack is ready:

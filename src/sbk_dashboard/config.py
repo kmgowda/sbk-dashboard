@@ -3,24 +3,55 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
-import platform
 import re
 import shutil
 from dataclasses import dataclass, replace
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
+from sbk_dashboard.contracts import (
+    DATA_DIRECTORY_ENVIRONMENT,
+    DEFAULT_DASHBOARD_PORT,
+    DEFAULT_GRAFANA_BIND,
+    DEFAULT_GRAFANA_PORT,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_MANAGEMENT_BIND,
+    DEFAULT_PROMETHEUS_BIND,
+    DEFAULT_PROMETHEUS_PORT,
+    DEFAULT_RETENTION_DAYS,
+    DEFAULT_SCRAPE_INTERVAL_SECONDS,
+    DEFAULT_STATUS_INTERVAL_SECONDS,
+    DEFAULT_TARGET_HOST,
+    GRAFANA_STARTUP_TIMEOUT_SECONDS,
+    HEALTH_RESPONSE_MEBIBYTES,
+    HTTP_QUEUE_CAPACITY,
+    HTTP_WORKERS,
+    MAX_DOWNLOAD_BYTES,
+    MAX_STATUS_INTERVAL_SECONDS,
+    MAX_TARGETS,
+    PORTABLE_HOME_ENVIRONMENT,
+    PROCESS_LOG_BACKUPS,
+    PROCESS_LOG_MEBIBYTES,
+    PROMETHEUS_STARTUP_TIMEOUT_SECONDS,
+    REQUEST_TIMEOUT_SECONDS,
+    SUPERVISOR_INTERVAL_SECONDS,
+    SUPPORTED_LOG_LEVELS,
+    TARGET_HEALTH_TIMEOUT_SECONDS,
+    BoundedIntegerSetting,
+)
+from sbk_dashboard.endpoint_policy import MAX_TCP_PORT
+from sbk_dashboard.layout import PortableHomeLayout
 from sbk_dashboard.network import normalize_host
+from sbk_dashboard.platforms import RuntimePlatform
 from sbk_dashboard.version import VERSION
 
-DEFAULT_PORT = 9721
-DEFAULT_PROMETHEUS_PORT = 9090
-DEFAULT_GRAFANA_PORT = 3000
-DEFAULT_RETENTION_DAYS = 7
-DEFAULT_STATUS_INTERVAL_SECONDS = 60
-DEFAULT_MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
+# Backward-compatible public aliases. Ownership lives in contracts.py.
+DEFAULT_PORT = DEFAULT_DASHBOARD_PORT
+DEFAULT_MAX_DOWNLOAD_BYTES = MAX_DOWNLOAD_BYTES
 
 
 def _select(option: str | None, environment: dict[str, str], variable: str, default: str) -> tuple[str, str]:
@@ -45,8 +76,8 @@ def _positive(value: str, name: str) -> int:
 
 def _port(value: str, name: str) -> int:
     parsed = _positive(value, name)
-    if parsed > 65535:
-        raise ValueError(f"{name} must be between 1 and 65535")
+    if parsed > MAX_TCP_PORT:
+        raise ValueError(f"{name} must be between 1 and {MAX_TCP_PORT}")
     return parsed
 
 
@@ -54,44 +85,6 @@ def _boolean(value: str, name: str) -> bool:
     if value.lower() in {"true", "false"}:
         return value.lower() == "true"
     raise ValueError(f"-{name} must be true or false")
-
-
-@dataclass(frozen=True)
-class RuntimePlatform:
-    operating_system: str
-    architecture: str
-
-    @property
-    def id(self) -> str:
-        return f"{self.operating_system}-{self.architecture}"
-
-    @property
-    def windows(self) -> bool:
-        return self.operating_system == "windows"
-
-    @classmethod
-    def current(cls) -> RuntimePlatform:
-        return cls.from_names(platform.system(), platform.machine())
-
-    @classmethod
-    def from_names(cls, os_name: str, architecture: str) -> RuntimePlatform:
-        system = os_name.lower()
-        if "darwin" in system or "mac" in system:
-            normalized_os = "macos"
-        elif "windows" in system or system.startswith("win"):
-            normalized_os = "windows"
-        elif "linux" in system:
-            normalized_os = "linux"
-        else:
-            raise ValueError(f"Unsupported operating system: {os_name}")
-        normalized_arch = architecture.lower().replace("-", "_")
-        if normalized_arch in {"amd64", "x86_64", "x64"}:
-            normalized_arch = "x86_64"
-        elif normalized_arch in {"aarch64", "arm64"}:
-            normalized_arch = "arm64"
-        else:
-            raise ValueError(f"Unsupported architecture: {architecture}")
-        return cls(normalized_os, normalized_arch)
 
 
 @dataclass(frozen=True)
@@ -103,21 +96,21 @@ class DashboardConfig:
     scrape_interval_seconds: int
     retention_days: int
     sources: dict[str, str]
-    http_workers: int = 8
-    http_queue_capacity: int = 64
-    request_timeout_seconds: int = 15
-    health_response_limit_bytes: int = 4 * 1024 * 1024
-    supervisor_interval_seconds: int = 5
-    process_log_size_mb: int = 10
-    process_log_backups: int = 3
-    max_targets: int = 10_000
-    bind_address: str = "0.0.0.0"
-    log_level: str = "INFO"
-    target_health_timeout_seconds: int = 4
-    prometheus_startup_timeout_seconds: int = 45
-    grafana_startup_timeout_seconds: int = 120
+    http_workers: int = HTTP_WORKERS.default
+    http_queue_capacity: int = HTTP_QUEUE_CAPACITY.default
+    request_timeout_seconds: int = REQUEST_TIMEOUT_SECONDS.default
+    health_response_limit_bytes: int = HEALTH_RESPONSE_MEBIBYTES.default * 1024 * 1024
+    supervisor_interval_seconds: int = SUPERVISOR_INTERVAL_SECONDS.default
+    process_log_size_mb: int = PROCESS_LOG_MEBIBYTES.default
+    process_log_backups: int = PROCESS_LOG_BACKUPS.default
+    max_targets: int = MAX_TARGETS.default
+    bind_address: str = DEFAULT_MANAGEMENT_BIND
+    log_level: str = DEFAULT_LOG_LEVEL
+    target_health_timeout_seconds: int = TARGET_HEALTH_TIMEOUT_SECONDS.default
+    prometheus_startup_timeout_seconds: int = PROMETHEUS_STARTUP_TIMEOUT_SECONDS.default
+    grafana_startup_timeout_seconds: int = GRAFANA_STARTUP_TIMEOUT_SECONDS.default
     status_interval_seconds: int = DEFAULT_STATUS_INTERVAL_SECONDS
-    default_target_host: str = "127.0.0.1"
+    default_target_host: str = DEFAULT_TARGET_HOST
 
 
 @dataclass(frozen=True)
@@ -128,8 +121,8 @@ class MonitoringConfig:
     grafana_port: int
     grafana_public_url: str
     sources: dict[str, str]
-    prometheus_bind_address: str = "127.0.0.1"
-    grafana_bind_address: str = "0.0.0.0"
+    prometheus_bind_address: str = DEFAULT_PROMETHEUS_BIND
+    grafana_bind_address: str = DEFAULT_GRAFANA_BIND
 
     def with_tools(self, prometheus_binary: Path, grafana_home: Path) -> MonitoringConfig:
         return replace(self, prometheus_binary=prometheus_binary, grafana_home=grafana_home)
@@ -200,35 +193,41 @@ def parser() -> argparse.ArgumentParser:
         "--port",
         default=str(DEFAULT_PORT),
         metavar="port",
-        help="dashboard HTTP port (default: 9721)",
+        help=f"dashboard HTTP port (default: {DEFAULT_DASHBOARD_PORT})",
     )
-    result.add_argument("-bind", metavar="address", help="management bind address (default: 0.0.0.0)")
+    result.add_argument(
+        "-bind", metavar="address", help=f"management bind address (default: {DEFAULT_MANAGEMENT_BIND})"
+    )
     result.add_argument("-auth", default="false", metavar="true|false", help="false only; reserved for future use")
     result.add_argument("-continue", dest="continue_existing", default="false", metavar="true|false",
                         help="reuse healthy existing Prometheus/Grafana processes (default: false)")
     result.add_argument("-data", "--data-dir", dest="data", metavar="directory", help="persistent data directory")
     result.add_argument("-retention", "--retention-days", dest="retention", metavar="days",
-                        help="Prometheus retention days (default: 7)")
+                        help=f"Prometheus retention days (default: {DEFAULT_RETENTION_DAYS})")
     result.add_argument("-prometheus-bin", metavar="path", help="Prometheus executable")
     result.add_argument(
         "-prometheus-port",
         metavar="port",
-        help="managed Prometheus port (default: 9090; supplied busy ports fail startup)",
+        help=f"managed Prometheus port (default: {DEFAULT_PROMETHEUS_PORT}; supplied busy ports fail startup)",
     )
-    result.add_argument("-prometheus-bind", metavar="address", help="Prometheus bind address (default: 127.0.0.1)")
+    result.add_argument(
+        "-prometheus-bind", metavar="address", help=f"Prometheus bind address (default: {DEFAULT_PROMETHEUS_BIND})"
+    )
     result.add_argument("-grafana-home", metavar="directory", help="Grafana installation home")
     result.add_argument(
         "-grafana-port",
         metavar="port",
-        help="managed Grafana port (default: 3000; supplied busy ports fail startup)",
+        help=f"managed Grafana port (default: {DEFAULT_GRAFANA_PORT}; supplied busy ports fail startup)",
     )
-    result.add_argument("-grafana-bind", metavar="address", help="Grafana bind address (default: 0.0.0.0)")
+    result.add_argument(
+        "-grafana-bind", metavar="address", help=f"Grafana bind address (default: {DEFAULT_GRAFANA_BIND})"
+    )
     result.add_argument("-grafana-url", metavar="url", help="browser-accessible Grafana base URL")
     result.add_argument("-log-level", metavar="level", help="DEBUG, INFO, WARNING, ERROR, or CRITICAL")
     result.add_argument(
         "-status-seconds",
         metavar="seconds",
-        help="periodic short-status interval seconds (default: 60)",
+        help=f"periodic short-status interval seconds (default: {DEFAULT_STATUS_INTERVAL_SECONDS})",
     )
     result.add_argument("-monitoring-properties", metavar="file", help="native download properties file")
     return result
@@ -243,31 +242,29 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     if authentication:
         raise ValueError("Authentication is reserved for a future release; use -auth false")
     continue_existing = _boolean(namespace.continue_existing, "continue")
-    bind, bind_source = _select(namespace.bind, environment, "SBK_DASHBOARD_BIND", "0.0.0.0")
-    log_level, log_level_source = _select(namespace.log_level, environment, "SBK_DASHBOARD_LOG_LEVEL", "INFO")
+    bind, bind_source = _select(namespace.bind, environment, "SBK_DASHBOARD_BIND", DEFAULT_MANAGEMENT_BIND)
+    log_level, log_level_source = _select(
+        namespace.log_level, environment, "SBK_DASHBOARD_LOG_LEVEL", DEFAULT_LOG_LEVEL
+    )
     selected_log_level = log_level.upper()
-    if selected_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+    if selected_log_level not in SUPPORTED_LOG_LEVELS:
         raise ValueError("log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
-    configured_home = environment.get("SBK_DASHBOARD_HOME", "").strip()
-    if configured_home:
-        default_data = Path(configured_home).expanduser().resolve()
-        if default_data == Path(default_data.anchor) or default_data == Path.home().resolve():
-            raise ValueError("SBK_DASHBOARD_HOME must be a dedicated subdirectory, not a filesystem or home root")
-    else:
-        default_data = Path.home() / ".sbk-dashboard"
-    if port != DEFAULT_PORT:
-        default_data = default_data / "instances" / str(port)
+    configured_home = environment.get(PORTABLE_HOME_ENVIRONMENT, "").strip()
+    home_layout = PortableHomeLayout.from_value(configured_home)
+    default_data = home_layout.data_directory(port)
     data, data_source = _select(
         namespace.data,
         environment,
-        "SBK_DASHBOARD_DATA_DIR",
+        DATA_DIRECTORY_ENVIRONMENT,
         str(default_data),
     )
     if data_source == "default" and configured_home:
-        data_source = "environment SBK_DASHBOARD_HOME"
+        data_source = f"environment {PORTABLE_HOME_ENVIRONMENT}"
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
-    scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
+    scrape, scrape_source = _select(
+        None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", str(DEFAULT_SCRAPE_INTERVAL_SECONDS)
+    )
     status_interval, status_interval_source = _select(
         namespace.status_seconds,
         environment,
@@ -275,31 +272,25 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         str(DEFAULT_STATUS_INTERVAL_SECONDS),
     )
     selected_status_interval = _positive(status_interval, "status interval")
-    if selected_status_interval > 86_400:
-        raise ValueError("status interval must be between 1 and 86400 seconds")
+    if selected_status_interval > MAX_STATUS_INTERVAL_SECONDS:
+        raise ValueError(f"status interval must be between 1 and {MAX_STATUS_INTERVAL_SECONDS} seconds")
     default_target_host, default_target_host_source = _select(
         None,
         environment,
         "SBK_DASHBOARD_DEFAULT_TARGET_HOST",
-        "127.0.0.1",
+        DEFAULT_TARGET_HOST,
     )
-    http_workers = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_WORKERS", 8, 1, 128)
-    http_queue = _bounded_environment(environment, "SBK_DASHBOARD_HTTP_QUEUE", 64, 0, 10_000)
-    request_timeout = _bounded_environment(environment, "SBK_DASHBOARD_REQUEST_TIMEOUT_SECONDS", 15, 1, 300)
-    health_limit_mb = _bounded_environment(environment, "SBK_DASHBOARD_HEALTH_RESPONSE_MB", 4, 1, 64)
-    supervisor_interval = _bounded_environment(environment, "SBK_DASHBOARD_SUPERVISOR_SECONDS", 5, 1, 60)
-    process_log_size = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_MB", 10, 1, 1024)
-    process_log_backups = _bounded_environment(environment, "SBK_DASHBOARD_PROCESS_LOG_BACKUPS", 3, 0, 100)
-    max_targets = _bounded_environment(environment, "SBK_DASHBOARD_MAX_TARGETS", 10_000, 1, 1_000_000)
-    target_health_timeout = _bounded_environment(
-        environment, "SBK_DASHBOARD_TARGET_HEALTH_TIMEOUT_SECONDS", 4, 1, 300
-    )
-    prometheus_startup_timeout = _bounded_environment(
-        environment, "SBK_DASHBOARD_PROMETHEUS_STARTUP_TIMEOUT_SECONDS", 45, 1, 900
-    )
-    grafana_startup_timeout = _bounded_environment(
-        environment, "SBK_DASHBOARD_GRAFANA_STARTUP_TIMEOUT_SECONDS", 120, 1, 900
-    )
+    http_workers = _bounded_setting(environment, HTTP_WORKERS)
+    http_queue = _bounded_setting(environment, HTTP_QUEUE_CAPACITY)
+    request_timeout = _bounded_setting(environment, REQUEST_TIMEOUT_SECONDS)
+    health_limit_mb = _bounded_setting(environment, HEALTH_RESPONSE_MEBIBYTES)
+    supervisor_interval = _bounded_setting(environment, SUPERVISOR_INTERVAL_SECONDS)
+    process_log_size = _bounded_setting(environment, PROCESS_LOG_MEBIBYTES)
+    process_log_backups = _bounded_setting(environment, PROCESS_LOG_BACKUPS)
+    max_targets = _bounded_setting(environment, MAX_TARGETS)
+    target_health_timeout = _bounded_setting(environment, TARGET_HEALTH_TIMEOUT_SECONDS)
+    prometheus_startup_timeout = _bounded_setting(environment, PROMETHEUS_STARTUP_TIMEOUT_SECONDS)
+    grafana_startup_timeout = _bounded_setting(environment, GRAFANA_STARTUP_TIMEOUT_SECONDS)
     dashboard = DashboardConfig(
         port, False, continue_existing, Path(data).expanduser().resolve(), _positive(scrape, "scrape interval"),
         _positive(retention, "retention"),
@@ -352,14 +343,14 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     grafana, grafana_source = _select(namespace.grafana_home, environment,
                                       "SBK_DASHBOARD_GRAFANA_HOME", default_grafana_home())
     prometheus_port, prometheus_port_source = _select(namespace.prometheus_port, environment,
-                                                       "SBK_DASHBOARD_PROMETHEUS_PORT", "9090")
+                                                       "SBK_DASHBOARD_PROMETHEUS_PORT", str(DEFAULT_PROMETHEUS_PORT))
     grafana_port, grafana_port_source = _select(namespace.grafana_port, environment,
-                                                "SBK_DASHBOARD_GRAFANA_PORT", "3000")
+                                                "SBK_DASHBOARD_GRAFANA_PORT", str(DEFAULT_GRAFANA_PORT))
     prometheus_bind, prometheus_bind_source = _select(
-        namespace.prometheus_bind, environment, "SBK_DASHBOARD_PROMETHEUS_BIND", "127.0.0.1"
+        namespace.prometheus_bind, environment, "SBK_DASHBOARD_PROMETHEUS_BIND", DEFAULT_PROMETHEUS_BIND
     )
     grafana_bind, grafana_bind_source = _select(
-        namespace.grafana_bind, environment, "SBK_DASHBOARD_GRAFANA_BIND", "0.0.0.0"
+        namespace.grafana_bind, environment, "SBK_DASHBOARD_GRAFANA_BIND", DEFAULT_GRAFANA_BIND
     )
     selected_grafana_port = _port(grafana_port, "grafana port")
     public_url, url_source = _select(namespace.grafana_url, environment, "SBK_DASHBOARD_GRAFANA_URL",
@@ -401,6 +392,12 @@ def _bounded_environment(
     return selected
 
 
+def _bounded_setting(environment: dict[str, str], setting: BoundedIntegerSetting) -> int:
+    return _bounded_environment(
+        environment, setting.environment, setting.default, setting.minimum, setting.maximum
+    )
+
+
 def _environment_source(environment: dict[str, str], name: str) -> str:
     return f"environment {name}" if environment.get(name, "").strip() else "default"
 
@@ -427,11 +424,45 @@ def _read_properties(text: str) -> dict[str, str]:
     return result
 
 
+def _manifest_properties(manifest: dict[str, Any]) -> dict[str, str]:
+    """Translate the packaged structured manifest into legacy override keys."""
+    if manifest.get("schemaVersion") != 1:
+        raise ValueError("Unsupported native artifact manifest schema")
+    result = {
+        "download.directory": str(manifest["downloadDirectory"]),
+        "install.directory": str(manifest["installDirectory"]),
+        "download.max.bytes": str(manifest["maxDownloadBytes"]),
+    }
+    fields = {
+        "url": "download.url",
+        "fileName": "download.file",
+        "sha256": "download.sha256",
+        "archiveDirectory": "archive.directory",
+        "executable": "executable",
+        "archiveFormat": "archive.format",
+    }
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise ValueError("Native artifact manifest is missing artifacts")
+    try:
+        for tool in ("prometheus", "grafana"):
+            platforms = artifacts[tool]
+            for platform_id, artifact in platforms.items():
+                for field, suffix in fields.items():
+                    result[f"{tool}.{platform_id}.{suffix}"] = str(artifact[field])
+    except (KeyError, AttributeError, TypeError) as error:
+        raise ValueError("Native artifact manifest is incomplete") from error
+    return result
+
+
 def load_download_config(option: str | None, data_directory: Path, environment: dict[str, str],
                          runtime_platform: RuntimePlatform | None = None) -> DownloadConfig:
     selected_platform = runtime_platform or RuntimePlatform.current()
-    resource = files("sbk_dashboard").joinpath("resources/monitoring-download.properties")
-    properties = _read_properties(resource.read_text(encoding="utf-8"))
+    resource = files("sbk_dashboard").joinpath("resources/native-artifacts.json")
+    manifest = json.loads(resource.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Native artifact manifest root must be an object")
+    properties = _manifest_properties(manifest)
     candidates: list[Path] = []
     explicit = option or environment.get("SBK_DASHBOARD_MONITORING_PROPERTIES")
     if explicit:
@@ -441,7 +472,7 @@ def load_download_config(option: str | None, data_directory: Path, environment: 
     external = next((item.resolve() for item in candidates if item.is_file()), None)
     if explicit and external is None:
         raise ValueError(f"Monitoring properties file does not exist: {Path(explicit).expanduser().resolve()}")
-    source = "packaged monitoring-download.properties"
+    source = "packaged native-artifacts.json"
     if external:
         overrides = _read_properties(external.read_text(encoding="utf-8"))
         properties.update(overrides)
@@ -453,7 +484,7 @@ def load_download_config(option: str | None, data_directory: Path, environment: 
                 if legacy in overrides and selected not in overrides:
                     properties[selected] = overrides[legacy]
         source = str(external)
-    portable_home = environment.get("SBK_DASHBOARD_HOME", "").strip()
+    portable_home = environment.get(PORTABLE_HOME_ENVIRONMENT, "").strip()
     variables = {
         "data.directory": str(data_directory.resolve()),
         "portable.home": str(

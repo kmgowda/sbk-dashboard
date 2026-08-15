@@ -159,11 +159,12 @@ Listener binding and browser-visible Grafana URL resolution are separate contrac
 
 ### Change the release version
 
-Update `src/sbk_dashboard/version.py` as the application source of truth. The `Major.Year.Month.Minor` value flows
+Update `src/sbk_dashboard/version.py` as the application source of truth, then run
+`python scripts/sync_release_metadata.py --write`. The `Major.Year.Month.Minor` value flows
 into setuptools metadata, normal startup output, and `sbk-dashboard -v`; do not add another runtime version source.
 Release packaging also carries deliberately pinned fallback/reference literals, so synchronize `Dockerfile`,
 `compose.yaml`, `compose.dev.yaml`, README release examples, and Docker documentation. The container contract tests
-must prove those literals equal `version.py`. Validate package metadata, startup output, `-v`, both distributions,
+must prove those literals equal `version.py`; CI runs the same script in check mode. Validate package metadata, startup output, `-v`, both distributions,
 Compose resolution, and container contract tests.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
@@ -243,7 +244,8 @@ to make a test convenient.
 1. Preserve the single-container native-child-process architecture and non-root UID/GID 10001.
 2. Keep Prometheus internal; publish only management 9721 and Grafana 3000.
 3. Keep `/var/lib/sbk-dashboard` on a persistent volume and never bake runtime state into an image layer.
-4. Synchronize application/native versions and pinned SHA-256 values with `version.py` and packaged properties.
+4. Synchronize application release references with `version.py` and update native versions and pinned SHA-256 values
+   once in `resources/native-artifacts.json`. Both direct installation and Docker builds consume that manifest.
    Keep the official Python base on a supported Debian stable generation, pin its complete patch tag and
    multi-architecture digest, and update that digest deliberately with full AMD64/ARM64 validation. CI must pass the
    version from `version.py` as `APPLICATION_VERSION`; the Dockerfile default remains a tested local-build fallback.

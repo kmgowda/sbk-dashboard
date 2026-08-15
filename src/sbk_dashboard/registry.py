@@ -8,7 +8,17 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from sbk_dashboard.contracts import MAX_TARGETS
+from sbk_dashboard.endpoint_policy import (
+    ALLOWED_ENDPOINT_KINDS,
+    DEFAULT_ENDPOINT_KIND,
+    MAX_ENDPOINT_NAME_CHARACTERS,
+    MAX_TCP_PORT,
+    MIN_TCP_PORT,
+    valid_port,
+)
 from sbk_dashboard.files import atomic_json
+from sbk_dashboard.layout import DashboardDataLayout
 from sbk_dashboard.models import BenchmarkTarget, endpoint_id, normalize_metrics_path
 from sbk_dashboard.network import normalize_host
 
@@ -24,8 +34,8 @@ class RegistrationResult:
 class TargetRegistry:
     """Thread-safe, atomically persisted unique host-and-port registrations."""
 
-    def __init__(self, data_directory: Path, max_targets: int = 10_000) -> None:
-        self._path = data_directory / "targets.json"
+    def __init__(self, data_directory: Path, max_targets: int = MAX_TARGETS.default) -> None:
+        self._path = DashboardDataLayout(data_directory).targets
         self._max_targets = max_targets
         self._lock = threading.RLock()
         data_directory.mkdir(parents=True, exist_ok=True)
@@ -76,13 +86,15 @@ class TargetRegistry:
         normalized_host = self._validate_host(host)
         normalized_port = self._validate_port(port)
         normalized_path = self._validate_path(metrics_path)
-        normalized_kind = kind.strip().upper() if isinstance(kind, str) else "SBK" if kind is None else ""
-        if normalized_kind not in {"SBK", "SBM"}:
+        normalized_kind = (
+            kind.strip().upper() if isinstance(kind, str) else DEFAULT_ENDPOINT_KIND if kind is None else ""
+        )
+        if normalized_kind not in ALLOWED_ENDPOINT_KINDS:
             raise ValueError("Kind must be SBK or SBM")
         target_id = endpoint_id(normalized_host, normalized_port)
         normalized_name = name.strip() if name and name.strip() else f"{normalized_host}:{normalized_port}"
-        if len(normalized_name) > 100:
-            raise ValueError("Name must not exceed 100 characters")
+        if len(normalized_name) > MAX_ENDPOINT_NAME_CHARACTERS:
+            raise ValueError(f"Name must not exceed {MAX_ENDPOINT_NAME_CHARACTERS} characters")
         with self._lock:
             existing = self._targets.get(target_id)
             if existing is not None:
@@ -144,8 +156,8 @@ class TargetRegistry:
 
     @staticmethod
     def _validate_port(port: int) -> int:
-        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
-            raise ValueError("Port must be between 1 and 65535")
+        if not valid_port(port):
+            raise ValueError(f"Port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}")
         return port
 
     @staticmethod

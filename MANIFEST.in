@@ -1,7 +1,12 @@
 include scripts/Start-SbkDashboard.ps1
 include scripts/Start-SbkDashboardBackground.ps1
 include scripts/Stop-SbkDashboard.ps1
+include scripts/Invoke-SbkDashboard.ps1
+include scripts/python_requirement.py
+include scripts/sbk-dashboard-launch.sh
 include scripts/docker_safe_extract.py
+include scripts/resolve_native_artifact.py
+include scripts/sync_release_metadata.py
 include scripts/sbk_dashboard_bootstrap.py
 include scripts/sbk_dashboard_launcher.py
 include scripts/sbk_dashboard_portable_entry.py

@@ -164,3 +164,9 @@ launcher state, logs, and default data live beneath the same home; `SBK_DASHBOAR
 `SBK_DASHBOARD_DATA_DIR` and `SBK_DASHBOARD_LAUNCHER_DIR` remain authoritative, and existing data needs no migration.
 GitHub releases also provide frozen Linux AMD64, macOS Apple-silicon, and Windows AMD64 executables without a Python
 prerequisite.
+
+The configuration-policy consolidation after 1.26.8.2 does not change defaults, CLI flags, environment variables,
+endpoint IDs, or stored formats. Built-in native artifact metadata moved from packaged properties into
+`native-artifacts.json`, which is also consumed by Docker builds. Existing external
+`monitoring-download.properties` overrides remain supported. Release maintainers should update `version.py` and run
+`python scripts/sync_release_metadata.py --write`; CI rejects stale current-release references.

@@ -39,7 +39,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 sbk_dashboard = [
   "resources/banner.txt",
-  "resources/monitoring-download.properties",
+  "resources/native-artifacts.json",
   "resources/grafana/dashboards/sbk-dashboard.json",
   "resources/web/*.html",
   "resources/web/*.css",
