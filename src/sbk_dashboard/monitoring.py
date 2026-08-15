@@ -14,6 +14,7 @@ from pathlib import Path
 
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform, executable, resolve_on_path
 from sbk_dashboard.files import atomic_write
+from sbk_dashboard.layout import DashboardDataLayout
 from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.processes import (
     HttpHealthProbe,
@@ -54,12 +55,14 @@ class ManagedMonitoringStack:
     def __init__(self, dashboard: DashboardConfig, monitoring: MonitoringConfig) -> None:
         self.dashboard = dashboard
         self.monitoring = monitoring
-        self.runtime_directory = dashboard.data_directory / "monitoring"
-        self.target_discovery = PrometheusTargetDiscovery(self.runtime_directory / "prometheus/targets.json")
+        self.data_layout = DashboardDataLayout(dashboard.data_directory)
+        self.layout = self.data_layout.monitoring
+        self.runtime_directory = self.layout.root
+        self.target_discovery = PrometheusTargetDiscovery(self.layout.prometheus_targets)
         self.dashboard_provisioner = GrafanaDashboardProvisioner(
-            self.runtime_directory / "grafana/dashboards", monitoring.grafana_public_url
+            self.layout.grafana_dashboards, monitoring.grafana_public_url
         )
-        self.process_registry = ManagedProcessRegistry(self.runtime_directory / "managed-processes.json")
+        self.process_registry = ManagedProcessRegistry(self.layout.process_registry)
         self.lifecycle = LifecycleController()
         self._operation_lock = threading.Lock()
         self._statuses: dict[str, TargetStatus] = {}
@@ -124,7 +127,7 @@ class ManagedMonitoringStack:
         self.target_discovery.write(list(snapshot))
         self.dashboard_provisioner.reconcile(list(snapshot))
         write_dashboard_mappings(
-            self.dashboard.data_directory / "dashboard-mappings.json", list(snapshot), self.dashboard_provisioner
+            self.data_layout.dashboard_mappings, list(snapshot), self.dashboard_provisioner
         )
         now = _now()
         with self._data_lock:
@@ -285,7 +288,7 @@ class ManagedMonitoringStack:
                 self.monitoring.prometheus_port,
                 self._prometheus_command,
                 HttpHealthProbe(self._prometheus_health()),
-                self.runtime_directory / "logs/prometheus.log",
+                self.layout.logs / "prometheus.log",
                 log_size,
                 self.dashboard.process_log_backups,
                 self.dashboard.prometheus_startup_timeout_seconds,
@@ -301,7 +304,7 @@ class ManagedMonitoringStack:
                 self.monitoring.grafana_port,
                 self._grafana_command,
                 HttpHealthProbe(self._grafana_health()),
-                self.runtime_directory / "logs/grafana-console.log",
+                self.layout.logs / "grafana-console.log",
                 log_size,
                 self.dashboard.process_log_backups,
                 self.dashboard.grafana_startup_timeout_seconds,
@@ -324,8 +327,8 @@ class ManagedMonitoringStack:
             raise OSError("Native service shutdown was incomplete: " + "; ".join(failures))
 
     def _prepare_configuration(self) -> None:
-        prometheus = self.runtime_directory / "prometheus"
-        grafana = self.runtime_directory / "grafana"
+        prometheus = self.layout.prometheus
+        grafana = self.layout.grafana
         for path in (
             prometheus / "data",
             grafana / "data/plugins",
@@ -333,7 +336,7 @@ class ManagedMonitoringStack:
             grafana / "provisioning/datasources",
             grafana / "provisioning/dashboards",
             grafana / "dashboards",
-            self.runtime_directory / "logs",
+            self.layout.logs,
         ):
             path.mkdir(parents=True, exist_ok=True)
         targets = _portable(prometheus / "targets.json").replace("'", "''")
@@ -385,7 +388,7 @@ class ManagedMonitoringStack:
         binary = resolve_on_path(self.monitoring.prometheus_binary, RuntimePlatform.current())
         if binary is None:
             raise OSError(f"Prometheus executable is not available: {self.monitoring.prometheus_binary}")
-        directory = self.runtime_directory / "prometheus"
+        directory = self.layout.prometheus
         return [
             str(binary),
             f"--config.file={directory / 'prometheus.yml'}",
@@ -407,7 +410,7 @@ class ManagedMonitoringStack:
         if promtool is None:
             LOGGER.warning("promtool is unavailable; generated Prometheus configuration was not pre-validated")
             return
-        config = self.runtime_directory / "prometheus/prometheus.yml"
+        config = self.layout.prometheus / "prometheus.yml"
         try:
             result = subprocess.run(
                 [str(promtool), "check", "config", str(config)],
@@ -436,7 +439,7 @@ class ManagedMonitoringStack:
         command.extend(
             [
                 f"--homepath={self.monitoring.grafana_home.resolve()}",
-                f"--config={self.runtime_directory / 'grafana/grafana.ini'}",
+                f"--config={self.layout.grafana / 'grafana.ini'}",
             ]
         )
         return command

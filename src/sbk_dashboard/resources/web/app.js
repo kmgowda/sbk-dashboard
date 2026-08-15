@@ -8,13 +8,20 @@ const downCount = document.querySelector('#down-count');
 const compareButton = document.querySelector('#compare-selected');
 const selectedTargetIds = new Set();
 const CLIENT_ID_KEY = 'sbk-dashboard-client-id';
-const MAX_COMPARISON_TARGETS = __MAX_COMPARISON_TARGETS__;
+const UI_POLICY = Object.freeze({
+    minComparisonTargets: __MIN_COMPARISON_TARGETS__,
+    maxComparisonTargets: __MAX_COMPARISON_TARGETS__,
+    targetRefreshMilliseconds: __TARGET_REFRESH_MILLISECONDS__,
+    landingHeartbeatMilliseconds: __LANDING_HEARTBEAT_MILLISECONDS__,
+    clientIdRandomBytes: __CLIENT_ID_RANDOM_BYTES__,
+    defaultEndpointKind: '__DEFAULT_ENDPOINT_KIND__'
+});
 
 function createClientId() {
     if (window.crypto && typeof window.crypto.randomUUID === 'function') {
         return window.crypto.randomUUID();
     }
-    const bytes = new Uint8Array(16);
+    const bytes = new Uint8Array(UI_POLICY.clientIdRandomBytes);
     window.crypto.getRandomValues(bytes);
     return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
 }
@@ -59,9 +66,9 @@ function renderTarget(target) {
     checkbox.checked = selectedTargetIds.has(target.id);
     checkbox.setAttribute('aria-label', `Compare ${target.name}`);
     checkbox.addEventListener('change', () => {
-        if (checkbox.checked && selectedTargetIds.size >= MAX_COMPARISON_TARGETS) {
+        if (checkbox.checked && selectedTargetIds.size >= UI_POLICY.maxComparisonTargets) {
             checkbox.checked = false;
-            message.textContent = `No more than ${MAX_COMPARISON_TARGETS} endpoints can be compared at once.`;
+            message.textContent = `No more than ${UI_POLICY.maxComparisonTargets} endpoints can be compared at once.`;
             return;
         }
         if (checkbox.checked) selectedTargetIds.add(target.id);
@@ -72,7 +79,7 @@ function renderTarget(target) {
     card.append(selector);
     const details = element('div');
     const heading = element('h3', null, target.name);
-    heading.append(element('span', 'kind-badge', target.kind || 'SBK'));
+    heading.append(element('span', 'kind-badge', target.kind || UI_POLICY.defaultEndpointKind));
     details.append(heading);
     const endpoint = element('div', 'endpoint', `${target.host}:${target.port}${target.metricsPath}`);
     const status = element('span', `status ${target.status.state}`, target.status.state);
@@ -98,7 +105,9 @@ function renderTarget(target) {
 function updateComparisonButton() {
     const count = selectedTargetIds.size;
     compareButton.textContent = `Compare selected (${count}) ↗`;
-    compareButton.disabled = count < 2 || count > MAX_COMPARISON_TARGETS;
+    compareButton.disabled = (
+        count < UI_POLICY.minComparisonTargets || count > UI_POLICY.maxComparisonTargets
+    );
 }
 
 function updateEndpointSummary(targets) {
@@ -174,7 +183,10 @@ form.addEventListener('submit', async event => {
 });
 
 compareButton.addEventListener('click', async () => {
-    if (selectedTargetIds.size < 2 || selectedTargetIds.size > MAX_COMPARISON_TARGETS) return;
+    if (
+        selectedTargetIds.size < UI_POLICY.minComparisonTargets
+        || selectedTargetIds.size > UI_POLICY.maxComparisonTargets
+    ) return;
     compareButton.disabled = true;
     message.textContent = '';
     const comparisonWindow = window.open('', '_blank');
@@ -201,5 +213,5 @@ compareButton.addEventListener('click', async () => {
 document.querySelector('#refresh').addEventListener('click', loadTargets);
 loadTargets();
 reportActivity('landing');
-window.setInterval(loadTargets, 10000);
-window.setInterval(() => reportActivity('landing'), 30000);
+window.setInterval(loadTargets, UI_POLICY.targetRefreshMilliseconds);
+window.setInterval(() => reportActivity('landing'), UI_POLICY.landingHeartbeatMilliseconds);

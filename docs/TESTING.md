@@ -8,6 +8,7 @@ Create either supported development environment and execute:
 python -m pip install -e ".[dev]"
 ruff check src tests scripts
 mypy
+python scripts/sync_release_metadata.py
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
@@ -38,7 +39,7 @@ separate smoke-test requirement.
 ## Container validation
 
 The static contract tests verify non-root execution, persistent data, public ports 9721/3000, internal Prometheus,
-the container-specific `host.docker.internal` endpoint-form default, native version/checksum synchronization,
+the container-specific `host.docker.internal` endpoint-form default, shared native-manifest consumption,
 Compose hardening, and build-context exclusions:
 
 ```bash

@@ -23,6 +23,8 @@ from typing import BinaryIO, Protocol, cast
 
 import psutil
 
+from sbk_dashboard.contracts import DEFAULT_MANAGEMENT_BIND, PROCESS_CREATE_TIME_TOLERANCE_SECONDS
+from sbk_dashboard.endpoint_policy import AUTO_PORT_FALLBACK_MINIMUM, MAX_TCP_PORT
 from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
@@ -169,7 +171,7 @@ class ManagedProcessRegistry:
             if not isinstance(raw_pid, (str, int)) or not isinstance(raw_started, (str, int, float)):
                 return None
             process = psutil.Process(int(raw_pid))
-            if abs(process.create_time() - float(raw_started)) > 0.01:
+            if abs(process.create_time() - float(raw_started)) > PROCESS_CREATE_TIME_TOLERANCE_SECONDS:
                 return None
             if process.exe() != entry.get("command"):
                 return None
@@ -194,8 +196,8 @@ class PortProcessManager:
         prometheus_port: int,
         grafana_port: int,
         registry: ManagedProcessRegistry,
-        prometheus_bind_address: str = "0.0.0.0",
-        grafana_bind_address: str = "0.0.0.0",
+        prometheus_bind_address: str = DEFAULT_MANAGEMENT_BIND,
+        grafana_bind_address: str = DEFAULT_MANAGEMENT_BIND,
         replace_prometheus: bool = True,
         replace_grafana: bool = True,
     ) -> None:
@@ -357,7 +359,7 @@ class PortProcessManager:
         )
 
     @staticmethod
-    def available(port: int, bind_address: str = "0.0.0.0") -> bool:
+    def available(port: int, bind_address: str = DEFAULT_MANAGEMENT_BIND) -> bool:
         try:
             endpoints = PortProcessManager._resolve_endpoints(bind_address, port)
             for endpoint in endpoints:
@@ -392,7 +394,7 @@ class PortProcessManager:
             return preferred_port
         candidate = preferred_port
         for _ in range(AUTO_PORT_SEARCH_ATTEMPTS):
-            candidate = 1024 if candidate >= 65535 else candidate + 1
+            candidate = AUTO_PORT_FALLBACK_MINIMUM if candidate >= MAX_TCP_PORT else candidate + 1
             if candidate in unavailable:
                 continue
             if cls.available(candidate, bind_address):
@@ -905,7 +907,7 @@ class ManagedNativeService:
             return (
                 native.is_running()
                 and native.status() != psutil.STATUS_ZOMBIE
-                and abs(native.create_time() - started) <= 0.01
+                and abs(native.create_time() - started) <= PROCESS_CREATE_TIME_TOLERANCE_SECONDS
             )
         except psutil.Error:
             return False

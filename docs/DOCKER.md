@@ -67,7 +67,9 @@ Use a pinned release in production instead of `latest`; use its immutable manife
 requires byte-identical deployment. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
-digest so AMD64 and ARM64 builds resolve the same reviewed manifest. Native archive downloads are checksum-verified,
+digest so AMD64 and ARM64 builds resolve the same reviewed manifest. Native archive URLs, filenames, formats, and
+checksums come from the same packaged `native-artifacts.json` used by direct installations; they are not duplicated
+as Docker build arguments. Native archive downloads are checksum-verified,
 time-bounded, retried, and capped at the same 2 GiB per-download maximum as automatic native installation.
 Python build tools and the Linux AMD64/ARM64 `psutil` wheels are exact-version and SHA-256 pinned. The build verifies
 that the installed application version equals the OCI `APPLICATION_VERSION` label input.
@@ -231,8 +233,8 @@ of surviving native child PIDs. The real-SBK mode is documented in `docs/TESTING
 
 Prometheus and Grafana downloads are separate Docker stages backed by independent checksum-validated BuildKit cache
 mounts, allowing cold downloads to run in parallel.
-Changing the Python source does not invalidate either native stage; changing only one native version does not
-invalidate the other tool's extraction. Cached archives never enter the final runtime image.
+Changing only one manifest entry invalidates the native download stages while the independent cache mounts preserve
+unaffected verified archives. Cached archives never enter the final runtime image.
 
 ## Publish images to Docker Hub
 

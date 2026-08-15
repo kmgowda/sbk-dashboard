@@ -473,34 +473,20 @@ class LauncherScriptTest(unittest.TestCase):
         start_powershell = (ROOT / "scripts" / "Start-SbkDashboard.ps1").read_text(encoding="utf-8")
         background_powershell = (ROOT / "scripts" / "Start-SbkDashboardBackground.ps1").read_text(encoding="utf-8")
         stop_powershell = (ROOT / "scripts" / "Stop-SbkDashboard.ps1").read_text(encoding="utf-8")
-        for content in (
-            start_shell,
-            background_shell,
-            stop_shell,
-            start_powershell,
-            background_powershell,
-            stop_powershell,
-        ):
-            self.assertLess(content.index("VIRTUAL_ENV"), content.index("CONDA_PREFIX"))
-        for content in (
-            start_shell,
-            background_shell,
-            stop_shell,
-            start_powershell,
-            background_powershell,
-            stop_powershell,
-        ):
-            self.assertIn("sbk_dashboard_bootstrap.py", content)
-        self.assertIn('foreground "$@"', start_shell)
-        self.assertIn('background "$@"', background_shell)
-        self.assertIn('stop "$@"', stop_shell)
-        self.assertIn("foreground @DashboardArguments", start_powershell)
-        self.assertIn("background @DashboardArguments", background_powershell)
-        self.assertIn("stop @DashboardArguments", stop_powershell)
-        self.assertIn("sys.version_info >= (3, 10)", start_shell)
-        self.assertIn("sys.version_info >= (3, 10)", start_powershell)
-        self.assertIn("sys.version_info >= (3, 10)", stop_shell)
-        self.assertIn("sys.version_info >= (3, 10)", stop_powershell)
+        unix_common = (ROOT / "scripts" / "sbk-dashboard-launch.sh").read_text(encoding="utf-8")
+        powershell_common = (ROOT / "scripts" / "Invoke-SbkDashboard.ps1").read_text(encoding="utf-8")
+        self.assertLess(unix_common.index("VIRTUAL_ENV"), unix_common.index("CONDA_PREFIX"))
+        self.assertLess(powershell_common.index("VIRTUAL_ENV"), powershell_common.index("CONDA_PREFIX"))
+        self.assertIn("sbk_dashboard_bootstrap.py", unix_common)
+        self.assertIn("sbk_dashboard_bootstrap.py", powershell_common)
+        self.assertIn('sbk-dashboard-launch.sh" foreground "$@"', start_shell)
+        self.assertIn('sbk-dashboard-launch.sh" background "$@"', background_shell)
+        self.assertIn('sbk-dashboard-launch.sh" stop "$@"', stop_shell)
+        self.assertIn("Invoke-SbkDashboard.ps1') foreground @args", start_powershell)
+        self.assertIn("Invoke-SbkDashboard.ps1') background @args", background_powershell)
+        self.assertIn("Invoke-SbkDashboard.ps1') stop @args", stop_powershell)
+        self.assertIn("python_requirement.py", unix_common)
+        self.assertIn("python_requirement.py", powershell_common)
         self.assertNotIn("Write-Error @'", start_powershell)
         self.assertNotIn('Write-Error @"', start_powershell)
         self.assertNotIn("recreate the project environment", start_powershell)
@@ -516,6 +502,10 @@ class LauncherScriptTest(unittest.TestCase):
             "Start-SbkDashboardBackground.ps1",
             "Stop-SbkDashboard.ps1",
             "docker_safe_extract.py",
+            "resolve_native_artifact.py",
+            "python_requirement.py",
+            "sbk-dashboard-launch.sh",
+            "Invoke-SbkDashboard.ps1",
             "build_portable.py",
             "sbk_dashboard_bootstrap.py",
             "sbk_dashboard_launcher.py",

@@ -88,8 +88,10 @@ command line > environment variable > built-in default
 ```
 
 Every selected public/operational value records its source for startup logging. Service classes receive frozen
-dataclasses and do not independently consult environment variables. External monitoring properties overlay packaged
-properties, with platform-qualified keys preferred over legacy generic keys.
+dataclasses and do not independently consult environment variables. `contracts.py`, `endpoint_policy.py`,
+`platforms.py`, and `layout.py` own shared defaults, validation policy, platform normalization, and paths.
+External monitoring properties overlay the packaged `native-artifacts.json` manifest, with platform-qualified keys
+preferred over legacy generic keys.
 
 `RuntimePlatform` normalizes Linux, macOS, and Windows plus x86-64 and ARM64. Archive URLs must be absolute HTTPS,
 checksums exactly 64 hexadecimal characters, and archive/executable paths safe relative paths.
@@ -292,7 +294,7 @@ re-enumerated before the forced Windows phase.
 ## Safe extension points
 
 - Add CLI/environment settings only through `config.py` and immutable config objects.
-- Add a native platform only through `RuntimePlatform` plus packaged archive properties and extraction tests.
+- Add a native platform only through `RuntimePlatform` plus `native-artifacts.json` and extraction tests.
 - Change endpoint fields through model, registry, API, discovery, mappings, compatibility, and rollback together.
 - Change dashboard transformations only on deep copies and preserve full `SBK_*` selector scoping.
 - Add HTTP routes through the bounded server; never create a second unbounded listener/executor.

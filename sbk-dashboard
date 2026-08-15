@@ -18,18 +18,7 @@ case "$COMMAND" in
         ;;
     repair)
         shift
-        if [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then
-            PYTHON="$VIRTUAL_ENV/bin/python"
-        elif [ -n "${CONDA_PREFIX:-}" ] && [ -x "$CONDA_PREFIX/bin/python" ]; then
-            PYTHON="$CONDA_PREFIX/bin/python"
-        else
-            PYTHON=$(command -v python3 || true)
-        fi
-        if [ -z "$PYTHON" ]; then
-            echo "Python 3.10 or newer is required." >&2
-            exit 1
-        fi
-        exec "$PYTHON" "$ROOT/scripts/sbk_dashboard_bootstrap.py" repair "$@"
+        exec "$ROOT/scripts/sbk-dashboard-launch.sh" repair "$@"
         ;;
     *)
         exec "$ROOT/scripts/start-sbk-dashboard.sh" "$@"

@@ -19,6 +19,18 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import unquote, urlparse, urlsplit
 
+from sbk_dashboard.contracts import (
+    CLIENT_ID_RANDOM_BYTES,
+    GRAFANA_ACTIVITY_SECONDS,
+    LANDING_ACTIVITY_SECONDS,
+    LANDING_HEARTBEAT_MILLISECONDS,
+    MAX_CLIENT_ID_CHARACTERS,
+    MAX_REQUEST_BYTES,
+    MAX_TRACKED_CLIENTS,
+    MIN_CLIENT_ID_CHARACTERS,
+    TARGET_REFRESH_MILLISECONDS,
+)
+from sbk_dashboard.endpoint_policy import DEFAULT_ENDPOINT_KIND, MAX_TCP_PORT, MIN_TCP_PORT, valid_port
 from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.network import normalize_host
@@ -26,11 +38,9 @@ from sbk_dashboard.processes import LifecycleController, LifecycleState
 from sbk_dashboard.provisioning import MAX_COMPARISON_TARGETS, MIN_COMPARISON_TARGETS
 from sbk_dashboard.registry import TargetRegistry
 
-MAX_REQUEST_BYTES = 64 * 1024
-MAX_TRACKED_CLIENTS = 10_000
-LANDING_ACTIVITY_SECONDS = 120.0
-GRAFANA_ACTIVITY_SECONDS = 300.0
-CLIENT_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{16,64}")
+CLIENT_ID_PATTERN = re.compile(
+    rf"[A-Za-z0-9_-]{{{MIN_CLIENT_ID_CHARACTERS},{MAX_CLIENT_ID_CHARACTERS}}}"
+)
 LOGGER = logging.getLogger(__name__)
 
 
@@ -204,8 +214,8 @@ class DashboardHttpServer:
         self._require(request, "POST")
         body = self._read_json(request)
         port = body.get("port")
-        if isinstance(port, bool) or not isinstance(port, int):
-            raise ValueError("Port must be between 1 and 65535")
+        if not valid_port(port):
+            raise ValueError(f"Port must be between {MIN_TCP_PORT} and {MAX_TCP_PORT}")
         with self._mutation_lock:
             registration = self.registry.register_with_status(
                 body.get("name"), body.get("host"), port, body.get("metricsPath"), body.get("kind")
@@ -306,9 +316,17 @@ class DashboardHttpServer:
                     html.escape(self._default_target_host, quote=True).encode("utf-8"),
                 )
             elif name == "app.js":
+                replacements = {
+                    b"__MIN_COMPARISON_TARGETS__": MIN_COMPARISON_TARGETS,
+                    b"__MAX_COMPARISON_TARGETS__": MAX_COMPARISON_TARGETS,
+                    b"__TARGET_REFRESH_MILLISECONDS__": TARGET_REFRESH_MILLISECONDS,
+                    b"__LANDING_HEARTBEAT_MILLISECONDS__": LANDING_HEARTBEAT_MILLISECONDS,
+                    b"__CLIENT_ID_RANDOM_BYTES__": CLIENT_ID_RANDOM_BYTES,
+                }
+                for placeholder, value in replacements.items():
+                    body = body.replace(placeholder, str(value).encode("ascii"))
                 body = body.replace(
-                    b"__MAX_COMPARISON_TARGETS__",
-                    str(MAX_COMPARISON_TARGETS).encode("ascii"),
+                    b"__DEFAULT_ENDPOINT_KIND__", DEFAULT_ENDPOINT_KIND.encode("ascii")
                 )
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
@@ -364,7 +382,7 @@ class DashboardHttpServer:
         if length < 0:
             raise ValueError("Invalid Content-Length")
         if length > MAX_REQUEST_BYTES:
-            raise ValueError("Request body exceeds 64 KiB")
+            raise ValueError(f"Request body exceeds {MAX_REQUEST_BYTES // 1024} KiB")
         value = json.loads(request.rfile.read(length))
         if not isinstance(value, dict):
             raise ValueError("Request body must be a JSON object")

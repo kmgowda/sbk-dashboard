@@ -10,6 +10,7 @@ from pathlib import Path
 
 import psutil
 
+from sbk_dashboard.contracts import PROCESS_CREATE_TIME_TOLERANCE_SECONDS
 from sbk_dashboard.files import atomic_json
 from sbk_dashboard.processes import _terminate_psutil_tree
 from sbk_dashboard.windows_job import (
@@ -39,7 +40,7 @@ def _parent_alive(pid: int, started: float) -> bool:
         return (
             parent.is_running()
             and parent.status() != psutil.STATUS_ZOMBIE
-            and abs(parent.create_time() - started) <= 0.01
+            and abs(parent.create_time() - started) <= PROCESS_CREATE_TIME_TOLERANCE_SECONDS
         )
     except psutil.Error:
         return False

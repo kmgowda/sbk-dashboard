@@ -117,6 +117,10 @@ runtime data as source material.
 | `src/sbk_dashboard/main.py` | Composition root, bootstrap, signals, startup output, shutdown |
 | `src/sbk_dashboard/version.py` | Single source of truth for package and runtime version |
 | `src/sbk_dashboard/config.py` | CLI/environment/default precedence, validation, platform/download definitions |
+| `src/sbk_dashboard/contracts.py` | Shared operational defaults and bounded environment settings |
+| `src/sbk_dashboard/endpoint_policy.py` | Endpoint identity, kind, path, name, and port policy |
+| `src/sbk_dashboard/platforms.py` | Runtime and portable platform normalization |
+| `src/sbk_dashboard/layout.py` | Portable-home and persistent runtime path construction |
 | `src/sbk_dashboard/network.py` | Shared canonical IP literal and conservative DNS-name validation |
 | `src/sbk_dashboard/web.py` | Bounded HTTP server, REST API, assets, request-host URL resolution |
 | `src/sbk_dashboard/registry.py` | Endpoint validation, identity, limits, atomic registration persistence |

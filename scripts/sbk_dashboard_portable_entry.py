@@ -7,19 +7,21 @@ import os
 import sys
 from pathlib import Path
 
+from sbk_dashboard.contracts import PORTABLE_HOME_ENVIRONMENT
+from sbk_dashboard.layout import PortableHomeLayout
+
 
 def portable_home() -> Path:
-    selected = os.environ.get("SBK_DASHBOARD_HOME", "").strip()
-    home = Path(selected).expanduser() if selected else Path.home() / ".sbk-dashboard"
-    resolved = home.resolve()
-    if resolved == Path(resolved.anchor) or resolved == Path.home().resolve():
-        raise SystemExit("SBK_DASHBOARD_HOME must be a dedicated subdirectory, not a filesystem or home root.")
-    return resolved
+    selected = os.environ.get(PORTABLE_HOME_ENVIRONMENT, "").strip()
+    try:
+        return PortableHomeLayout.from_value(selected).root
+    except ValueError as error:
+        raise SystemExit(f"{error}.") from error
 
 
 def main(arguments: list[str] | None = None) -> int:
     selected = list(sys.argv[1:] if arguments is None else arguments)
-    os.environ["SBK_DASHBOARD_HOME"] = str(portable_home())
+    os.environ[PORTABLE_HOME_ENVIRONMENT] = str(portable_home())
     if selected and selected[0] == "--internal-guardian":
         from sbk_dashboard.guardian import main as guardian_main
 

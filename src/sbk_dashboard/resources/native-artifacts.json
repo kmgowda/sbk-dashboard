@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "downloadDirectory": "${portable.home}/downloads",
+  "installDirectory": "${portable.home}/tools",
+  "maxDownloadBytes": 2147483648,
+  "artifacts": {
+    "prometheus": {
+      "linux-x86_64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.linux-amd64.tar.gz", "fileName": "prometheus-3.13.2.linux-amd64.tar.gz", "sha256": "0e8c4d46101bd025ea8265e377d2caabc57f488fc1be1c367f37db69ea41be6f", "archiveDirectory": "prometheus-3.13.2.linux-amd64", "executable": "prometheus", "archiveFormat": "tar.gz"},
+      "linux-arm64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.linux-arm64.tar.gz", "fileName": "prometheus-3.13.2.linux-arm64.tar.gz", "sha256": "7cecb17a6f41d59814e1a0581a1f81f79051ad5973d1ecf39e23a9f747d6572a", "archiveDirectory": "prometheus-3.13.2.linux-arm64", "executable": "prometheus", "archiveFormat": "tar.gz"},
+      "macos-x86_64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.darwin-amd64.tar.gz", "fileName": "prometheus-3.13.2.darwin-amd64.tar.gz", "sha256": "e57095aed0b69e10edaee28b92718d4a65f46d466bf93aeda54075e901d15c2a", "archiveDirectory": "prometheus-3.13.2.darwin-amd64", "executable": "prometheus", "archiveFormat": "tar.gz"},
+      "macos-arm64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.darwin-arm64.tar.gz", "fileName": "prometheus-3.13.2.darwin-arm64.tar.gz", "sha256": "f68ca4f1dbedd6366bbfdd8ac5d2c0b7ba1f273474acc8d38eb33202fbeec7a4", "archiveDirectory": "prometheus-3.13.2.darwin-arm64", "executable": "prometheus", "archiveFormat": "tar.gz"},
+      "windows-x86_64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.windows-amd64.zip", "fileName": "prometheus-3.13.2.windows-amd64.zip", "sha256": "ebd97831d80be097eed54af257816ca7fa93cc67682bdcf94d44057b17cde6ad", "archiveDirectory": "prometheus-3.13.2.windows-amd64", "executable": "prometheus.exe", "archiveFormat": "zip"},
+      "windows-arm64": {"url": "https://github.com/prometheus/prometheus/releases/download/v3.13.2/prometheus-3.13.2.windows-arm64.zip", "fileName": "prometheus-3.13.2.windows-arm64.zip", "sha256": "e526435b472222672189f815816f21e4c2c2190974c54cc72d7571c19bb2b9e2", "archiveDirectory": "prometheus-3.13.2.windows-arm64", "executable": "prometheus.exe", "archiveFormat": "zip"}
+    },
+    "grafana": {
+      "linux-x86_64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_linux_amd64.tar.gz", "fileName": "grafana-13.1.3-linux-amd64.tar.gz", "sha256": "e0fd22aa63901ebc961ee64195da60eef8624a831683ca10b26c7b068082e92b", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana", "archiveFormat": "tar.gz"},
+      "linux-arm64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_linux_arm64.tar.gz", "fileName": "grafana-13.1.3-linux-arm64.tar.gz", "sha256": "83eef49ccc6529da5ef3ffd2bc76dadfa66cca9a9684278bf858346cf2271b5d", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana", "archiveFormat": "tar.gz"},
+      "macos-x86_64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_darwin_amd64.tar.gz", "fileName": "grafana-13.1.3-darwin-amd64.tar.gz", "sha256": "abdb13038f8604c8fbb3d355e728ea217d4f67b41baf3e66369cff2f758179ca", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana", "archiveFormat": "tar.gz"},
+      "macos-arm64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_darwin_arm64.tar.gz", "fileName": "grafana-13.1.3-darwin-arm64.tar.gz", "sha256": "cbd4fc856fa5817a7fbc141d1e11cb1d79ca21cea15294cd32d9c82a666d382a", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana", "archiveFormat": "tar.gz"},
+      "windows-x86_64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_windows_amd64.tar.gz", "fileName": "grafana-13.1.3-windows-amd64.tar.gz", "sha256": "2b447dc806ea5dba96ec00150b919fb7cabee84127b5d51447680be5e58ba396", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana.exe", "archiveFormat": "tar.gz"},
+      "windows-arm64": {"url": "https://dl.grafana.com/grafana/release/13.1.3/grafana_13.1.3_31135815010_windows_arm64.tar.gz", "fileName": "grafana-13.1.3-windows-arm64.tar.gz", "sha256": "4693ffe4e4cd7e38b53a2d0c5b21910c8bf5cb24e720d9866b36c28965dc616a", "archiveDirectory": "grafana-13.1.3", "executable": "bin/grafana.exe", "archiveFormat": "tar.gz"}
+    }
+  }
+}
