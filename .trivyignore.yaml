@@ -1,0 +1,121 @@
+# The newest official Grafana 13.1.3 and Prometheus 3.13.2 binaries predate these upstream fixes.
+# Exceptions are target-scoped and expire quickly; new IDs, targets, critical findings, and expired entries fail CI.
+vulnerabilities:
+  - id: CVE-2026-21728
+    paths: ["opt/grafana/bin/grafana"]
+    statement: Grafana 13.1.3 is the newest official build; Tempo tracing is not configured by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-28377
+    paths: ["opt/grafana/bin/grafana"]
+    statement: Grafana 13.1.3 is the newest official build; Tempo tracing is not configured by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-25681
+    paths: ["opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"]
+    statement: The bundled Zipkin datasource is not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-27136
+    paths: ["opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"]
+    statement: The bundled Zipkin datasource is not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-33814
+    paths: ["opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"]
+    statement: The bundled Zipkin datasource is not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56852
+    paths: ["opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"]
+    statement: The bundled Zipkin datasource is not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: GHSA-hrxh-6v49-42gf
+    paths: ["opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"]
+    statement: The bundled Zipkin datasource is not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-27145
+    paths:
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+    statement: These bundled datasources are not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-39822
+    paths:
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+    statement: These bundled datasources are not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-42504
+    paths:
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+    statement: These bundled datasources are not provisioned or used by SBK Dashboard.
+    expired_at: 2026-09-30
+  - id: CVE-2026-33818
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-39821
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-46600
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56853
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56858
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56859
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56860
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30
+  - id: CVE-2026-56862
+    paths:
+      - "opt/grafana/bin/grafana"
+      - "opt/grafana/data/plugins-bundled/elasticsearch/gpx_grafana_elasticsearch_datasource_linux_amd64"
+      - "opt/grafana/data/plugins-bundled/zipkin/gpx_grafana-zipkin-datasource_linux_amd64"
+      - "opt/prometheus/prometheus"
+      - "opt/prometheus/promtool"
+    statement: Latest official binaries predate Go 1.26.6; replace them before this exception expires.
+    expired_at: 2026-09-30

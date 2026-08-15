@@ -12,13 +12,16 @@ Desktop can run the same Linux container build on macOS or Windows.
 
 The release build publishes two tags:
 
-- `kmgowda/sbk-dashboard:1.26.8.2` is the immutable version tag used by `compose.yaml`.
+- `kmgowda/sbk-dashboard:1.26.8.2` is the stable version tag used by `compose.yaml`.
 - `kmgowda/sbk-dashboard:latest` is a convenient pointer to the newest stable release.
 
 Each tag points to one multi-architecture manifest containing:
 
 - `linux/amd64` for x86-64 systems; and
 - `linux/arm64` for 64-bit ARM systems.
+
+Registry tags can be reassigned. The manifest's `sha256:` digest is the immutable production identity. The GitHub
+release workflow also publishes SBOM/provenance attestations and a keyless Cosign signature for that digest.
 
 The image still runs one Python control plane, one native Prometheus child process, and one native Grafana child
 process. Publishing a multi-architecture image does not split those services into separate containers.
@@ -118,8 +121,9 @@ Run the Linux container smoke test:
 python3 tests/container_smoke.py --image "sbk-dashboard:$SBK_VERSION-local"
 ```
 
-The smoke test uses disposable containers, a network, and a volume. It verifies health, published ports, endpoint
-registration, Grafana provisioning, Prometheus persistence, restart behavior, and clean native-process shutdown.
+The smoke test uses disposable containers, a network, and a volume. It verifies health, published ports, read-only
+root operation, immutable native installations, endpoint registration, Grafana provisioning, Prometheus
+persistence and stale-state recovery after `SIGKILL`, and clean native-process shutdown.
 Do not publish if this test fails.
 
 ## 5. Create the Docker Hub repository and token
@@ -194,6 +198,10 @@ ordinary local Docker image, so do not replace `--push` with `--load` for the re
 Use `latest` only for a stable release. Consumers and `compose.yaml` should use the exact version tag so an upgrade
 cannot happen unexpectedly.
 
+The supported release path is the tagged GitHub workflow because it applies the vulnerability gate and GitHub-OIDC
+signature. A manual Buildx push can reproduce the image and attestations, but it is not presented as an officially
+signed repository release.
+
 ## 8. Verify the Docker Hub image
 
 Inspect the published manifest:
@@ -207,6 +215,26 @@ The output must include both:
 ```text
 Platform: linux/amd64
 Platform: linux/arm64
+```
+
+Copy the top-level manifest digest from the inspection output and install Cosign. Verify that the signature was
+issued by this repository's tagged release workflow:
+
+```bash
+export SBK_DIGEST='sha256:<manifest-digest>'
+cosign verify \
+  --certificate-identity-regexp \
+    '^https://github.com/kmgowda/sbk-dashboard/.github/workflows/container.yml@refs/tags/v' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  "$SBK_IMAGE@$SBK_DIGEST"
+```
+
+For strict production deployment, use the version and digest together:
+
+```bash
+export SBK_DASHBOARD_IMAGE="$SBK_IMAGE:$SBK_VERSION@$SBK_DIGEST"
+docker compose pull
+docker compose up --detach
 ```
 
 Pull the version through the same Compose definition used by customers:
@@ -272,8 +300,10 @@ docker volume create sbk-dashboard-data
 docker run --detach \
   --name sbk-dashboard \
   --restart unless-stopped \
-  --publish 9721:9721 \
-  --publish 3000:3000 \
+  --read-only \
+  --tmpfs /tmp:size=64m,mode=1777 \
+  --publish 127.0.0.1:9721:9721 \
+  --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
   kmgowda/sbk-dashboard:1.26.8.2
@@ -318,8 +348,12 @@ git tag -a "v$SBK_VERSION" -m "SBK Dashboard $SBK_VERSION"
 git push origin "v$SBK_VERSION"
 ```
 
-The workflow builds `linux/amd64` and `linux/arm64`, attaches provenance and an SBOM, and publishes both the version
-and `latest` tags. It stops before Docker Hub login when the Git tag and package version do not match.
+The workflow builds the runnable AMD64 image, rejects fixed high/critical vulnerabilities with pinned Trivy, builds
+`linux/amd64` and `linux/arm64`, attaches provenance and an SBOM, publishes both the version and `latest` tags, and
+keylessly signs their shared digest with GitHub OIDC. It stops before Docker Hub login when the Git tag and package
+version do not match. No long-lived signing key is stored in repository secrets. Any reviewed scanner exception is
+target-scoped, documented, and time-limited in `.trivyignore.yaml`; expiry deliberately blocks publishing until the
+native dependencies are upgraded or the exception is reviewed again.
 
 ## Troubleshooting
 

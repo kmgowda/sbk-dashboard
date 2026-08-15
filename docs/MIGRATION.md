@@ -98,6 +98,23 @@ the packaged default is 2 GiB.
 
 ## Optional container deployment
 
+Container deployments created after the container-hardening update bind published ports to `127.0.0.1` by default.
+Set `SBK_DASHBOARD_PUBLISH_HOST=0.0.0.0` only when retaining deliberate network-wide access behind an appropriate
+firewall or authenticated proxy. Compose also runs with a read-only root filesystem; all persistent writes remain
+under the existing `/var/lib/sbk-dashboard` volume, so no data migration is required. Native binaries under `/opt`
+are now immutable root-owned image content.
+
+The optional `compose.resources.yaml` overlay supplies default 4 GiB memory, 2 CPU, and 512 PID limits. It is not
+automatically applied, allowing existing deployments to select limits appropriate to their target cardinality.
+Release images are vulnerability-gated, carry SBOM/provenance attestations, and are signed by the GitHub release
+workflow. Existing version tags remain usable; production operators can adopt immutable digest references without
+changing stored registrations or monitoring data.
+
+The verified native defaults advance to Prometheus 3.13.2 and Grafana 13.1.3 across supported operating systems and
+architectures. Existing downloaded versions remain in their versioned tool cache but are no longer selected by the
+packaged defaults. Persistent Prometheus TSDB, Grafana database, registrations, and dashboard identities remain in
+the data root and require no format migration.
+
 Release 1.26.8.1 added an optional Linux AMD64/ARM64 container without changing endpoint IDs, persisted JSON,
 dashboard UIDs, retention, or the native child-process design. To move an existing direct installation, stop it
 cleanly and copy its data root into a Docker volume or a UID/GID 10001-writable bind mount at

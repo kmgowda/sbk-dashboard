@@ -17,11 +17,19 @@ class ContainerContractTest(unittest.TestCase):
         cls.dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         cls.compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
         cls.development_compose = (ROOT / "compose.dev.yaml").read_text(encoding="utf-8")
+        cls.resources_compose = (ROOT / "compose.resources.yaml").read_text(encoding="utf-8")
         cls.workflow = (ROOT / ".github/workflows/container.yml").read_text(encoding="utf-8")
         cls.ci_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         cls.properties = (
             ROOT / "src/sbk_dashboard/resources/monitoring-download.properties"
         ).read_text(encoding="utf-8")
+        cls.container_build_requirements = (
+            ROOT / "requirements/container-build.txt"
+        ).read_text(encoding="utf-8")
+        cls.container_runtime_requirements = (
+            ROOT / "requirements/container-runtime.txt"
+        ).read_text(encoding="utf-8")
+        cls.trivy_ignore = (ROOT / ".trivyignore.yaml").read_text(encoding="utf-8")
 
     def test_image_runs_as_non_root_with_persistent_data_and_two_public_ports(self):
         self.assertIn(f"ARG PYTHON_BASE={PYTHON_BASE}", self.dockerfile)
@@ -43,13 +51,15 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal", self.dockerfile)
 
     def test_compose_publishes_dashboard_ports_and_persists_state(self):
-        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:9721:9721"', self.compose)
-        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-0.0.0.0}:3000:3000"', self.compose)
+        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-127.0.0.1}:9721:9721"', self.compose)
+        self.assertIn('"${SBK_DASHBOARD_PUBLISH_HOST:-127.0.0.1}:3000:3000"', self.compose)
         self.assertNotRegex(self.compose, r'["\s]9090:9090')
         self.assertIn("sbk-dashboard-data:/var/lib/sbk-dashboard", self.compose)
         self.assertIn("host.docker.internal:host-gateway", self.compose)
         self.assertIn("no-new-privileges:true", self.compose)
         self.assertIn("cap_drop:", self.compose)
+        self.assertIn("read_only: true", self.compose)
+        self.assertIn("/tmp:size=64m,mode=1777", self.compose)
         self.assertIn("enable_ipv6: true", self.compose)
         self.assertIn("pull_policy: missing", self.compose)
         self.assertIn("stop_grace_period: 30s", self.compose)
@@ -58,6 +68,21 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("pull_policy: never", self.development_compose)
         self.assertIn("build:", self.development_compose)
         self.assertIn("VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}", self.development_compose)
+        self.assertIn("SBK_DASHBOARD_MEMORY_LIMIT:-4g", self.resources_compose)
+        self.assertIn("SBK_DASHBOARD_CPU_LIMIT:-2.0", self.resources_compose)
+        self.assertIn("SBK_DASHBOARD_PIDS_LIMIT:-512", self.resources_compose)
+
+    def test_container_python_dependencies_and_build_tools_are_hash_pinned(self):
+        self.assertIn("setuptools==80.9.0", self.container_build_requirements)
+        self.assertIn("packaging==26.3", self.container_build_requirements)
+        self.assertIn("wheel==0.48.0", self.container_build_requirements)
+        self.assertIn("psutil==7.2.2", self.container_runtime_requirements)
+        self.assertEqual(2, self.container_runtime_requirements.count("--hash=sha256:"))
+        self.assertIn("--require-hashes", self.dockerfile)
+        self.assertIn("--no-build-isolation --no-deps", self.dockerfile)
+        self.assertIn('test "${installed_version}" = "${APPLICATION_VERSION}"', self.dockerfile)
+        self.assertNotIn("--chown=10001:10001 /opt/prometheus", self.dockerfile)
+        self.assertNotIn("--chown=10001:10001 /opt/grafana", self.dockerfile)
 
     def test_image_native_versions_and_checksums_match_packaged_bootstrap(self):
         expected = {
@@ -110,12 +135,19 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn('arguments.add_argument("--grafana-port", type=int)', smoke)
         self.assertIn("BaseHTTPRequestHandler, HTTPServer", smoke)
         self.assertNotIn("ThreadingHTTPServer", smoke)
+        self.assertIn('"docker", "kill", "--signal", "KILL"', smoke)
+        self.assertIn('"--read-only"', smoke)
+        self.assertIn("Native installations are not immutable root-owned content", smoke)
 
     def test_ci_runs_smoke_and_builds_both_linux_architectures(self):
         self.assertIn('- "compose.dev.yaml"', self.workflow)
         self.assertIn("Validate production and development Compose definitions", self.workflow)
         self.assertIn(
             "docker compose -f compose.yaml -f compose.dev.yaml config --quiet",
+            self.workflow,
+        )
+        self.assertIn(
+            "docker compose -f compose.yaml -f compose.resources.yaml config --quiet",
             self.workflow,
         )
         self.assertIn("python tests/compose_contract.py", self.workflow)
@@ -127,6 +159,15 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("Log in to Docker Hub", self.workflow)
         self.assertIn("secrets.DOCKERHUB_USERNAME", self.workflow)
         self.assertIn("secrets.DOCKERHUB_TOKEN", self.workflow)
+        self.assertIn("aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25", self.workflow)
+        self.assertIn("severity: CRITICAL,HIGH", self.workflow)
+        self.assertIn("trivyignores: .trivyignore.yaml", self.workflow)
+        self.assertEqual(18, self.trivy_ignore.count("  - id:"))
+        self.assertEqual(18, self.trivy_ignore.count("expired_at: 2026-09-30"))
+        self.assertEqual(18, self.trivy_ignore.count("statement:"))
+        self.assertIn("sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6", self.workflow)
+        self.assertIn("id-token: write", self.workflow)
+        self.assertIn("cosign sign --yes", self.workflow)
         self.assertNotIn("ghcr.io", self.workflow)
         self.assertIn("Verify release tag matches the package version", self.workflow)
         self.assertEqual(2, self.workflow.count("runs-on: ubuntu-24.04"))
