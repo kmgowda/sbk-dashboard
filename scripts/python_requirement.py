@@ -6,11 +6,11 @@ import sys
 MINIMUM_PYTHON = (3, 10)
 
 
-def minimum_text():
+def minimum_text() -> str:
     return ".".join(str(value) for value in MINIMUM_PYTHON)
 
 
-def ensure_supported():
+def ensure_supported() -> None:
     if sys.version_info < MINIMUM_PYTHON:
         raise SystemExit(
             f"Python {minimum_text()} or newer is required; selected interpreter reports {sys.version.split()[0]}."
