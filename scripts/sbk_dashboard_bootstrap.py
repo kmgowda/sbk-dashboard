@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -14,6 +15,7 @@ import sys
 import time
 import uuid
 from contextlib import suppress
+from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,11 @@ LOCK_WAIT_SECONDS = 180.0
 LOCK_STALE_SECONDS = 600.0
 KEEP_RUNTIME_VERSIONS = 2
 VERSION_PREFIX = 'VERSION = "'
+FINGERPRINT_ROOT_FILES = ("pyproject.toml", "MANIFEST.in")
+FINGERPRINT_EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
+WINDOWS_SYNCHRONIZE = 0x00100000
+WINDOWS_WAIT_OBJECT_0 = 0x00000000
+WINDOWS_ERROR_INVALID_PARAMETER = 87
 
 
 def dashboard_home(environment: dict[str, str] | None = None) -> Path:
@@ -59,9 +66,16 @@ def platform_id() -> str:
 
 def source_fingerprint(project_directory: Path) -> str:
     digest = hashlib.sha256()
-    paths = [project_directory / "pyproject.toml"]
+    paths = [project_directory / name for name in FINGERPRINT_ROOT_FILES]
     for directory in (project_directory / "src", project_directory / "scripts"):
-        paths.extend(path for path in directory.rglob("*") if path.is_file() and path.suffix in {".py", ".toml"})
+        paths.extend(
+            path
+            for path in directory.rglob("*")
+            if path.is_file()
+            and path.suffix not in FINGERPRINT_EXCLUDED_SUFFIXES
+            and "__pycache__" not in path.parts
+            and not any(part.endswith(".egg-info") for part in path.parts)
+        )
     for path in sorted(paths, key=lambda item: item.as_posix()):
         digest.update(path.relative_to(project_directory).as_posix().encode())
         digest.update(b"\0")
@@ -102,9 +116,37 @@ def run_checked(command: list[str], failure: str, environment: dict[str, str] | 
         raise SystemExit(f"{failure}\nFailed command: {rendered}\nDetails: {error}") from error
 
 
+def windows_process_alive(pid: int, kernel32: Any | None = None) -> bool:
+    """Check a Windows PID without sending a signal or requiring psutil."""
+    if kernel32 is None:
+        loader = getattr(ctypes, "WinDLL", None)
+        if loader is None:
+            return True
+        try:
+            kernel32 = loader("kernel32", use_last_error=True)
+        except OSError:
+            return True
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(WINDOWS_SYNCHRONIZE, False, pid)
+    if not handle:
+        get_last_error = getattr(ctypes, "get_last_error", lambda: 0)
+        return int(get_last_error()) != WINDOWS_ERROR_INVALID_PARAMETER
+    try:
+        return int(kernel32.WaitForSingleObject(handle, 0)) != WINDOWS_WAIT_OBJECT_0
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def process_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        return windows_process_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -189,6 +231,13 @@ def runtime_valid(runtime: Path, version: str, fingerprint: str) -> bool:
     )
 
 
+def move_directory(source: Path, destination: Path) -> None:
+    """Atomically move one directory only when the destination is absent."""
+    if destination.exists():
+        raise FileExistsError(f"Runtime promotion destination already exists: {destination}")
+    os.rename(source, destination)
+
+
 def install_application(python: Path, project_directory: Path, home: Path) -> None:
     environment = dict(os.environ)
     environment["PIP_CACHE_DIR"] = str(home / "cache" / "pip")
@@ -222,7 +271,7 @@ def install_private_runtime(
         selected.parent.mkdir(parents=True, exist_ok=True)
         abandoned_backups = sorted(selected.parent.glob(f".{selected.name}.backup-*"))
         if not selected.exists() and abandoned_backups:
-            os.replace(abandoned_backups.pop(), selected)
+            move_directory(abandoned_backups.pop(), selected)
         for abandoned in abandoned_backups:
             shutil.rmtree(abandoned, ignore_errors=True)
         for abandoned in selected.parent.glob(f".{selected.name}.staging-*"):
@@ -248,12 +297,12 @@ def install_private_runtime(
                 },
             )
             if selected.exists():
-                os.replace(selected, backup)
+                move_directory(selected, backup)
             try:
-                os.replace(staging, selected)
+                move_directory(staging, selected)
             except BaseException:
                 if backup.exists() and not selected.exists():
-                    os.replace(backup, selected)
+                    move_directory(backup, selected)
                 raise
             if backup.exists():
                 shutil.rmtree(backup, ignore_errors=True)
@@ -265,7 +314,7 @@ def install_private_runtime(
             if staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
             if backup.exists() and not selected.exists():
-                os.replace(backup, selected)
+                move_directory(backup, selected)
         prune_runtimes(selected.parent, selected)
         return runtime_python(selected)
 

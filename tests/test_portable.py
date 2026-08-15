@@ -99,6 +99,9 @@ class PortableReleaseTest(unittest.TestCase):
         self.assertNotIn("-latest", workflow)
         self.assertIn("gh release upload", workflow)
         self.assertIn("release:\n    types: [published]", workflow)
+        self.assertIn('"pyinstaller==6.22.0"', workflow)
+        self.assertIn('"pyinstaller-hooks-contrib==2026.6"', workflow)
+        self.assertIn("setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7", workflow)
 
 
 if __name__ == "__main__":

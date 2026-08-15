@@ -33,10 +33,7 @@ Install Python with its venv module, then rerun this script.
 if (-not (Test-Path -LiteralPath $Python)) {
     $BrokenEnvironmentMessage = @"
 The selected $EnvironmentDescription has no Python executable at $Python.
-Reactivate a valid environment, or recreate the project environment:
-  py -3 -m venv .venv
-  .\.venv\Scripts\Activate.ps1
-  python -m pip install .
+Reactivate a valid environment, or install a supported Python with venv support.
 "@
     Write-Error $BrokenEnvironmentMessage -ErrorAction Continue
     exit 1

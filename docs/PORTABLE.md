@@ -43,9 +43,10 @@ native Prometheus/Grafana archives are available. The initial standalone build m
 the three native GitHub-hosted runners above; emulated builds are not presented as native validation.
 
 Release CI builds each archive on its target runner, writes a per-file `manifest.json`, creates an external SHA-256
-file, uploads workflow artifacts, and attaches them to a published GitHub release. The files are checksummed but not
-code-signed or notarized by this repository; operators that require trust-policy signing must apply and verify their
-organization's signing process before distribution.
+file, uploads workflow artifacts, and attaches them to a published GitHub release. PyInstaller and its contributed
+hooks are pinned to reviewed exact versions so release tooling does not drift between runs. The files are
+checksummed but not code-signed or notarized by this repository; operators that require trust-policy signing must
+apply and verify their organization's signing process before distribution.
 
 ## Persistent home and cache layout
 
