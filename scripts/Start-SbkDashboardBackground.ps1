@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $ScriptDirectory = $PSScriptRoot
-$ProjectDirectory = Split-Path -Parent $ScriptDirectory
 $DashboardArguments = @($args)
 $PythonArguments = @()
 
@@ -10,9 +9,6 @@ if ($env:VIRTUAL_ENV) {
 } elseif ($env:CONDA_PREFIX) {
     $Python = Join-Path $env:CONDA_PREFIX 'python.exe'
     $EnvironmentDescription = "active Conda environment $env:CONDA_PREFIX"
-} elseif (Test-Path -LiteralPath (Join-Path $ProjectDirectory '.venv\Scripts\python.exe')) {
-    $Python = Join-Path $ProjectDirectory '.venv\Scripts\python.exe'
-    $EnvironmentDescription = "project virtual environment $(Join-Path $ProjectDirectory '.venv')"
 } else {
     $PythonCommand = Get-Command py -ErrorAction SilentlyContinue
     if (-not $PythonCommand) {
@@ -37,10 +33,7 @@ Install Python with its venv module, then rerun this script.
 if (-not (Test-Path -LiteralPath $Python)) {
     $BrokenEnvironmentMessage = @"
 The selected $EnvironmentDescription has no Python executable at $Python.
-Reactivate a valid environment, or recreate the project environment:
-  py -3 -m venv .venv
-  .\.venv\Scripts\Activate.ps1
-  python -m pip install .
+Reactivate a valid environment, or install a supported Python with venv support.
 "@
     Write-Error $BrokenEnvironmentMessage -ErrorAction Continue
     exit 1

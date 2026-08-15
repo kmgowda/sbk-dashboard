@@ -30,9 +30,11 @@ image; the development override builds that image locally. Both invoke the same 
 Python `run()` composition below remains the sole owner of Prometheus and Grafana in either delivery mode.
 
 The optional source-archive launchers are outside the package composition root. A dependency-free bootstrap first
-reuses an active venv/Conda environment or the project `.venv`; with only Python 3.10+ available, it creates the
-project `.venv`. It installs pip when necessary and installs the local project when `psutil` or `sbk_dashboard` is
-missing, before any launcher ownership state or native process can be acquired. Foreground mode then calls
+reuses an active venv/Conda environment; with only Python 3.10+ available, it creates a versioned, platform-specific,
+source-fingerprinted private venv below `SBK_DASHBOARD_HOME`. An exclusive bounded lock protects a sibling staging
+directory and atomic promotion, two recent fingerprints are retained, and pip downloads are shared through
+`<home>/cache/pip`. It installs pip when necessary and prepares the local project before any launcher ownership
+state or native process can be acquired. Foreground mode then calls
 `main.main()` in the console-attached helper process. On Windows, an identity-specific stop-request file is watched
 by one bounded thread and converted into `SIGINT` in that same process, while console interrupts are handled
 directly. Abrupt foreground death remains covered by the native-process guardians. Background mode first starts an empty supervisor, records its

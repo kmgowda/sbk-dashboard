@@ -20,9 +20,10 @@ LAUNCHER = ROOT / "scripts" / "sbk_dashboard_launcher.py"
 
 
 class LauncherScriptTest(unittest.TestCase):
-    def test_bootstrap_installs_missing_application_dependencies(self):
+    def test_bootstrap_installs_missing_application_dependencies_in_active_environment(self):
         completed = subprocess.CompletedProcess([], 0)
         with (
+            tempfile.TemporaryDirectory() as temporary,
             patch.object(
                 sbk_dashboard_bootstrap,
                 "missing_modules",
@@ -34,66 +35,231 @@ class LauncherScriptTest(unittest.TestCase):
                 side_effect=[completed, completed],
             ) as run,
         ):
-            sbk_dashboard_bootstrap.ensure_application(ROOT)
-        self.assertEqual(
-            [sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[1].args[0]
-        )
+            home = Path(temporary)
+            sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+        self.assertEqual([sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[1].args[0])
+        self.assertEqual(str(home / "cache" / "pip"), run.call_args_list[1].kwargs["env"]["PIP_CACHE_DIR"])
 
     def test_bootstrap_installs_pip_before_application_when_needed(self):
         missing_pip = subprocess.CompletedProcess([], 1)
         completed = subprocess.CompletedProcess([], 0)
         with (
-            patch.object(
-                sbk_dashboard_bootstrap, "missing_modules", side_effect=[["psutil"], []]
-            ),
+            tempfile.TemporaryDirectory() as temporary,
             patch.object(
                 sbk_dashboard_bootstrap.subprocess,
                 "run",
                 side_effect=[missing_pip, completed, completed],
             ) as run,
         ):
-            sbk_dashboard_bootstrap.ensure_application(ROOT)
-        self.assertEqual(
-            [sys.executable, "-m", "ensurepip", "--upgrade"], run.call_args_list[1].args[0]
-        )
-        self.assertEqual(
-            [sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[2].args[0]
-        )
+            sbk_dashboard_bootstrap.install_application(Path(sys.executable), ROOT, Path(temporary))
+        self.assertEqual([sys.executable, "-m", "ensurepip", "--upgrade"], run.call_args_list[1].args[0])
+        self.assertEqual([sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[2].args[0])
 
-    def test_bootstrap_creates_project_environment_before_installing(self):
+    def test_bootstrap_creates_private_home_runtime_before_launching(self):
+        private_python = Path("private") / "venv" / "bin" / "python"
         with (
+            tempfile.TemporaryDirectory() as temporary,
             patch.object(sbk_dashboard_bootstrap, "environment_is_active", return_value=False),
-            patch.object(sbk_dashboard_bootstrap, "executable_exists", return_value=False),
+            patch.object(sbk_dashboard_bootstrap, "dashboard_home", return_value=Path(temporary)),
+            patch.object(sbk_dashboard_bootstrap, "project_version", return_value="1.2.3.4"),
             patch.object(
                 sbk_dashboard_bootstrap,
-                "ensure_project_environment",
-                side_effect=RuntimeError("exec replacement"),
-            ) as create,
-            patch.object(sbk_dashboard_bootstrap, "ensure_application") as install,
-            self.assertRaisesRegex(RuntimeError, "exec replacement"),
+                "source_fingerprint",
+                return_value="fingerprint",
+            ),
+            patch.object(
+                sbk_dashboard_bootstrap,
+                "install_private_runtime",
+                return_value=private_python,
+            ) as install,
+            patch.object(sbk_dashboard_bootstrap, "launch") as launch,
         ):
-            sbk_dashboard_bootstrap.main(["foreground", "--help"])
-        create.assert_called_once_with(ROOT, ["foreground", "--help"])
-        install.assert_not_called()
+            self.assertEqual(0, sbk_dashboard_bootstrap.main(["foreground", "--help"]))
+        install.assert_called_once_with(ROOT, Path(temporary), "1.2.3.4", "fingerprint", force=False)
+        launch.assert_called_once_with(private_python, ROOT / "scripts", ["foreground", "--help"], Path(temporary))
 
     def test_bootstrap_reuses_active_environment_and_preserves_arguments(self):
         with (
             patch.object(sbk_dashboard_bootstrap, "environment_is_active", return_value=True),
-            patch.object(sbk_dashboard_bootstrap, "ensure_application") as install,
-            patch.object(sbk_dashboard_bootstrap.os, "execv") as execute,
+            patch.object(sbk_dashboard_bootstrap, "dashboard_home", return_value=ROOT / "home"),
+            patch.object(sbk_dashboard_bootstrap, "project_version", return_value="1.2.3.4"),
+            patch.object(sbk_dashboard_bootstrap, "source_fingerprint", return_value="fingerprint"),
+            patch.object(sbk_dashboard_bootstrap, "prepare_active_environment") as install,
+            patch.object(sbk_dashboard_bootstrap, "launch") as launch,
         ):
             self.assertEqual(0, sbk_dashboard_bootstrap.main(["background", "-port", "19721"]))
-        install.assert_called_once_with(ROOT)
-        self.assertEqual(
-            [
-                sys.executable,
-                str(ROOT / "scripts" / "sbk_dashboard_launcher.py"),
-                "background",
-                "-port",
-                "19721",
-            ],
-            execute.call_args.args[1],
+        install.assert_called_once_with(ROOT, ROOT / "home", "1.2.3.4", force=False)
+        launch.assert_called_once_with(
+            Path(sys.executable),
+            ROOT / "scripts",
+            ["background", "-port", "19721"],
+            ROOT / "home",
         )
+
+    def test_bootstrap_home_and_fingerprint_are_stable_and_bounded(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "portable-home"
+            self.assertEqual(home.resolve(), sbk_dashboard_bootstrap.dashboard_home({"SBK_DASHBOARD_HOME": str(home)}))
+            first = sbk_dashboard_bootstrap.source_fingerprint(ROOT)
+            second = sbk_dashboard_bootstrap.source_fingerprint(ROOT)
+            self.assertRegex(first, r"^[0-9a-f]{16}$")
+            self.assertEqual(first, second)
+        with self.assertRaisesRegex(SystemExit, "dedicated subdirectory"):
+            sbk_dashboard_bootstrap.dashboard_home({"SBK_DASHBOARD_HOME": str(Path.home())})
+
+    def test_source_fingerprint_tracks_resources_and_ignores_generated_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "pyproject.toml").write_text("[project]\nname='test'\n", encoding="utf-8")
+            (root / "MANIFEST.in").write_text("include resources\n", encoding="utf-8")
+            resources = root / "src" / "sbk_dashboard" / "resources"
+            resources.mkdir(parents=True)
+            banner = resources / "banner.txt"
+            banner.write_text("first banner", encoding="utf-8")
+            scripts = root / "scripts"
+            scripts.mkdir()
+            (scripts / "launcher.ps1").write_text("Write-Host start\n", encoding="utf-8")
+            first = sbk_dashboard_bootstrap.source_fingerprint(root)
+            banner.write_text("changed banner", encoding="utf-8")
+            changed = sbk_dashboard_bootstrap.source_fingerprint(root)
+            self.assertNotEqual(first, changed)
+
+            cache = root / "src" / "sbk_dashboard" / "__pycache__"
+            cache.mkdir()
+            (cache / "generated.pyc").write_bytes(b"generated bytecode")
+            metadata = root / "src" / "sbk_dashboard.egg-info"
+            metadata.mkdir()
+            (metadata / "PKG-INFO").write_text("generated metadata", encoding="utf-8")
+            self.assertEqual(changed, sbk_dashboard_bootstrap.source_fingerprint(root))
+
+    def test_windows_process_liveness_uses_handles_without_signaling(self):
+        kernel32 = Mock()
+        kernel32.OpenProcess.return_value = 123
+        kernel32.WaitForSingleObject.return_value = 0x00000102
+        self.assertTrue(sbk_dashboard_bootstrap.windows_process_alive(456, kernel32))
+        kernel32.OpenProcess.assert_called_once_with(
+            sbk_dashboard_bootstrap.WINDOWS_SYNCHRONIZE, False, 456
+        )
+        kernel32.CloseHandle.assert_called_once_with(123)
+
+        kernel32.reset_mock()
+        kernel32.OpenProcess.return_value = 123
+        kernel32.WaitForSingleObject.return_value = (
+            sbk_dashboard_bootstrap.WINDOWS_WAIT_OBJECT_0
+        )
+        self.assertFalse(sbk_dashboard_bootstrap.windows_process_alive(456, kernel32))
+        kernel32.CloseHandle.assert_called_once_with(123)
+
+    def test_windows_process_liveness_handles_missing_and_inaccessible_pids(self):
+        kernel32 = Mock()
+        kernel32.OpenProcess.return_value = 0
+        with patch.object(
+            sbk_dashboard_bootstrap.ctypes,
+            "get_last_error",
+            return_value=sbk_dashboard_bootstrap.WINDOWS_ERROR_INVALID_PARAMETER,
+            create=True,
+        ):
+            self.assertFalse(sbk_dashboard_bootstrap.windows_process_alive(456, kernel32))
+        with patch.object(
+            sbk_dashboard_bootstrap.ctypes,
+            "get_last_error",
+            return_value=5,
+            create=True,
+        ):
+            self.assertTrue(sbk_dashboard_bootstrap.windows_process_alive(456, kernel32))
+
+    def test_process_alive_never_calls_os_kill_on_windows(self):
+        with (
+            patch.object(sbk_dashboard_bootstrap.os, "name", "nt"),
+            patch.object(
+                sbk_dashboard_bootstrap, "windows_process_alive", return_value=True
+            ) as windows_alive,
+            patch.object(sbk_dashboard_bootstrap.os, "kill") as kill,
+        ):
+            self.assertTrue(sbk_dashboard_bootstrap.process_alive(456))
+        windows_alive.assert_called_once_with(456)
+        kill.assert_not_called()
+
+    def test_install_lock_recovers_only_dead_stale_owner(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "install.lock"
+            path.write_text(json.dumps({"pid": 99999999, "created": 0, "token": "old"}), encoding="utf-8")
+            with sbk_dashboard_bootstrap.InstallLock(path):
+                self.assertTrue(path.exists())
+            self.assertFalse(path.exists())
+
+    def test_failed_repair_preserves_the_previous_private_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            with (
+                patch.object(sbk_dashboard_bootstrap, "platform_id", return_value="linux-amd64"),
+                patch.object(
+                    sbk_dashboard_bootstrap,
+                    "run_checked",
+                    side_effect=SystemExit("simulated venv failure"),
+                ),
+            ):
+                selected = sbk_dashboard_bootstrap.runtime_directory(home, "1.2.3.4", "fingerprint")
+                python = sbk_dashboard_bootstrap.runtime_python(selected)
+                python.parent.mkdir(parents=True)
+                python.write_text("previous runtime", encoding="utf-8")
+                python.chmod(0o700)
+                sbk_dashboard_bootstrap.atomic_json(
+                    sbk_dashboard_bootstrap.installed_marker(selected),
+                    {"version": "1.2.3.4", "fingerprint": "fingerprint"},
+                )
+                with self.assertRaisesRegex(SystemExit, "simulated venv failure"):
+                    sbk_dashboard_bootstrap.install_private_runtime(ROOT, home, "1.2.3.4", "fingerprint", force=True)
+                self.assertEqual("previous runtime", python.read_text(encoding="utf-8"))
+
+    def test_directory_promotion_refuses_an_existing_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            destination.mkdir()
+            with self.assertRaisesRegex(FileExistsError, "destination already exists"):
+                sbk_dashboard_bootstrap.move_directory(source, destination)
+            self.assertTrue(source.is_dir())
+            self.assertTrue(destination.is_dir())
+
+    def test_directory_promotion_moves_to_an_absent_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            destination = root / "destination"
+            source.mkdir()
+            (source / "python-marker").write_text("prepared", encoding="utf-8")
+            sbk_dashboard_bootstrap.move_directory(source, destination)
+            self.assertFalse(source.exists())
+            self.assertEqual(
+                "prepared", (destination / "python-marker").read_text(encoding="utf-8")
+            )
+
+    def test_private_runtime_recovers_a_crash_between_atomic_renames(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            with patch.object(
+                sbk_dashboard_bootstrap, "platform_id", return_value="linux-amd64"
+            ):
+                selected = sbk_dashboard_bootstrap.runtime_directory(
+                    home, "1.2.3.4", "fingerprint"
+                )
+                backup = selected.with_name(f".{selected.name}.backup-interrupted")
+                python = sbk_dashboard_bootstrap.runtime_python(backup)
+                python.parent.mkdir(parents=True)
+                python.write_text("recovered runtime", encoding="utf-8")
+                python.chmod(0o700)
+                sbk_dashboard_bootstrap.atomic_json(
+                    sbk_dashboard_bootstrap.installed_marker(backup),
+                    {"version": "1.2.3.4", "fingerprint": "fingerprint"},
+                )
+                recovered = sbk_dashboard_bootstrap.install_private_runtime(
+                    ROOT, home, "1.2.3.4", "fingerprint"
+                )
+                self.assertEqual(sbk_dashboard_bootstrap.runtime_python(selected), recovered)
+                self.assertEqual("recovered runtime", recovered.read_text(encoding="utf-8"))
 
     def test_environment_report_is_actionable_when_application_is_missing(self):
         missing = ModuleNotFoundError("No module named 'sbk_dashboard'", name="sbk_dashboard")
@@ -252,7 +418,7 @@ class LauncherScriptTest(unittest.TestCase):
 
     def test_empty_windows_local_app_data_falls_back_to_home(self):
         fallback = Path("C:/Users/tester")
-        expected = fallback / "SBK Dashboard" / "launcher"
+        expected = fallback / ".sbk-dashboard" / "launcher"
         path_factory = Mock(return_value=fallback)
         path_factory.home.return_value = fallback
         with (
@@ -261,6 +427,16 @@ class LauncherScriptTest(unittest.TestCase):
             patch.object(sbk_dashboard_launcher, "Path", path_factory),
         ):
             self.assertEqual(expected, sbk_dashboard_launcher.state_directory())
+
+    def test_portable_home_owns_launcher_state_on_every_platform(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.dict(os.environ, {"SBK_DASHBOARD_HOME": temporary}, clear=False),
+        ):
+            self.assertEqual(
+                Path(temporary).resolve() / "launcher",
+                sbk_dashboard_launcher.state_directory(),
+            )
 
     def test_windows_foreground_stop_writes_identity_specific_request(self):
         process = Mock(pid=321)
@@ -292,14 +468,10 @@ class LauncherScriptTest(unittest.TestCase):
 
     def test_wrappers_prefer_active_environments(self):
         start_shell = (ROOT / "scripts" / "start-sbk-dashboard.sh").read_text(encoding="utf-8")
-        background_shell = (ROOT / "scripts" / "start-sbk-dashboard-background.sh").read_text(
-            encoding="utf-8"
-        )
+        background_shell = (ROOT / "scripts" / "start-sbk-dashboard-background.sh").read_text(encoding="utf-8")
         stop_shell = (ROOT / "scripts" / "stop-sbk-dashboard.sh").read_text(encoding="utf-8")
         start_powershell = (ROOT / "scripts" / "Start-SbkDashboard.ps1").read_text(encoding="utf-8")
-        background_powershell = (ROOT / "scripts" / "Start-SbkDashboardBackground.ps1").read_text(
-            encoding="utf-8"
-        )
+        background_powershell = (ROOT / "scripts" / "Start-SbkDashboardBackground.ps1").read_text(encoding="utf-8")
         stop_powershell = (ROOT / "scripts" / "Stop-SbkDashboard.ps1").read_text(encoding="utf-8")
         for content in (
             start_shell,
@@ -310,11 +482,15 @@ class LauncherScriptTest(unittest.TestCase):
             stop_powershell,
         ):
             self.assertLess(content.index("VIRTUAL_ENV"), content.index("CONDA_PREFIX"))
-            self.assertIn(".venv", content)
-        for content in (start_shell, background_shell, start_powershell, background_powershell):
+        for content in (
+            start_shell,
+            background_shell,
+            stop_shell,
+            start_powershell,
+            background_powershell,
+            stop_powershell,
+        ):
             self.assertIn("sbk_dashboard_bootstrap.py", content)
-        for content in (stop_shell, stop_powershell):
-            self.assertIn("sbk_dashboard_launcher.py", content)
         self.assertIn('foreground "$@"', start_shell)
         self.assertIn('background "$@"', background_shell)
         self.assertIn('stop "$@"', stop_shell)
@@ -327,6 +503,8 @@ class LauncherScriptTest(unittest.TestCase):
         self.assertIn("sys.version_info >= (3, 10)", stop_powershell)
         self.assertNotIn("Write-Error @'", start_powershell)
         self.assertNotIn('Write-Error @"', start_powershell)
+        self.assertNotIn("recreate the project environment", start_powershell)
+        self.assertNotIn("recreate the project environment", background_powershell)
         launcher = LAUNCHER.read_text(encoding="utf-8")
         self.assertIn("foreground_stop_path", launcher)
         self.assertIn("signal.raise_signal(signal.SIGINT)", launcher)
@@ -338,13 +516,18 @@ class LauncherScriptTest(unittest.TestCase):
             "Start-SbkDashboardBackground.ps1",
             "Stop-SbkDashboard.ps1",
             "docker_safe_extract.py",
+            "build_portable.py",
             "sbk_dashboard_bootstrap.py",
             "sbk_dashboard_launcher.py",
+            "sbk_dashboard_portable_entry.py",
             "start-sbk-dashboard.sh",
             "start-sbk-dashboard-background.sh",
             "stop-sbk-dashboard.sh",
         ):
             self.assertIn(f"include scripts/{name}", manifest)
+        for name in ("sbk-dashboard", "sbk-dashboard.ps1", "sbk-dashboard.cmd"):
+            self.assertIn(f"include {name}", manifest)
+        self.assertIn("recursive-include docs *.md", manifest)
 
     def test_start_and_stop_use_creation_time_guarded_state(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -466,11 +649,7 @@ class LauncherScriptTest(unittest.TestCase):
                         text=True,
                         env=environment,
                     )
-                    state = json.loads(
-                        (state_directory / f"sbk-dashboard-{port}.json").read_text(
-                            encoding="utf-8"
-                        )
-                    )
+                    state = json.loads((state_directory / f"sbk-dashboard-{port}.json").read_text(encoding="utf-8"))
                     self.assertEqual(port, state["port"])
                     processes.append(psutil.Process(state["pid"]))
 
@@ -517,9 +696,7 @@ class LauncherScriptTest(unittest.TestCase):
                 text=True,
                 env=environment,
             )
-            state = json.loads(
-                (state_directory / "sbk-dashboard-19722.json").read_text(encoding="utf-8")
-            )
+            state = json.loads((state_directory / "sbk-dashboard-19722.json").read_text(encoding="utf-8"))
             process = psutil.Process(state["pid"])
             (state_directory / "sbk-dashboard.json").write_bytes(b"\xffnot-json")
             try:
@@ -560,9 +737,7 @@ class LauncherScriptTest(unittest.TestCase):
             combined = "\n".join(output for output, _error in outputs)
             self.assertEqual(1, combined.count("Started SBK Dashboard"))
             self.assertEqual(1, combined.count("already running"))
-            state = json.loads(
-                (state_directory / "sbk-dashboard-19723.json").read_text(encoding="utf-8")
-            )
+            state = json.loads((state_directory / "sbk-dashboard-19723.json").read_text(encoding="utf-8"))
             launcher = psutil.Process(state["pid"])
             try:
                 subprocess.run(

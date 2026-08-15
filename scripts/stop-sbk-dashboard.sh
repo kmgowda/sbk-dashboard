@@ -2,7 +2,6 @@
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
 
 if [ -n "${VIRTUAL_ENV:-}" ]; then
     PYTHON="$VIRTUAL_ENV/bin/python"
@@ -10,9 +9,6 @@ if [ -n "${VIRTUAL_ENV:-}" ]; then
 elif [ -n "${CONDA_PREFIX:-}" ]; then
     PYTHON="$CONDA_PREFIX/bin/python"
     ENVIRONMENT="active Conda environment $CONDA_PREFIX"
-elif [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
-    PYTHON="$PROJECT_DIR/.venv/bin/python"
-    ENVIRONMENT="project virtual environment $PROJECT_DIR/.venv"
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON=$(command -v python3)
     ENVIRONMENT="Python on PATH"
@@ -34,4 +30,4 @@ if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10)
     exit 1
 fi
 
-exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_launcher.py" stop "$@"
+exec "$PYTHON" "$SCRIPT_DIR/sbk_dashboard_bootstrap.py" stop "$@"

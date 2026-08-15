@@ -63,13 +63,17 @@ creates the guardian's kill-on-close Job Object before the native process is res
 - Grafana reopens its state database and reprovisions dashboard files.
 - A down exporter changes endpoint status but does not prevent startup or erase historical data.
 
-## Runtime data layout
+## Portable home and runtime data layout
 
-The management-port 9721 default data root is `~/.sbk-dashboard`; non-default management ports use
-`~/.sbk-dashboard/instances/<port>`. Tests must override it:
+The portable home defaults to `~/.sbk-dashboard` and can be relocated with `SBK_DASHBOARD_HOME`. It owns source-
+bootstrap runtimes, shared caches, launcher state/logs, and the default-port data root. Non-default management ports
+use `<home>/instances/<port>`. Tests must override it:
 
 ```text
-<data>/
+<home>/
+|-- app/                          # immutable source runtimes and active-environment markers
+|-- cache/pip/                    # shared Python package cache
+|-- launcher/                     # installation locks, state, background logs
 |-- targets.json
 |-- dashboard-mappings.json
 |-- downloads/
@@ -299,6 +303,7 @@ Review changes in this order:
 - `docs/ARCHITECTURE.md`: design decisions and invariants.
 - `docs/TESTING.md`: executable validation procedures.
 - `docs/USAGE.md`: operator installation, environment, endpoint, backup, upgrade, and troubleshooting procedures.
+- `docs/PORTABLE.md`: source bootstrap, standalone bundles, cache layout, repair, and platform coverage.
 - `docs/INTERNALS.md`: implementation-level call paths, locks, processes, persistence formats, and failure boundaries.
 - `docs/MIGRATION.md`: compatibility and upgrade behavior.
 - `SBK.md`: benchmark/exporter integration and endpoint examples.
