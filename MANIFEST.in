@@ -4,6 +4,12 @@ include scripts/Stop-SbkDashboard.ps1
 include scripts/docker_safe_extract.py
 include scripts/sbk_dashboard_bootstrap.py
 include scripts/sbk_dashboard_launcher.py
+include scripts/sbk_dashboard_portable_entry.py
+include scripts/build_portable.py
 include scripts/start-sbk-dashboard.sh
 include scripts/start-sbk-dashboard-background.sh
 include scripts/stop-sbk-dashboard.sh
+include sbk-dashboard
+include sbk-dashboard.ps1
+include sbk-dashboard.cmd
+recursive-include docs *.md

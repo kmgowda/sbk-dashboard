@@ -64,6 +64,24 @@ class ConfigurationTest(unittest.TestCase):
             config.dashboard.data_directory,
         )
 
+    def test_portable_home_controls_default_data_without_overriding_explicit_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "portable"
+            default = parse_configuration([], {"SBK_DASHBOARD_HOME": str(home)})
+            instance = parse_configuration(["-port", "19721"], {"SBK_DASHBOARD_HOME": str(home)})
+            explicit = parse_configuration(
+                ["-data", str(Path(temporary) / "explicit")],
+                {"SBK_DASHBOARD_HOME": str(home)},
+            )
+            self.assertEqual(home.resolve(), default.dashboard.data_directory)
+            self.assertEqual("environment SBK_DASHBOARD_HOME", default.dashboard.sources["data"])
+            self.assertEqual((home / "instances" / "19721").resolve(), instance.dashboard.data_directory)
+            self.assertEqual((Path(temporary) / "explicit").resolve(), explicit.dashboard.data_directory)
+            self.assertEqual((home / "downloads").resolve(), explicit.downloads.download_directory)
+            self.assertEqual((home / "tools").resolve(), explicit.downloads.install_directory)
+        with self.assertRaisesRegex(ValueError, "dedicated subdirectory"):
+            parse_configuration([], {"SBK_DASHBOARD_HOME": str(Path.home())})
+
     def test_explicit_data_directory_remains_authoritative_on_nondefault_port(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = parse_configuration(

@@ -248,7 +248,13 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     selected_log_level = log_level.upper()
     if selected_log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ValueError("log level must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
-    default_data = Path.home() / ".sbk-dashboard"
+    configured_home = environment.get("SBK_DASHBOARD_HOME", "").strip()
+    if configured_home:
+        default_data = Path(configured_home).expanduser().resolve()
+        if default_data == Path(default_data.anchor) or default_data == Path.home().resolve():
+            raise ValueError("SBK_DASHBOARD_HOME must be a dedicated subdirectory, not a filesystem or home root")
+    else:
+        default_data = Path.home() / ".sbk-dashboard"
     if port != DEFAULT_PORT:
         default_data = default_data / "instances" / str(port)
     data, data_source = _select(
@@ -257,6 +263,8 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         "SBK_DASHBOARD_DATA_DIR",
         str(default_data),
     )
+    if data_source == "default" and configured_home:
+        data_source = "environment SBK_DASHBOARD_HOME"
     retention, retention_source = _select(namespace.retention, environment,
                                            "SBK_DASHBOARD_DISK_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
     scrape, scrape_source = _select(None, environment, "SBK_DASHBOARD_SCRAPE_SECONDS", "5")
@@ -445,8 +453,13 @@ def load_download_config(option: str | None, data_directory: Path, environment: 
                 if legacy in overrides and selected not in overrides:
                     properties[selected] = overrides[legacy]
         source = str(external)
+    portable_home = environment.get("SBK_DASHBOARD_HOME", "").strip()
     variables = {
-        "data.directory": str(data_directory.resolve()), "user.home": str(Path.home()),
+        "data.directory": str(data_directory.resolve()),
+        "portable.home": str(
+            Path(portable_home).expanduser().resolve() if portable_home else data_directory.resolve()
+        ),
+        "user.home": str(Path.home()),
         "os.arch": selected_platform.architecture, "os.name": selected_platform.operating_system,
     }
 

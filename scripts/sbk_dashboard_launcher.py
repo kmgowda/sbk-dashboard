@@ -45,9 +45,14 @@ def state_directory() -> Path:
     override = os.environ.get("SBK_DASHBOARD_LAUNCHER_DIR")
     if override:
         return Path(override).expanduser().resolve()
+    portable_home = os.environ.get("SBK_DASHBOARD_HOME", "").strip()
+    if portable_home:
+        return Path(portable_home).expanduser().resolve() / "launcher"
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home())
-        return base / "SBK Dashboard" / "launcher"
+        legacy = base / "SBK Dashboard" / "launcher"
+        if legacy.exists():
+            return legacy
     return Path.home() / ".sbk-dashboard" / "launcher"
 
 

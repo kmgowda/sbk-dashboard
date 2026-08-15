@@ -140,8 +140,10 @@ display name, and SBK/SBM kind returns the existing endpoint and dashboard rathe
 error. The initial API request returns HTTP 201 and repeats return HTTP 200. Existing endpoint IDs and persisted
 registrations are unchanged; conflicting metadata for an existing `host:port` is still rejected.
 
-Source-archive start scripts now require only Python 3.10 or newer with venv support. They continue to prefer an
-active venv, active Conda environment, and existing project `.venv`, but now create the project `.venv` when no
-environment is available and install missing pip, `sbk-dashboard`, and `psutil` before launch. This may modify the
-selected active environment and may require package-index access. The installed console command and stop scripts do
-not auto-install, and no application data or endpoint migration is involved.
+Portable startup replaces the checkout-local `.venv` fallback. Source scripts require only Python 3.10+ with venv,
+reuse an active venv/Conda environment when present, and otherwise create an immutable runtime below
+`~/.sbk-dashboard/app/<version>/<platform>/<source-fingerprint>`. Shared package downloads, native archives/tools,
+launcher state, logs, and default data live beneath the same home; `SBK_DASHBOARD_HOME` relocates it.
+`SBK_DASHBOARD_DATA_DIR` and `SBK_DASHBOARD_LAUNCHER_DIR` remain authoritative, and existing data needs no migration.
+GitHub releases also provide frozen Linux AMD64, macOS Apple-silicon, and Windows AMD64 executables without a Python
+prerequisite.

@@ -63,6 +63,8 @@ Documentation map:
 
 - [Usage guide](docs/USAGE.md): environment activation/deactivation, daily operation, endpoints, backup, upgrades,
   and troubleshooting.
+- [Portable installation](docs/PORTABLE.md): one-command source startup, standalone release bundles, cache layout,
+  repair, and platform coverage.
 - [SBK and PrometheusLogger guide](docs/SBK.md): direct and distributed benchmark exporters, registration,
   networking, verification, and troubleshooting.
 - [Architecture](docs/ARCHITECTURE.md): system boundaries, lifecycle, concurrency, persistence, and design decisions.
@@ -75,11 +77,36 @@ Documentation map:
 
 ## Requirements
 
-- Python 3.10 or newer
-- `pip` for a venv installation, or Conda
-- Network access on the first run if Prometheus or Grafana is not installed
+- A standalone release bundle needs no separately installed Python.
+- A cloned repository or source archive needs Python 3.10 or newer with its `venv` module; pip is bootstrapped.
+- An activated venv or Conda environment is reused when present.
+- Network access is needed on the first source start when packages, Prometheus, or Grafana are not cached.
 
-The only runtime Python dependency is `psutil`, used for cross-platform process and listener ownership checks.
+The bootstrap installs the only runtime Python dependency, `psutil`, automatically.
+
+## Run immediately after clone or download
+
+From a source checkout or extracted source archive, use the root entry point. It creates an immutable private
+runtime under `~/.sbk-dashboard` when no environment is active, then reuses it on later starts:
+
+```bash
+./sbk-dashboard
+./sbk-dashboard background
+./sbk-dashboard stop
+```
+
+```powershell
+.\sbk-dashboard.ps1
+.\sbk-dashboard.ps1 background
+.\sbk-dashboard.ps1 stop
+```
+
+Windows Command Prompt can use `sbk-dashboard.cmd`. Use `repair` to rebuild the selected runtime. Set
+`SBK_DASHBOARD_HOME` before the first start to relocate packages, caches, native tools, data, state, and logs.
+
+GitHub releases also provide standalone Linux AMD64, macOS Apple-silicon, and Windows AMD64 archives. Extract the
+matching archive and run its `sbk-dashboard` executable; these bundles need no system Python. Verify the adjacent
+`.sha256` file first. See [portable installation](docs/PORTABLE.md).
 
 ## Start with Docker Compose
 
@@ -216,10 +243,9 @@ custom `-data` directory, or a Docker volume. See the [usage guide](docs/USAGE.m
 sbk-dashboard
 ```
 
-Cross-platform launchers reuse an active venv or Conda environment, otherwise prefer or create the project `.venv`,
-and pass every additional dashboard option through unchanged and in the same order. Python 3.10 or newer is the
-only prerequisite: when `sbk-dashboard` or `psutil` is missing, the start scripts install the project and its runtime
-dependencies into the selected environment automatically. The default start script stays in the foreground and
+Cross-platform launchers reuse an active venv or Conda environment. Otherwise they create or reuse a checkout-
+fingerprinted private venv beneath `~/.sbk-dashboard/app/<version>/<platform>/`; they do not require a project
+`.venv`. Every dashboard option is passed through unchanged. The default start script stays in the foreground and
 prints application logs to the console:
 
 ```bash
@@ -353,6 +379,7 @@ Command-line values override environment variables, which override built-in defa
 
 | Environment variable | Purpose |
 |---|---|
+| `SBK_DASHBOARD_HOME` | Portable runtime/cache/state root and default data root; default `~/.sbk-dashboard` |
 | `SBK_DASHBOARD_DATA_DIR` | Fallback for `-data` |
 | `SBK_DASHBOARD_BIND` | Fallback for `-bind`; default `0.0.0.0` |
 | `SBK_DASHBOARD_DISK_RETENTION_DAYS` | Fallback for `-retention` |
@@ -396,8 +423,10 @@ layouts, and executable names for:
 - `macos-x86_64` and `macos-arm64`
 - `windows-x86_64` and `windows-arm64`
 
-Missing tools are downloaded to `${data.directory}/downloads`, checksum-verified, safely extracted, and installed
-under `${data.directory}/tools`. Each response is bounded by `download.max.bytes`, including downloads without a
+Portable startup downloads missing tools to `<SBK_DASHBOARD_HOME>/downloads`, checksum-verifies, safely extracts,
+and installs under `<SBK_DASHBOARD_HOME>/tools`, sharing them across port-isolated instances. Without the portable
+home environment, direct console installations retain `${data.directory}/downloads` and `${data.directory}/tools`.
+Each response is bounded by `download.max.bytes`, including downloads without a
 `Content-Length`. Cached verified archives are reused. TAR.GZ and ZIP traversal, links, and special entries are
 rejected. When the official `promtool` is available beside Prometheus, each generated `prometheus.yml` is validated
 with `promtool check config` before the native services start.
@@ -586,7 +615,7 @@ Code-level component ownership and call paths are documented separately in
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests scripts
-mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
+mypy
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest

@@ -8,15 +8,42 @@ upgrades, and common operational checks. See [`ARCHITECTURE.md`](ARCHITECTURE.md
 
 | Deployment | Best fit | Prometheus and Grafana |
 |---|---|---|
+| Standalone archive | Download, extract, and run without system Python | Native child processes on that host |
+| Source bootstrap | Clone/extract and run with only Python 3.10+ | Native child processes on that host |
 | Python venv | Direct host installation with isolated Python packages | Native child processes on that host |
 | Conda | Existing Conda-based operations or development workflow | Native child processes on that host |
 | Docker/Compose | Reproducible Linux image and named-volume persistence | Native child processes in the same container |
 
-All three modes run the same control plane and one Prometheus/Grafana pair. Docker is packaging, not a distributed
+All modes run the same control plane and one Prometheus/Grafana pair. Docker is packaging, not a distributed
 service topology.
 
 Production Compose pulls the prebuilt pinned image, so starting the service does not compile Python or separately
 download Prometheus/Grafana. `compose.dev.yaml` is used only when deliberately building the same image from source.
+
+## Portable first start
+
+The root `sbk-dashboard` (Linux/macOS), `sbk-dashboard.ps1` (PowerShell), and `sbk-dashboard.cmd` (Command Prompt)
+are the recommended source-checkout entry points. With no active venv or Conda environment they require only Python
+3.10+ with `venv`, create a private immutable runtime, install the current checkout, and launch. Later starts reuse
+the validated runtime and pip cache:
+
+```bash
+./sbk-dashboard --help
+./sbk-dashboard background -port 19721
+./sbk-dashboard stop -port 19721
+./sbk-dashboard repair
+```
+
+```powershell
+.\sbk-dashboard.ps1 --help
+.\sbk-dashboard.ps1 background -port 19721
+.\sbk-dashboard.ps1 stop -port 19721
+.\sbk-dashboard.ps1 repair
+```
+
+Standalone release archives contain a frozen `sbk-dashboard` executable and need no system Python. They start in
+the foreground and accept normal application options. See [`PORTABLE.md`](PORTABLE.md) for verification, platform
+coverage, private-home layout, offline behavior, and recovery.
 
 ## Python venv lifecycle
 
@@ -131,14 +158,14 @@ SSH, service, CI, and headless sessions intentionally skip browser launch. Open 
 
 ## Start and stop scripts
 
-The repository and source archive include foreground, background, and stop scripts for direct host installations.
+The repository and source archive include a root dispatcher plus foreground, background, and stop scripts.
 They are not installed by the wheel; a wheel installation always provides the `sbk-dashboard` console command.
-The helper scripts select Python in this order: an active virtual environment, an active Conda environment, the
-repository's `.venv`, and finally Python on `PATH`. An active environment is reused. If no environment is active and
-the repository `.venv` does not contain an executable Python, a supported Python on `PATH` creates or repairs it.
-When `sbk-dashboard`, `psutil`, or pip is missing, the start scripts install pip where possible and then install the
-project plus its runtime dependencies into the selected environment. Dependency installation may require access to
-the configured Python package index. The stop script uses the already prepared environment and never installs.
+The helper scripts select Python in this order: an active virtual environment, an active Conda environment, then
+Python on `PATH`. An active environment is reused and prepared once per checkout fingerprint. Without an active
+environment, supported Python creates a private runtime under `SBK_DASHBOARD_HOME`; no repository `.venv` is
+created. Missing pip, `sbk-dashboard`, and `psutil` are installed before launcher acquisition. Dependency
+installation may require access to the configured Python package index. The stop command prepares the same runtime
+when necessary, allowing a fresh command set to locate launcher ownership consistently.
 
 Before starting, the scripts print the selected Python executable and environment, require Python 3.10 or newer,
 prepare missing dependencies, import `sbk-dashboard`, and print its detected version. A missing or outdated Python,
@@ -217,8 +244,9 @@ With no options, the stop script stops all launcher-managed foreground and backg
 records the port, mode, PID, and process creation time, so a reused PID cannot identify an unrelated process. The
 stop helper does not search by process name or terminate an unrelated manually started dashboard.
 
-Launcher state defaults to `~/.sbk-dashboard/launcher` on Linux/macOS and
-`%LOCALAPPDATA%\SBK Dashboard\launcher` on Windows. Set `SBK_DASHBOARD_LAUNCHER_DIR` to override that location.
+Launcher state defaults to `<SBK_DASHBOARD_HOME>/launcher` on every platform, where the home defaults to
+`~/.sbk-dashboard`. A pre-existing legacy Windows `%LOCALAPPDATA%\SBK Dashboard\launcher` is still recognized when
+the portable home is not selected explicitly. Set `SBK_DASHBOARD_LAUNCHER_DIR` to override only state/log location.
 Foreground logs are printed directly on the current console. The background launcher drains output continuously to
 `sbk-dashboard.log` for the default port and `sbk-dashboard-<port>.log` for other ports in that directory, rotating
 each log at 10 MiB with three backups. Default-port state remains `sbk-dashboard.json`; other instances use

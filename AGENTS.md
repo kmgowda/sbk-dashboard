@@ -129,8 +129,10 @@ runtime data as source material.
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
-| `scripts/sbk_dashboard_bootstrap.py` | Dependency-free venv creation and application dependency installation |
+| `scripts/sbk_dashboard_bootstrap.py` | Private-home runtime locking, caching, repair, and environment preparation |
 | `scripts/sbk_dashboard_launcher.py` | Cross-platform foreground/background ownership, logs, and selective stop |
+| `scripts/build_portable.py`, `scripts/sbk_dashboard_portable_entry.py` | Frozen archive construction and entry dispatch |
+| `sbk-dashboard`, `sbk-dashboard.ps1`, `sbk-dashboard.cmd` | Root source-checkout command dispatchers |
 | `Dockerfile`, `compose.yaml`, `compose.dev.yaml` | Non-root release image, production deployment, development build override |
 | `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |
@@ -158,7 +160,7 @@ Run the fast required checks after every code change:
 
 ```bash
 ruff check src tests scripts
-mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
+mypy
 PYTHONPATH=src python -W error::ResourceWarning -m unittest discover -s tests -q
 git diff --check
 ```

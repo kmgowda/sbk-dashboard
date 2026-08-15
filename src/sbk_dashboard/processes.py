@@ -801,10 +801,13 @@ class ManagedNativeService:
         )
         guardian_state.unlink(missing_ok=True)
         parent_started = psutil.Process(os.getpid()).create_time()
+        guardian_entry = (
+            [sys.executable, "--internal-guardian"]
+            if getattr(sys, "frozen", False)
+            else [sys.executable, "-m", "sbk_dashboard.guardian"]
+        )
         guardian_command = [
-            sys.executable,
-            "-m",
-            "sbk_dashboard.guardian",
+            *guardian_entry,
             "--parent-pid",
             str(os.getpid()),
             "--parent-started",

@@ -1,6 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $ScriptDirectory = $PSScriptRoot
-$ProjectDirectory = Split-Path -Parent $ScriptDirectory
 $DashboardArguments = @($args)
 $PythonArguments = @()
 
@@ -10,9 +9,6 @@ if ($env:VIRTUAL_ENV) {
 } elseif ($env:CONDA_PREFIX) {
     $Python = Join-Path $env:CONDA_PREFIX 'python.exe'
     $EnvironmentDescription = "active Conda environment $env:CONDA_PREFIX"
-} elseif (Test-Path -LiteralPath (Join-Path $ProjectDirectory '.venv\Scripts\python.exe')) {
-    $Python = Join-Path $ProjectDirectory '.venv\Scripts\python.exe'
-    $EnvironmentDescription = "project virtual environment $(Join-Path $ProjectDirectory '.venv')"
 } else {
     $PythonCommand = Get-Command py -ErrorAction SilentlyContinue
     if (-not $PythonCommand) {

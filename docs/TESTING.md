@@ -7,7 +7,7 @@ Create either supported development environment and execute:
 ```bash
 python -m pip install -e ".[dev]"
 ruff check src tests scripts
-mypy src scripts/sbk_dashboard_bootstrap.py scripts/sbk_dashboard_launcher.py
+mypy
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
@@ -233,9 +233,16 @@ page, and confirm both named series remain live in representative throughput, la
 
 ## venv and Conda checks
 
-Launcher bootstrap tests verify active venv/Conda precedence, project `.venv` creation when only Python is present,
-automatic installation when `psutil` or `sbk-dashboard` is missing, pip bootstrapping, argument preservation, and
-failure before launcher acquisition when environment preparation cannot complete.
+Launcher bootstrap tests verify active venv/Conda precedence, private-home runtime selection when only Python is
+present, deterministic source fingerprints, bounded stale-lock recovery, automatic installation when `psutil` or
+`sbk-dashboard` is missing, pip bootstrapping, argument preservation, and failure before launcher acquisition when
+environment preparation cannot complete. Portable-builder tests verify archive naming, internal manifests,
+external SHA-256 files, and frozen guardian dispatch.
+
+For a clean source-bootstrap smoke test, set `SBK_DASHBOARD_HOME` to a unique temporary directory, remove
+`VIRTUAL_ENV`/`CONDA_PREFIX` from that test process, and run `./sbk-dashboard --help` twice. Confirm the first start
+creates one runtime and the second performs no installation. Remove only that exact test home after confirming no
+launcher/native process remains.
 
 Validate both installers rather than assuming their activation semantics are equivalent:
 

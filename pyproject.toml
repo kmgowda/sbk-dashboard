@@ -70,7 +70,13 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 
 [tool.mypy]
 python_version = "3.10"
-files = ["src", "scripts/sbk_dashboard_bootstrap.py", "scripts/sbk_dashboard_launcher.py"]
+files = [
+  "src",
+  "scripts/build_portable.py",
+  "scripts/sbk_dashboard_bootstrap.py",
+  "scripts/sbk_dashboard_launcher.py",
+  "scripts/sbk_dashboard_portable_entry.py",
+]
 check_untyped_defs = true
 disallow_untyped_defs = true
 no_implicit_optional = true
