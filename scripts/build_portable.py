@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -85,7 +84,7 @@ def build_bundle(output_directory: Path) -> Path:
             json.dumps({"version": version, "platform": target, "files": files}, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        if os.name == "nt":
+        if target.startswith("windows-"):
             archive = output_directory / f"{bundle_name}.zip"
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
                 for path in sorted(bundle.rglob("*")):
