@@ -171,11 +171,11 @@ class PortableReleaseTest(unittest.TestCase):
             installer = build_portable.ROOT / "sbk-dashboard"
             first = subprocess.run(
                 [str(installer), "-name", "Dashboard with spaces"],
-                check=True,
                 capture_output=True,
                 text=True,
                 env=environment,
             )
+            self.assertEqual(0, first.returncode, first.stdout + first.stderr)
             self.assertIn("Preparing standalone", first.stdout)
             self.assertEqual(
                 [str(home), "foreground", "-name", "Dashboard with spaces"],
@@ -184,11 +184,11 @@ class PortableReleaseTest(unittest.TestCase):
             shutil.rmtree(release)
             second = subprocess.run(
                 [str(installer), "stop", "-port", "19721"],
-                check=True,
                 capture_output=True,
                 text=True,
                 env=environment,
             )
+            self.assertEqual(0, second.returncode, second.stdout + second.stderr)
             self.assertNotIn("Preparing standalone", second.stdout)
             self.assertEqual(
                 [str(home), "stop", "-port", "19721"],

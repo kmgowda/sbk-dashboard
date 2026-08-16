@@ -95,7 +95,7 @@ download() {
             DOWNLOAD_SOURCE=${1#file://}
             DOWNLOAD_BYTES=$(wc -c <"$DOWNLOAD_SOURCE" | tr -d ' ')
             [ "$DOWNLOAD_BYTES" -le "$DOWNLOAD_LIMIT" ] || return 1
-            cp -- "$DOWNLOAD_SOURCE" "$2"
+            cp "$DOWNLOAD_SOURCE" "$2"
             return
             ;;
     esac
@@ -113,23 +113,23 @@ download() {
 
 release_lock() {
     if [ "$LOCK_OWNED" = true ] && [ -d "$LOCK_DIRECTORY" ]; then
-        rm -f -- "$LOCK_DIRECTORY/pid"
-        rmdir -- "$LOCK_DIRECTORY" 2>/dev/null || true
+        rm -f "$LOCK_DIRECTORY/pid"
+        rmdir "$LOCK_DIRECTORY" 2>/dev/null || true
         LOCK_OWNED=false
     fi
 }
 cleanup() {
-    [ -z "$CHECKSUM_PART" ] || rm -f -- "$CHECKSUM_PART"
-    [ -z "$ARCHIVE_PART" ] || rm -f -- "$ARCHIVE_PART"
-    [ -z "$LISTING" ] || rm -f -- "$LISTING"
-    [ -z "$STAGING" ] || rm -rf -- "$STAGING"
+    [ -z "$CHECKSUM_PART" ] || rm -f "$CHECKSUM_PART"
+    [ -z "$ARCHIVE_PART" ] || rm -f "$ARCHIVE_PART"
+    [ -z "$LISTING" ] || rm -f "$LISTING"
+    [ -z "$STAGING" ] || rm -rf "$STAGING"
     release_lock
 }
 trap cleanup EXIT HUP INT TERM
 
-mkdir -p -- "$CACHE_DIRECTORY" "$INSTALL_PARENT" "$(dirname -- "$LOCK_DIRECTORY")"
+mkdir -p "$CACHE_DIRECTORY" "$INSTALL_PARENT" "$(dirname -- "$LOCK_DIRECTORY")"
 waited=0
-while ! mkdir -- "$LOCK_DIRECTORY" 2>/dev/null; do
+while ! mkdir "$LOCK_DIRECTORY" 2>/dev/null; do
     owner=
     started=
     [ ! -f "$LOCK_DIRECTORY/pid" ] || owner=$(sed -n '1p' "$LOCK_DIRECTORY/pid" 2>/dev/null || true)
@@ -143,8 +143,8 @@ while ! mkdir -- "$LOCK_DIRECTORY" 2>/dev/null; do
                     *)
                         now=$(date +%s)
                         if [ $((now - started)) -ge "$LOCK_STALE_SECONDS" ]; then
-                            rm -f -- "$LOCK_DIRECTORY/pid"
-                            rmdir -- "$LOCK_DIRECTORY" 2>/dev/null || true
+                            rm -f "$LOCK_DIRECTORY/pid"
+                            rmdir "$LOCK_DIRECTORY" 2>/dev/null || true
                             continue
                         fi
                         ;;
@@ -172,8 +172,8 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
     ARCHIVE="$CACHE_DIRECTORY/$ARCHIVE_NAME"
     STAGING="$INSTALL_PARENT/.staging-$ARCHIVE_NAME-$$"
     LISTING="$CACHE_DIRECTORY/$ARCHIVE_NAME.listing-$$"
-    rm -f -- "$CHECKSUM_PART" "$ARCHIVE_PART"
-    rm -rf -- "$STAGING"
+    rm -f "$CHECKSUM_PART" "$ARCHIVE_PART"
+    rm -rf "$STAGING"
     echo "Preparing standalone SBK Dashboard $VERSION for $PLATFORM_ID."
     download "$BASE_URL/$ARCHIVE_NAME.sha256" "$CHECKSUM_PART" "$MAXIMUM_CHECKSUM_BYTES"
     EXPECTED=$(awk 'NR == 1 {print $1}' "$CHECKSUM_PART")
@@ -188,7 +188,7 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
         }
         ACTUAL=$(sha256_file "$ARCHIVE_PART")
         [ "$ACTUAL" = "$EXPECTED" ] || { echo "Checksum verification failed for $ARCHIVE_NAME." >&2; exit 1; }
-        mv -- "$ARCHIVE_PART" "$ARCHIVE"
+        mv "$ARCHIVE_PART" "$ARCHIVE"
     fi
     if ! tar -tzf "$ARCHIVE" >"$LISTING" 2>/dev/null; then
         echo "Unsafe or unreadable archive $ARCHIVE_NAME." >&2
@@ -206,24 +206,24 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
         echo "Links are not allowed in $ARCHIVE_NAME." >&2
         exit 1
     fi
-    mkdir -p -- "$STAGING"
+    mkdir -p "$STAGING"
     tar -xzf "$ARCHIVE" -C "$STAGING"
     [ -f "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard" ] || {
         echo "The portable archive does not contain the expected executable." >&2
         exit 1
     }
-    chmod +x -- "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard"
+    chmod +x "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard"
     EXECUTABLE_SHA256=$(sha256_file "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard")
     printf '%s\n%s\n' "$EXPECTED" "$EXECUTABLE_SHA256" >"$STAGING/.installed-sha256"
     if [ -d "$INSTALL_DIRECTORY" ]; then
         BACKUP="$INSTALL_PARENT/.backup-$ARCHIVE_NAME-$$"
-        mv -- "$INSTALL_DIRECTORY" "$BACKUP"
+        mv "$INSTALL_DIRECTORY" "$BACKUP"
     fi
-    if ! mv -- "$STAGING" "$INSTALL_DIRECTORY"; then
-        [ -z "$BACKUP" ] || mv -- "$BACKUP" "$INSTALL_DIRECTORY"
+    if ! mv "$STAGING" "$INSTALL_DIRECTORY"; then
+        [ -z "$BACKUP" ] || mv "$BACKUP" "$INSTALL_DIRECTORY"
         exit 1
     fi
-    rm -f -- "$CHECKSUM_PART"
+    rm -f "$CHECKSUM_PART"
     CHECKSUM_PART=
     ARCHIVE_PART=
     STAGING=
@@ -231,7 +231,7 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
 fi
 
 if [ -n "$BACKUP" ]; then
-    rm -rf -- "$BACKUP"
+    rm -rf "$BACKUP"
 fi
 cleanup
 trap - EXIT HUP INT TERM
