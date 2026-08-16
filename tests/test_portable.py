@@ -196,7 +196,7 @@ class PortableReleaseTest(unittest.TestCase):
             )
 
     @unittest.skipUnless(os.name == "posix" and platform.system() in {"Linux", "Darwin"}, "POSIX portable smoke")
-    def test_python_free_installer_rejects_checksum_and_traversal_failures(self):
+    def test_python_free_installer_rejects_checksum_traversal_and_special_files(self):
         version = build_portable.application_version()
         system_id = "linux" if platform.system() == "Linux" else "macos"
         architecture = "amd64" if platform.machine().lower() in {"x86_64", "amd64"} else "arm64"
@@ -238,6 +238,30 @@ class PortableReleaseTest(unittest.TestCase):
             self.assertNotEqual(0, failed.returncode)
             self.assertIn("Unsafe", failed.stderr)
             self.assertFalse((root / "escape").exists())
+
+            with tarfile.open(archive, "w:gz") as output:
+                entry = tarfile.TarInfo(
+                    f"sbk-dashboard-{version}-{platform_id}/unsupported-fifo"
+                )
+                entry.type = tarfile.FIFOTYPE
+                output.addfile(entry)
+            checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+            (release / f"{archive_name}.sha256").write_text(
+                f"{checksum}  {archive_name}\n", encoding="utf-8"
+            )
+            environment["SBK_DASHBOARD_HOME"] = str(root / "special-file-home")
+            failed = subprocess.run(
+                [str(installer), "foreground"], capture_output=True, text=True, env=environment
+            )
+            self.assertNotEqual(0, failed.returncode)
+            self.assertIn("Only regular files and directories", failed.stderr)
+
+            environment.update({"HOME": str(root / "user-home"), "SBK_DASHBOARD_HOME": "~"})
+            failed = subprocess.run(
+                [str(installer), "foreground"], capture_output=True, text=True, env=environment
+            )
+            self.assertNotEqual(0, failed.returncode)
+            self.assertIn("dedicated subdirectory", failed.stderr)
 
     def test_windows_target_always_creates_zip_archive(self):
         with (
@@ -287,12 +311,14 @@ class PortableReleaseTest(unittest.TestCase):
         self.assertIn("Install-SbkDashboardPortable.ps1", powershell)
         self.assertIn("SBK_DASHBOARD_PORTABLE_BASE_URL", unix_installer)
         self.assertIn("portable-bootstrap.properties", unix_installer)
-        self.assertIn("SBK_DASHBOARD_PORTABLE_BASE_URL", (
+        powershell_installer = (
             build_portable.ROOT / "scripts/Install-SbkDashboardPortable.ps1"
-        ).read_text(encoding="utf-8"))
-        self.assertIn("portable-bootstrap.properties", (
-            build_portable.ROOT / "scripts/Install-SbkDashboardPortable.ps1"
-        ).read_text(encoding="utf-8"))
+        ).read_text(encoding="utf-8")
+        self.assertIn("SBK_DASHBOARD_PORTABLE_BASE_URL", powershell_installer)
+        self.assertIn("portable-bootstrap.properties", powershell_installer)
+        self.assertIn("$HomeValue -eq '~'", powershell_installer)
+        self.assertIn("$HomeValue -split '[\\\\/]'", powershell_installer)
+        self.assertIn("$UnixType -notin @(0, 0x4000, 0x8000)", powershell_installer)
 
 
 if __name__ == "__main__":

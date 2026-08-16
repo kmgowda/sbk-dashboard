@@ -41,6 +41,7 @@ PLATFORM_ID="$OS_ID-$ARCH_ID"
 if [ -n "${SBK_DASHBOARD_HOME:-}" ]; then
     case "$SBK_DASHBOARD_HOME" in
         /*) PORTABLE_HOME=${SBK_DASHBOARD_HOME%/} ;;
+        \~) PORTABLE_HOME=${HOME:?} ;;
         \~/*) PORTABLE_HOME=${HOME:?}/${SBK_DASHBOARD_HOME#\~/} ;;
         *) PORTABLE_HOME=$PWD/${SBK_DASHBOARD_HOME%/} ;;
     esac
@@ -175,12 +176,18 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
     rm -f "$CHECKSUM_PART" "$ARCHIVE_PART"
     rm -rf "$STAGING"
     echo "Preparing standalone SBK Dashboard $VERSION for $PLATFORM_ID."
-    download "$BASE_URL/$ARCHIVE_NAME.sha256" "$CHECKSUM_PART" "$MAXIMUM_CHECKSUM_BYTES"
+    download "$BASE_URL/$ARCHIVE_NAME.sha256" "$CHECKSUM_PART" "$MAXIMUM_CHECKSUM_BYTES" || {
+        echo "Unable to download the checksum for $ARCHIVE_NAME from $BASE_URL." >&2
+        exit 1
+    }
     EXPECTED=$(awk 'NR == 1 {print $1}' "$CHECKSUM_PART")
     case "$EXPECTED" in *[!0-9a-fA-F]*|'') echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1 ;; esac
     [ "${#EXPECTED}" -eq 64 ] || { echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1; }
     if [ ! -f "$ARCHIVE" ] || [ "$(sha256_file "$ARCHIVE")" != "$EXPECTED" ]; then
-        download "$BASE_URL/$ARCHIVE_NAME" "$ARCHIVE_PART" "$MAXIMUM_ARCHIVE_BYTES"
+        download "$BASE_URL/$ARCHIVE_NAME" "$ARCHIVE_PART" "$MAXIMUM_ARCHIVE_BYTES" || {
+            echo "Unable to download $ARCHIVE_NAME from $BASE_URL." >&2
+            exit 1
+        }
         ARCHIVE_BYTES=$(wc -c <"$ARCHIVE_PART" | tr -d ' ')
         [ "$ARCHIVE_BYTES" -le "$MAXIMUM_ARCHIVE_BYTES" ] || {
             echo "Portable archive exceeds the $MAXIMUM_ARCHIVE_BYTES byte limit." >&2
@@ -202,8 +209,8 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
         echo "Unsafe or unreadable archive $ARCHIVE_NAME." >&2
         exit 1
     fi
-    if awk 'substr($0, 1, 1) == "l" || substr($0, 1, 1) == "h" {exit 1}' "$LISTING"; then :; else
-        echo "Links are not allowed in $ARCHIVE_NAME." >&2
+    if awk 'substr($0, 1, 1) != "-" && substr($0, 1, 1) != "d" {exit 1}' "$LISTING"; then :; else
+        echo "Only regular files and directories are allowed in $ARCHIVE_NAME." >&2
         exit 1
     fi
     mkdir -p "$STAGING"

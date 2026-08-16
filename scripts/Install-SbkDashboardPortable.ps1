@@ -37,10 +37,19 @@ switch ($Architecture) {
 $PlatformId = "windows-$ArchitectureId"
 
 $HomeValue = if ($env:SBK_DASHBOARD_HOME) { $env:SBK_DASHBOARD_HOME } else { Join-Path $HOME '.sbk-dashboard' }
+if ($HomeValue -eq '~') {
+    $HomeValue = $HOME
+} elseif ($HomeValue.StartsWith('~/') -or $HomeValue.StartsWith('~\')) {
+    $HomeValue = Join-Path $HOME $HomeValue.Substring(2)
+}
+$HomeSegments = $HomeValue -split '[\\/]'
+if ($HomeSegments -contains '.' -or $HomeSegments -contains '..') {
+    throw 'SBK_DASHBOARD_HOME must be a dedicated subdirectory without traversal.'
+}
 $PortableHome = [System.IO.Path]::GetFullPath($HomeValue)
 $UserHome = [System.IO.Path]::GetFullPath($HOME).TrimEnd('\')
 if ($PortableHome.TrimEnd('\') -eq $UserHome -or $PortableHome -eq [System.IO.Path]::GetPathRoot($PortableHome)) {
-    throw 'SBK_DASHBOARD_HOME must be a dedicated subdirectory.'
+    throw 'SBK_DASHBOARD_HOME must be a dedicated subdirectory without traversal.'
 }
 
 $ArchiveName = "sbk-dashboard-$Version-$PlatformId.zip"
@@ -192,7 +201,7 @@ try {
                 $Target = [System.IO.Path]::GetFullPath((Join-Path $Staging $Entry.FullName))
                 $UnixType = (($Entry.ExternalAttributes -shr 16) -band 0xF000)
                 if (-not $Target.StartsWith($StagingRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-                    $UnixType -eq 0xA000) {
+                    $UnixType -notin @(0, 0x4000, 0x8000)) {
                     throw "Unsafe archive entry: $($Entry.FullName)"
                 }
             }
