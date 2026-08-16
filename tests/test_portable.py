@@ -151,7 +151,6 @@ class PortableReleaseTest(unittest.TestCase):
                 "rm",
                 "rmdir",
                 "sed",
-                "sha256sum",
                 "sleep",
                 "tar",
                 "tr",
@@ -161,6 +160,13 @@ class PortableReleaseTest(unittest.TestCase):
                 resolved = shutil.which(command)
                 self.assertIsNotNone(resolved, command)
                 (command_directory / command).symlink_to(resolved)
+            checksum_command = next(
+                (command for command in ("sha256sum", "shasum", "openssl") if shutil.which(command)),
+                None,
+            )
+            self.assertIsNotNone(checksum_command)
+            assert checksum_command is not None
+            (command_directory / checksum_command).symlink_to(shutil.which(checksum_command))
             environment["PATH"] = str(command_directory)
             installer = build_portable.ROOT / "sbk-dashboard"
             first = subprocess.run(
