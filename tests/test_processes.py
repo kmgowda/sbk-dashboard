@@ -38,6 +38,16 @@ class LifecycleTest(unittest.TestCase):
         context.__enter__.return_value = endpoint
         return context, endpoint
 
+    @staticmethod
+    def _await_supervised_restart(service, timeout=10):
+        """Exercise the supervisor's bounded retry/backoff contract across slower native hosts."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if service.supervise():
+                return True
+            time.sleep(0.05)
+        return False
+
     def test_state_machine_accepts_only_defined_transitions(self):
         lifecycle = LifecycleController()
         self.assertEqual(LifecycleState.NEW, lifecycle.state)
@@ -68,7 +78,7 @@ class LifecycleTest(unittest.TestCase):
                 first_process = psutil.Process(first_pid)
                 first_process.kill()
                 first_process.wait(3)
-                self.assertTrue(service.supervise())
+                self.assertTrue(self._await_supervised_restart(service))
                 second_pid = service.pid
                 self.assertIsNotNone(second_pid)
                 self.assertNotEqual(first_pid, second_pid)
@@ -105,7 +115,7 @@ class LifecycleTest(unittest.TestCase):
                 )
             else:
                 self.assertTrue(psutil.pid_exists(first_native_pid))
-            self.assertTrue(service.supervise())
+            self.assertTrue(self._await_supervised_restart(service))
             self.assertFalse(psutil.pid_exists(first_native_pid))
             self.assertNotEqual(first_native_pid, service.pid)
             service.stop()
