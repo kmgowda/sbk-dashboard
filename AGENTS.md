@@ -134,6 +134,8 @@ runtime data as source material.
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
 | `src/sbk_dashboard/resources/` | Packaged dashboard, web assets, and download defaults |
 | `scripts/sbk_dashboard_bootstrap.py` | Private-home runtime locking, caching, repair, and environment preparation |
+| `scripts/install-portable.sh`, `scripts/Install-SbkDashboardPortable.ps1` | Python-free verified standalone fallback |
+| `scripts/portable-bootstrap.properties` | Shared dependency-free release URL and bootstrap bounds |
 | `scripts/sbk_dashboard_launcher.py` | Cross-platform foreground/background ownership, logs, and selective stop |
 | `scripts/build_portable.py`, `scripts/sbk_dashboard_portable_entry.py` | Frozen archive construction and entry dispatch |
 | `sbk-dashboard`, `sbk-dashboard.ps1`, `sbk-dashboard.cmd` | Root source-checkout command dispatchers |

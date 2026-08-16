@@ -416,6 +416,20 @@ class LauncherScriptTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "between 1 and 65535"):
             sbk_dashboard_launcher.management_port(["-port", "0"])
 
+    def test_frozen_launcher_reenters_executable_for_children(self):
+        with (
+            patch.object(sbk_dashboard_launcher.sys, "frozen", True, create=True),
+            patch.object(sbk_dashboard_launcher.sys, "executable", "/portable/sbk-dashboard"),
+        ):
+            self.assertEqual(
+                ["/portable/sbk-dashboard", "--internal-launcher", "_watch", "1", "2"],
+                sbk_dashboard_launcher.launcher_command("_watch", "1", "2"),
+            )
+            self.assertEqual(
+                ["/portable/sbk-dashboard", "--internal-dashboard", "-port", "19721"],
+                sbk_dashboard_launcher.dashboard_command(["-port", "19721"]),
+            )
+
     def test_empty_windows_local_app_data_falls_back_to_home(self):
         fallback = Path("C:/Users/tester")
         expected = fallback / ".sbk-dashboard" / "launcher"
@@ -506,6 +520,9 @@ class LauncherScriptTest(unittest.TestCase):
             "python_requirement.py",
             "sbk-dashboard-launch.sh",
             "Invoke-SbkDashboard.ps1",
+            "Install-SbkDashboardPortable.ps1",
+            "install-portable.sh",
+            "portable-bootstrap.properties",
             "build_portable.py",
             "sbk_dashboard_bootstrap.py",
             "sbk_dashboard_launcher.py",

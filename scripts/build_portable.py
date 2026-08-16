@@ -63,6 +63,8 @@ def build_bundle(output_directory: Path) -> Path:
                 "sbk_dashboard",
                 "--hidden-import",
                 "sbk_dashboard.guardian",
+                "--add-data",
+                f"{ROOT / 'scripts' / 'sbk_dashboard_launcher.py'}:.",
                 "--distpath",
                 str(work / "dist"),
                 "--workpath",

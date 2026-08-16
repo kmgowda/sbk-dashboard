@@ -66,13 +66,15 @@ creates the guardian's kill-on-close Job Object before the native process is res
 ## Portable home and runtime data layout
 
 The portable home defaults to `~/.sbk-dashboard` and can be relocated with `SBK_DASHBOARD_HOME`. It owns source-
-bootstrap runtimes, shared caches, launcher state/logs, and the default-port data root. Non-default management ports
+bootstrap and standalone runtimes, shared caches, launcher state/logs, and the default-port data root. Non-default management ports
 use `<home>/instances/<port>`. Tests must override it:
 
 ```text
 <home>/
 |-- app/                          # immutable source runtimes and active-environment markers
 |-- cache/pip/                    # shared Python package cache
+|-- cache/releases/               # verified standalone archives
+|-- distributions/                # atomically promoted standalone runtimes
 |-- launcher/                     # installation locks, state, background logs
 |-- targets.json
 |-- dashboard-mappings.json

@@ -75,6 +75,20 @@ WATCH_INTERVAL_SECONDS = 0.25
 FORCE_CLEANUP_SECONDS = 10.0
 
 
+def launcher_command(mode: str, *arguments: str) -> list[str]:
+    """Build a source or frozen command that re-enters this launcher."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--internal-launcher", mode, *arguments]
+    return [sys.executable, str(Path(__file__).resolve()), mode, *arguments]
+
+
+def dashboard_command(arguments: list[str]) -> list[str]:
+    """Build a source or frozen command that starts the application child."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--internal-dashboard", *arguments]
+    return [sys.executable, "-m", "sbk_dashboard", *arguments]
+
+
 def state_directory() -> Path:
     override = os.environ.get(LAUNCHER_DIRECTORY_ENVIRONMENT)
     if override:
@@ -387,16 +401,14 @@ def start_background(arguments: list[str]) -> int:
     started_marker = directory / f"startup-{startup_id}.started"
     try:
         child = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
+            launcher_command(
                 "_run",
                 str(parent.pid),
                 str(parent.create_time()),
                 str(marker),
                 str(started_marker),
                 *arguments,
-            ],
+            ),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -637,7 +649,7 @@ def run_dashboard(
     exit_code = 1
     try:
         child = subprocess.Popen(
-            [sys.executable, "-m", "sbk_dashboard", *arguments],
+            dashboard_command(arguments),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -652,15 +664,13 @@ def run_dashboard(
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             )
             subprocess.Popen(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
+                launcher_command(
                     "_watch",
                     str(supervisor.pid),
                     str(supervisor_created),
                     str(child_process.pid),
                     str(child_process.create_time()),
-                ],
+                ),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -708,7 +718,7 @@ def request_stop(process: psutil.Process, mode: str, create_time: float) -> None
             for child in process.children(recursive=True):
                 try:
                     command = child.cmdline()
-                    if any(
+                    if "--internal-dashboard" in command or any(
                         command[index] == "-m" and command[index + 1] == "sbk_dashboard"
                         for index in range(len(command) - 1)
                     ):

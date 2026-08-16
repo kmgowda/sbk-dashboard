@@ -9,7 +9,7 @@ upgrades, and common operational checks. See [`ARCHITECTURE.md`](ARCHITECTURE.md
 | Deployment | Best fit | Prometheus and Grafana |
 |---|---|---|
 | Standalone archive | Download, extract, and run without system Python | Native child processes on that host |
-| Source bootstrap | Clone/extract and run with only Python 3.10+ | Native child processes on that host |
+| Source bootstrap | Clone/extract; Python is optional with a matching standalone release | Native child processes on that host |
 | Python venv | Direct host installation with isolated Python packages | Native child processes on that host |
 | Conda | Existing Conda-based operations or development workflow | Native child processes on that host |
 | Docker/Compose | Reproducible Linux image and named-volume persistence | Native child processes in the same container |
@@ -23,9 +23,9 @@ download Prometheus/Grafana. `compose.dev.yaml` is used only when deliberately b
 ## Portable first start
 
 The root `sbk-dashboard` (Linux/macOS), `sbk-dashboard.ps1` (PowerShell), and `sbk-dashboard.cmd` (Command Prompt)
-are the recommended source-checkout entry points. With no active venv or Conda environment they require only Python
-3.10+ with `venv`, create a private immutable runtime, install the current checkout, and launch. Later starts reuse
-the validated runtime and pip cache:
+are the recommended source-checkout entry points. They prefer an active venv/Conda environment, then Python 3.10+
+with `venv`. If supported Python is unavailable, they download and install the exact-version standalone runtime.
+Later starts reuse the validated private venv or frozen runtime and their caches:
 
 ```bash
 ./sbk-dashboard --help
@@ -41,8 +41,8 @@ the validated runtime and pip cache:
 .\sbk-dashboard.ps1 repair
 ```
 
-Standalone release archives contain a frozen `sbk-dashboard` executable and need no system Python. They start in
-the foreground and accept normal application options. See [`PORTABLE.md`](PORTABLE.md) for verification, platform
+Standalone release archives contain a frozen `sbk-dashboard` executable and need no system Python. They support
+foreground/background startup and selective/all-instance stop. See [`PORTABLE.md`](PORTABLE.md) for verification, platform
 coverage, private-home layout, offline behavior, and recovery.
 
 ## Python venv lifecycle
