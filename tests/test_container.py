@@ -14,10 +14,8 @@ from pathlib import Path
 from sbk_dashboard.version import VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_BASE = (
-    "python:3.12.13-slim-trixie@"
-    "sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36"
-)
+PYTHON_BASE_NAME = "python:3.12.13-slim-trixie"
+PYTHON_BASE_DIGEST = "sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36"
 
 
 class ContainerContractTest(unittest.TestCase):
@@ -38,10 +36,15 @@ class ContainerContractTest(unittest.TestCase):
         cls.container_runtime_requirements = (
             ROOT / "requirements/container-runtime.txt"
         ).read_text(encoding="utf-8")
+        cls.container_os_requirements = (ROOT / "requirements/container-os.txt").read_text(
+            encoding="utf-8"
+        )
         cls.trivy_ignore = (ROOT / ".trivyignore.yaml").read_text(encoding="utf-8")
 
     def test_image_runs_as_non_root_with_persistent_data_and_two_public_ports(self):
-        self.assertIn(f"ARG PYTHON_BASE={PYTHON_BASE}", self.dockerfile)
+        self.assertIn(f"ARG PYTHON_BASE_NAME={PYTHON_BASE_NAME}", self.dockerfile)
+        self.assertIn(f"ARG PYTHON_BASE_DIGEST={PYTHON_BASE_DIGEST}", self.dockerfile)
+        self.assertIn("ARG PYTHON_BASE=${PYTHON_BASE_NAME}@${PYTHON_BASE_DIGEST}", self.dockerfile)
         self.assertEqual(3, self.dockerfile.count("FROM ${PYTHON_BASE}"))
         self.assertNotIn("slim-bookworm", self.dockerfile)
         self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
@@ -72,14 +75,18 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("enable_ipv6: true", self.compose)
         self.assertIn("pull_policy: missing", self.compose)
         self.assertIn("stop_grace_period: 30s", self.compose)
+        self.assertIn("SBK_DASHBOARD_PIDS_LIMIT:-512", self.compose)
+        self.assertIn("SBK_DASHBOARD_LOG_MAX_SIZE:-10m", self.compose)
+        self.assertIn("SBK_DASHBOARD_LOG_MAX_FILES:-3", self.compose)
         self.assertNotIn("build:", self.compose)
         self.assertIn(f"image: sbk-dashboard:{VERSION}", self.development_compose)
         self.assertIn("pull_policy: never", self.development_compose)
         self.assertIn("build:", self.development_compose)
         self.assertIn("VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}", self.development_compose)
+        self.assertIn("SBK_DASHBOARD_BUILD_DATE:-1970-01-01T00:00:00Z", self.development_compose)
         self.assertIn("SBK_DASHBOARD_MEMORY_LIMIT:-4g", self.resources_compose)
         self.assertIn("SBK_DASHBOARD_CPU_LIMIT:-2.0", self.resources_compose)
-        self.assertIn("SBK_DASHBOARD_PIDS_LIMIT:-512", self.resources_compose)
+        self.assertNotIn("SBK_DASHBOARD_PIDS_LIMIT", self.resources_compose)
 
     def test_container_python_dependencies_and_build_tools_are_hash_pinned(self):
         self.assertIn("setuptools==80.9.0", self.container_build_requirements)
@@ -88,7 +95,18 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("psutil==7.2.2", self.container_runtime_requirements)
         self.assertEqual(2, self.container_runtime_requirements.count("--hash=sha256:"))
         self.assertIn("--require-hashes", self.dockerfile)
-        self.assertIn("apt-get upgrade --yes --no-install-recommends", self.dockerfile)
+        self.assertNotIn("apt-get upgrade", self.dockerfile)
+        requirements = [
+            line
+            for line in self.container_os_requirements.splitlines()
+            if line and not line.startswith("#")
+        ]
+        self.assertEqual(11, len(requirements))
+        self.assertTrue(all(line.count("=") == 1 for line in requirements))
+        self.assertIn("ca-certificates=20250419", requirements)
+        self.assertIn("tini=0.19.0-3+b7", requirements)
+        self.assertIn("COPY requirements/container-os.txt", self.dockerfile)
+        self.assertIn("dpkg-query --show", self.dockerfile)
         self.assertIn("--no-build-isolation --no-deps", self.dockerfile)
         self.assertIn('test "${installed_version}" = "${APPLICATION_VERSION}"', self.dockerfile)
         self.assertNotIn("--chown=10001:10001 /opt/prometheus", self.dockerfile)
@@ -132,6 +150,10 @@ class ContainerContractTest(unittest.TestCase):
         self.assertNotIn("ThreadingHTTPServer", smoke)
         self.assertIn('"docker", "kill", "--signal", "KILL"', smoke)
         self.assertIn('"--read-only"', smoke)
+        self.assertIn('"--pids-limit"', smoke)
+        self.assertIn('"max-size=10m"', smoke)
+        self.assertIn("self._restore_backup()", smoke)
+        self.assertIn('f"{self.source_volume}:/source:ro"', smoke)
         self.assertIn("Native installations are not immutable root-owned content", smoke)
 
     def test_ci_runs_smoke_and_builds_both_linux_architectures(self):
@@ -150,6 +172,10 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("platforms: linux/amd64", self.workflow)
         self.assertIn("platforms: linux/arm64", self.workflow)
         self.assertIn("platforms: linux/amd64,linux/arm64", self.workflow)
+        self.assertIn('cron: "17 3 * * 1"', self.workflow)
+        self.assertIn("runs-on: ubuntu-24.04-arm", self.workflow)
+        self.assertIn("Validate ARM64 runtime, persistence, restore, and shutdown", self.workflow)
+        self.assertIn("needs: [validate, arm64-validate]", self.workflow)
         self.assertIn("images: kmgowda/sbk-dashboard", self.workflow)
         self.assertIn("Log in to Docker Hub", self.workflow)
         self.assertIn("secrets.DOCKERHUB_USERNAME", self.workflow)
@@ -165,7 +191,9 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("cosign sign --yes", self.workflow)
         self.assertNotIn("ghcr.io", self.workflow)
         self.assertIn("Verify release tag matches the package version", self.workflow)
-        self.assertEqual(2, self.workflow.count("runs-on: ubuntu-24.04"))
+        workflow_lines = self.workflow.splitlines()
+        self.assertEqual(2, workflow_lines.count("    runs-on: ubuntu-24.04"))
+        self.assertEqual(1, workflow_lines.count("    runs-on: ubuntu-24.04-arm"))
         self.assertNotIn("ubuntu-latest", self.workflow)
         self.assertIn("runs-on: ubuntu-24.04", self.ci_workflow)
         self.assertNotIn("runs-on: ubuntu-latest", self.ci_workflow)
@@ -175,6 +203,11 @@ class ContainerContractTest(unittest.TestCase):
             3,
             self.workflow.count("APPLICATION_VERSION=${{ steps.version.outputs.value }}"),
         )
+        self.assertEqual(3, self.workflow.count("BUILD_DATE=${{ steps.version.outputs.build_date }}"))
+        self.assertIn('org.opencontainers.image.documentation=', self.dockerfile)
+        self.assertIn('org.opencontainers.image.created="${BUILD_DATE}"', self.dockerfile)
+        self.assertIn('org.opencontainers.image.base.name="${PYTHON_BASE_NAME}"', self.dockerfile)
+        self.assertIn('org.opencontainers.image.base.digest="${PYTHON_BASE_DIGEST}"', self.dockerfile)
         self.assertNotRegex(self.workflow + self.ci_workflow, r"uses: [^\s]+@v\d+(?:\s|$)")
         self.assertIn("windows-2022", self.ci_workflow)
         self.assertNotIn("windows-latest", self.ci_workflow)

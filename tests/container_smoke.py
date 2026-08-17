@@ -101,7 +101,9 @@ class ContainerSmoke:
         self.target_port = target_port
         self.expect_target_up = expect_target_up
         self.name = f"sbk-dashboard-smoke-{suffix}"
-        self.volume = f"sbk-dashboard-smoke-data-{suffix}"
+        self.source_volume = f"sbk-dashboard-smoke-data-{suffix}"
+        self.restore_volume = f"sbk-dashboard-smoke-restore-{suffix}"
+        self.active_volume = self.source_volume
         self.network = f"sbk-dashboard-smoke-net-{suffix}"
         self.exporters = (
             f"sbk-dashboard-smoke-exporter-v4-{suffix}",
@@ -111,7 +113,7 @@ class ContainerSmoke:
         self.captured_pids: set[int] = set()
 
     def run(self) -> None:
-        command("docker", "volume", "create", self.volume)
+        command("docker", "volume", "create", self.source_volume)
         try:
             command("docker", "network", "create", "--ipv6", self.network)
             if self.expect_target_up:
@@ -123,20 +125,15 @@ class ContainerSmoke:
             self._assert_processes_stopped()
             self._start()
             self._wait_until_healthy()
-            targets = self._targets()
-            if {target["id"] for target in targets} != set(target_ids):
-                raise AssertionError(f"Persisted target was not restored: {targets}")
-            for target in targets:
-                self._wait_for_target_up(target["id"])
-                self._assert_metrics_and_panels(target["id"])
-                self._wait_for_dashboard(target["dashboardUrl"])
-            if comparison is not None:
-                repeated_comparison = self._comparison_dashboard(list(reversed(target_ids)))
-                if repeated_comparison != comparison:
-                    raise AssertionError(
-                        f"Persisted comparison dashboard was not reused: {repeated_comparison}"
-                    )
-                self._assert_comparison_dashboard(comparison, target_ids)
+            self._assert_persisted_state(target_ids, comparison)
+            self._capture_processes()
+            self._stop_and_remove()
+            self._assert_processes_stopped()
+            self._restore_backup()
+            self.active_volume = self.restore_volume
+            self._start()
+            self._wait_until_healthy()
+            self._assert_persisted_state(target_ids, comparison)
             self._capture_processes()
             self._stop_and_remove()
             self._assert_processes_stopped()
@@ -149,8 +146,46 @@ class ContainerSmoke:
             command("docker", "rm", "--force", self.name, check=False)
             for exporter in self.exporters:
                 command("docker", "rm", "--force", exporter, check=False)
-            command("docker", "volume", "rm", "--force", self.volume, check=False)
+            command("docker", "volume", "rm", "--force", self.source_volume, check=False)
+            command("docker", "volume", "rm", "--force", self.restore_volume, check=False)
             command("docker", "network", "rm", self.network, check=False)
+
+    def _assert_persisted_state(
+        self, target_ids: list[str], comparison: dict[str, Any] | None
+    ) -> None:
+        targets = self._targets()
+        if {target["id"] for target in targets} != set(target_ids):
+            raise AssertionError(f"Persisted target was not restored: {targets}")
+        for target in targets:
+            self._wait_for_target_up(target["id"])
+            self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard(target["dashboardUrl"])
+        if comparison is not None:
+            repeated_comparison = self._comparison_dashboard(list(reversed(target_ids)))
+            if repeated_comparison != comparison:
+                raise AssertionError(
+                    f"Persisted comparison dashboard was not reused: {repeated_comparison}"
+                )
+            self._assert_comparison_dashboard(comparison, target_ids)
+
+    def _restore_backup(self) -> None:
+        command("docker", "volume", "create", self.restore_volume)
+        command(
+            "docker",
+            "run",
+            "--rm",
+            "--user",
+            "0:0",
+            "--entrypoint",
+            "sh",
+            "--volume",
+            f"{self.source_volume}:/source:ro",
+            "--volume",
+            f"{self.restore_volume}:/restore",
+            self.image,
+            "-c",
+            "set -eu; tar -C /source -cf - . | tar -C /restore -xf -",
+        )
 
     def _first_start(self) -> tuple[list[str], dict[str, Any] | None]:
         self._start()
@@ -257,8 +292,16 @@ class ContainerSmoke:
             "--read-only",
             "--tmpfs",
             "/tmp:size=64m,mode=1777",
+            "--pids-limit",
+            "512",
+            "--log-driver",
+            "json-file",
+            "--log-opt",
+            "max-size=10m",
+            "--log-opt",
+            "max-file=3",
             "--volume",
-            f"{self.volume}:/var/lib/sbk-dashboard",
+            f"{self.active_volume}:/var/lib/sbk-dashboard",
             "--publish",
             f"127.0.0.1:{self.dashboard_port}:9721",
             "--publish",
@@ -390,6 +433,16 @@ class ContainerSmoke:
             raise AssertionError(f"Container user is not fixed non-root UID/GID 10001: {details['Config']['User']}")
         if details["HostConfig"]["ReadonlyRootfs"] is not True:
             raise AssertionError("Container root filesystem is not read-only")
+        if details["HostConfig"]["PidsLimit"] != 512:
+            raise AssertionError(f"Container PID limit is not 512: {details['HostConfig']['PidsLimit']}")
+        expected_log_config = {
+            "Type": "json-file",
+            "Config": {"max-file": "3", "max-size": "10m"},
+        }
+        if details["HostConfig"]["LogConfig"] != expected_log_config:
+            raise AssertionError(
+                f"Container log rotation is not bounded: {details['HostConfig']['LogConfig']}"
+            )
         script = (
             "import json, os\n"
             "paths=['/opt/prometheus/prometheus','/opt/grafana/bin/grafana']\n"

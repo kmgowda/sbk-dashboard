@@ -72,8 +72,10 @@ also records the exact Git commit in the OCI image metadata:
 export SBK_VERSION="$(PYTHONPATH=src python3 -c 'from sbk_dashboard.version import VERSION; print(VERSION)')"
 export SBK_IMAGE="kmgowda/sbk-dashboard"
 export SBK_VCS_REF="$(git rev-parse HEAD)"
+export SBK_BUILD_DATE="$(git show -s --format=%cI HEAD)"
 
-printf 'Version: %s\nImage: %s\nCommit: %s\n' "$SBK_VERSION" "$SBK_IMAGE" "$SBK_VCS_REF"
+printf 'Version: %s\nImage: %s\nCommit: %s\nCreated: %s\n' \
+  "$SBK_VERSION" "$SBK_IMAGE" "$SBK_VCS_REF" "$SBK_BUILD_DATE"
 ```
 
 For the current release, the version output should be `1.26.8.2`. Stop if the version or commit is not the one you
@@ -121,6 +123,7 @@ The direct build command is useful when you want a named local image for the aut
 docker build \
   --build-arg APPLICATION_VERSION="$SBK_VERSION" \
   --build-arg VCS_REF="$SBK_VCS_REF" \
+  --build-arg BUILD_DATE="$SBK_BUILD_DATE" \
   --tag "sbk-dashboard:$SBK_VERSION-local" \
   .
 ```
@@ -194,6 +197,7 @@ docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --build-arg APPLICATION_VERSION="$SBK_VERSION" \
   --build-arg VCS_REF="$SBK_VCS_REF" \
+  --build-arg BUILD_DATE="$SBK_BUILD_DATE" \
   --tag "$SBK_IMAGE:$SBK_VERSION" \
   --tag "$SBK_IMAGE:latest" \
   --provenance=mode=max \
@@ -358,12 +362,14 @@ git tag -a "v$SBK_VERSION" -m "SBK Dashboard $SBK_VERSION"
 git push origin "v$SBK_VERSION"
 ```
 
-The workflow builds the runnable AMD64 image, rejects fixed high/critical vulnerabilities with pinned Trivy, builds
-`linux/amd64` and `linux/arm64`, attaches provenance and an SBOM, publishes both the version and `latest` tags, and
+The workflow natively builds and smoke-tests runnable AMD64 and ARM64 images, rejects fixed high/critical
+vulnerabilities with pinned Trivy, attaches provenance and an SBOM, publishes both the version and `latest` tags, and
 keylessly signs their shared digest with GitHub OIDC. It stops before Docker Hub login when the Git tag and package
 version do not match. No long-lived signing key is stored in repository secrets. Any reviewed scanner exception is
 target-scoped, documented, and time-limited in `.trivyignore.yaml`; expiry deliberately blocks publishing until the
 native dependencies are upgraded or the exception is reviewed again.
+The validation jobs also run weekly so disclosure of a new vulnerability is visible without waiting for a source
+commit or release tag.
 
 ## Troubleshooting
 

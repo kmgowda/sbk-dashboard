@@ -245,8 +245,8 @@ Use the least expensive layer that proves the change, then add the higher layers
 5. **Real SBK:** Java 25 SBK `PrometheusLogger`, real series ingestion, 53 panels, restart persistence.
 6. **Native cross-platform smoke:** repeat installation/start/stop on Linux, macOS, and Windows rather than simulating
    all OS behavior on Linux.
-7. **Container smoke:** build the Linux AMD64 image, validate ports, registration, generated Grafana URL/dashboard,
-   restart persistence, and orphan-free shutdown; separately build Linux ARM64 with Buildx/QEMU.
+7. **Container smoke:** natively build/load Linux AMD64 and ARM64 images, validate ports, registration, generated
+   Grafana URL/dashboard, restart and backup/restore persistence, bounds, and orphan-free shutdown.
 
 When a test requires external downloads, prefer already installed verified tools. Do not weaken checksum validation
 to make a test convenient.
@@ -272,8 +272,11 @@ to make a test convenient.
    root-owned, and prove the application works with a read-only root filesystem.
 10. Hash-pin container-only Python build/runtime dependencies, scan the runnable image for fixed high/critical
     vulnerabilities, and sign release digests without granting signing credentials to pull-request jobs.
-11. Test both graceful stop and `SIGKILL` recovery against the same persistent volume. Resource overlays may bound
-    CPU, memory, and PIDs but must not change image acquisition, networking, persistence, or process topology.
+11. Test graceful stop, `SIGKILL` recovery, and restore to a fresh volume. Base Compose must bound PIDs and local
+    Docker logs; the resource overlay may add CPU and memory but must not change image acquisition, networking,
+    persistence, or process topology.
+12. Exact-lock direct final-image OS packages, retain the reviewed inventory in the image, and pass deterministic
+    commit-derived creation metadata to release builds. Run the security gate on a schedule as well as on changes.
 
 ## Debugging guide
 

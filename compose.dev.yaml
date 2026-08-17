@@ -15,3 +15,4 @@ services:
       context: .
       args:
         VCS_REF: ${SBK_DASHBOARD_VCS_REF:-local}
+        BUILD_DATE: ${SBK_DASHBOARD_BUILD_DATE:-1970-01-01T00:00:00Z}

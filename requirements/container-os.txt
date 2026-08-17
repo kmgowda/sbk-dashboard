@@ -1,0 +1,21 @@
+# Copyright (c) KMG. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+##
+
+# Direct final-image Debian packages. The pinned Python base digest owns transitive base packages.
+bsdutils=1:2.41.5-0+deb13u1
+ca-certificates=20250419
+libblkid1=2.41.5-0+deb13u1
+liblastlog2-2=2.41.5-0+deb13u1
+libmount1=2.41.5-0+deb13u1
+libsmartcols1=2.41.5-0+deb13u1
+libuuid1=2.41.5-0+deb13u1
+login=1:4.16.0-2+really2.41.5-0+deb13u1
+mount=2.41.5-0+deb13u1
+tini=0.19.0-3+b7
+util-linux=2.41.5-0+deb13u1

@@ -385,12 +385,15 @@ protection. Compose grants 30 seconds for ordered cleanup; after that bound the 
 remaining process in the container PID namespace/cgroup, preventing a host orphan.
 
 Compose publishes management and Grafana on host loopback by default. Network-wide publication is an explicit
-operator choice because authentication remains disabled. `compose.resources.yaml` is an optional overlay that adds
-CPU, memory, and PID limits without changing topology or imposing one resource profile on every deployment.
+operator choice because authentication remains disabled. Base Compose bounds PIDs and rotates engine logs;
+`compose.resources.yaml` is an optional overlay that adds CPU and memory limits without changing topology or
+imposing one capacity profile on every deployment.
 
-Container builds hash-pin Python build/runtime inputs, verify the installed package version against the OCI version
-argument, and scan the runnable image for fixed high/critical vulnerabilities. Tagged release builds attach SBOM
-and provenance attestations and keylessly sign the published multi-architecture digest through GitHub OIDC.
+Container builds hash-pin Python build/runtime inputs, exact-lock direct final-image OS packages, retain that package
+inventory, and verify the installed package version against the OCI version argument. Native AMD64 and ARM64 jobs
+run identical restore/lifecycle smoke tests; AMD64 is scanned for fixed high/critical vulnerabilities on changes and
+weekly. Tagged release builds attach SBOM and provenance attestations and keylessly sign the published
+multi-architecture digest through GitHub OIDC.
 
 Compose adds `host.docker.internal:host-gateway`, allowing container Prometheus to scrape an SBK exporter on the
 Docker host, and the image supplies that hostname as the landing form default. Direct host execution retains
