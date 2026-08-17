@@ -1,10 +1,77 @@
+# Copyright (c) KMG. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+##
+
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+COPYRIGHT_NOTICE = "Copyright (c) KMG. All Rights Reserved."
+COMMENTABLE_SUFFIXES = {
+    ".cmd",
+    ".css",
+    ".html",
+    ".js",
+    ".md",
+    ".mdc",
+    ".properties",
+    ".ps1",
+    ".py",
+    ".sh",
+    ".toml",
+    ".yaml",
+    ".yml",
+}
+COMMENTABLE_NAMES = {".dockerignore", ".gitignore", "Dockerfile", "MANIFEST.in", "sbk-dashboard"}
+IGNORED_DIRECTORY_NAMES = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "build",
+    "dist",
+    "sbk_dashboard.egg-info",
+}
+REPOSITORY_SOURCE_DIRECTORIES = {
+    ".cursor",
+    ".github",
+    ".windsurf",
+    "docs",
+    "requirements",
+    "scripts",
+    "src",
+    "tests",
+}
 
 
 class DocumentationContractTest(unittest.TestCase):
+    def test_commentable_repository_files_have_license_header(self):
+        candidates = []
+        roots = [ROOT, *(ROOT / name for name in REPOSITORY_SOURCE_DIRECTORIES)]
+        for source_root in roots:
+            paths = source_root.iterdir() if source_root == ROOT else source_root.rglob("*")
+            for path in paths:
+                if not path.is_file() or any(part in IGNORED_DIRECTORY_NAMES for part in path.parts):
+                    continue
+                if (
+                    path.suffix in COMMENTABLE_SUFFIXES
+                    or path.name in COMMENTABLE_NAMES
+                    or path.parent == ROOT / "requirements" and path.suffix == ".txt"
+                ):
+                    candidates.append(path)
+
+        self.assertTrue(candidates)
+        for path in sorted(set(candidates)):
+            with self.subTest(path=path.relative_to(ROOT)):
+                prefix = path.read_text(encoding="utf-8")[:1024]
+                self.assertIn(COPYRIGHT_NOTICE, prefix)
+
     def test_readme_documents_environment_exit_and_deactivation(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("deactivate", readme)
