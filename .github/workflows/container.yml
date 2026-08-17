@@ -54,7 +54,7 @@ jobs:
       - name: Resolve application version
         id: version
         run: |
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH=src python3 - <<'PY'
           import os
           import subprocess
           from pathlib import Path
@@ -77,7 +77,7 @@ jobs:
           docker compose config --quiet
           docker compose -f compose.yaml -f compose.dev.yaml config --quiet
           docker compose -f compose.yaml -f compose.resources.yaml config --quiet
-          python tests/compose_contract.py
+          python3 tests/compose_contract.py
       - name: Build runnable AMD64 image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -103,7 +103,7 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
       - name: Validate runtime, ports, dashboards, persistence, and shutdown
-        run: python tests/container_smoke.py --image sbk-dashboard:ci
+        run: python3 tests/container_smoke.py --image sbk-dashboard:ci
   arm64-validate:
     runs-on: ubuntu-24.04-arm
     steps:
@@ -114,7 +114,7 @@ jobs:
       - name: Resolve application version
         id: version
         run: |
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH=src python3 - <<'PY'
           import os
           import subprocess
           from pathlib import Path
@@ -146,7 +146,7 @@ jobs:
           cache-from: type=gha,scope=sbk-dashboard-arm64
           cache-to: type=gha,mode=max,scope=sbk-dashboard-arm64,ignore-error=true
       - name: Validate ARM64 runtime, persistence, restore, and shutdown
-        run: python tests/container_smoke.py --image sbk-dashboard:ci-arm64
+        run: python3 tests/container_smoke.py --image sbk-dashboard:ci-arm64
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -170,7 +170,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH=src python3 - <<'PY'
           import os
           import subprocess
           from sbk_dashboard.version import VERSION
@@ -196,6 +196,8 @@ jobs:
           tags: |
             type=match,pattern=v(.*),group=1
             type=raw,value=latest
+          labels: |
+            org.opencontainers.image.created=${{ steps.version.outputs.build_date }}
       - name: Log in to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:

@@ -167,8 +167,10 @@ class ContainerContractTest(unittest.TestCase):
             "docker compose -f compose.yaml -f compose.resources.yaml config --quiet",
             self.workflow,
         )
-        self.assertIn("python tests/compose_contract.py", self.workflow)
-        self.assertIn("python tests/container_smoke.py --image sbk-dashboard:ci", self.workflow)
+        self.assertIn("python3 tests/compose_contract.py", self.workflow)
+        self.assertIn("python3 tests/container_smoke.py --image sbk-dashboard:ci", self.workflow)
+        self.assertIn("python3 tests/container_smoke.py --image sbk-dashboard:ci-arm64", self.workflow)
+        self.assertNotRegex(self.workflow, r"(?m)^\s*(?:PYTHONPATH=src )?python (?:-|tests/)")
         self.assertIn("platforms: linux/amd64", self.workflow)
         self.assertIn("platforms: linux/arm64", self.workflow)
         self.assertIn("platforms: linux/amd64,linux/arm64", self.workflow)
@@ -204,6 +206,12 @@ class ContainerContractTest(unittest.TestCase):
             self.workflow.count("APPLICATION_VERSION=${{ steps.version.outputs.value }}"),
         )
         self.assertEqual(3, self.workflow.count("BUILD_DATE=${{ steps.version.outputs.build_date }}"))
+        self.assertEqual(
+            1,
+            self.workflow.count(
+                "org.opencontainers.image.created=${{ steps.version.outputs.build_date }}"
+            ),
+        )
         self.assertIn('org.opencontainers.image.documentation=', self.dockerfile)
         self.assertIn('org.opencontainers.image.created="${BUILD_DATE}"', self.dockerfile)
         self.assertIn('org.opencontainers.image.base.name="${PYTHON_BASE_NAME}"', self.dockerfile)
