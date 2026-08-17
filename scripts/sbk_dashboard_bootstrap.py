@@ -15,6 +15,7 @@ import time
 import uuid
 from contextlib import suppress
 from ctypes import wintypes
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,12 @@ SOURCE_DIRECTORY = PROJECT_DIRECTORY / "src"
 if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
-from sbk_dashboard.contracts import PORTABLE_HOME_ENVIRONMENT  # noqa: E402
+from sbk_dashboard.contracts import (  # noqa: E402
+    BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT,
+    BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT,
+    BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT,
+    PORTABLE_HOME_ENVIRONMENT,
+)
 from sbk_dashboard.layout import PortableHomeLayout  # noqa: E402
 from sbk_dashboard.platforms import portable_platform_id  # noqa: E402
 
@@ -43,6 +49,16 @@ FINGERPRINT_EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 WINDOWS_SYNCHRONIZE = 0x00100000
 WINDOWS_WAIT_OBJECT_0 = 0x00000000
 WINDOWS_ERROR_INVALID_PARAMETER = 87
+
+
+@dataclass(frozen=True)
+class PreparedEnvironment:
+    """Interpreter selection and whether bootstrap created or reused it."""
+
+    python: Path
+    kind: str
+    location: Path
+    state: str
 
 
 def dashboard_home(environment: dict[str, str] | None = None) -> Path:
@@ -269,7 +285,7 @@ def install_application(python: Path, project_directory: Path, home: Path) -> No
 
 def install_private_runtime(
     project_directory: Path, home: Path, version: str, fingerprint: str, force: bool = False
-) -> Path:
+) -> PreparedEnvironment:
     selected = runtime_directory(home, version, fingerprint)
     lock = home / "launcher" / "locks" / f"runtime-{version}-{platform_id()}.lock"
     with InstallLock(lock):
@@ -282,7 +298,9 @@ def install_private_runtime(
         for abandoned in selected.parent.glob(f".{selected.name}.staging-*"):
             shutil.rmtree(abandoned, ignore_errors=True)
         if runtime_valid(selected, version, fingerprint) and not force:
-            return runtime_python(selected)
+            return PreparedEnvironment(
+                runtime_python(selected), "private virtual environment", selected, "saved environment reused"
+            )
         staging = selected.with_name(f".{selected.name}.staging-{uuid.uuid4().hex}")
         backup = selected.with_name(f".{selected.name}.backup-{uuid.uuid4().hex}")
         try:
@@ -321,7 +339,8 @@ def install_private_runtime(
             if backup.exists() and not selected.exists():
                 move_directory(backup, selected)
         prune_runtimes(selected.parent, selected)
-        return runtime_python(selected)
+        state = "environment repaired" if force else "fresh environment created"
+        return PreparedEnvironment(runtime_python(selected), "private virtual environment", selected, state)
 
 
 def prune_runtimes(parent: Path, current: Path) -> None:
@@ -336,16 +355,34 @@ def prune_runtimes(parent: Path, current: Path) -> None:
             shutil.rmtree(candidate, ignore_errors=True)
 
 
-def active_environment_marker(home: Path, project_directory: Path) -> Path:
+def active_environment_marker(
+    home: Path, project_directory: Path, fingerprint: str | None = None
+) -> Path:
     interpreter = hashlib.sha256(str(Path(sys.executable).resolve()).encode()).hexdigest()[:16]
-    return home / "app" / "active" / interpreter / f"{source_fingerprint(project_directory)}.json"
+    selected_fingerprint = fingerprint or source_fingerprint(project_directory)
+    return home / "app" / "active" / interpreter / f"{selected_fingerprint}.json"
 
 
-def prepare_active_environment(project_directory: Path, home: Path, version: str, force: bool = False) -> None:
+def active_environment_valid(marker: Path, version: str, fingerprint: str) -> bool:
+    try:
+        value = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        value.get("version") == version
+        and value.get("fingerprint") == fingerprint
+        and value.get("python") == str(Path(sys.executable).resolve())
+    )
+
+
+def prepare_active_environment(
+    project_directory: Path, home: Path, version: str, force: bool = False
+) -> bool:
     missing = missing_modules()
-    marker = active_environment_marker(home, project_directory)
-    if not missing and marker.is_file() and not force:
-        return
+    fingerprint = source_fingerprint(project_directory)
+    marker = active_environment_marker(home, project_directory, fingerprint)
+    if not missing and active_environment_valid(marker, version, fingerprint) and not force:
+        return False
     reason = f"missing: {', '.join(missing)}" if missing else "checkout changed or was not prepared"
     print(
         f"Installing SBK Dashboard into active environment {sys.executable} ({reason})",
@@ -360,7 +397,7 @@ def prepare_active_environment(project_directory: Path, home: Path, version: str
         marker,
         {
             "version": version,
-            "fingerprint": source_fingerprint(project_directory),
+            "fingerprint": fingerprint,
             "python": str(Path(sys.executable).resolve()),
             "created": time.time(),
         },
@@ -369,13 +406,27 @@ def prepare_active_environment(project_directory: Path, home: Path, version: str
         if old_marker != marker:
             with suppress(OSError):
                 old_marker.unlink()
+    return True
 
 
-def launch(python: Path, script_directory: Path, selected: list[str], home: Path) -> None:
+def active_environment_kind() -> str:
+    if os.environ.get("VIRTUAL_ENV"):
+        return "active virtual environment"
+    if os.environ.get("CONDA_PREFIX"):
+        return "active Conda environment"
+    return "active Python environment"
+
+
+def launch(
+    prepared: PreparedEnvironment, script_directory: Path, selected: list[str], home: Path
+) -> None:
     os.environ[PORTABLE_HOME_ENVIRONMENT] = str(home)
     os.environ.setdefault("PIP_CACHE_DIR", str(home / "cache" / "pip"))
+    os.environ[BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT] = prepared.kind
+    os.environ[BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT] = prepared.state
+    os.environ[BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT] = str(prepared.location)
     launcher = script_directory / "sbk_dashboard_launcher.py"
-    os.execv(str(python), [str(python), str(launcher), *selected])
+    os.execv(str(prepared.python), [str(prepared.python), str(launcher), *selected])
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -389,17 +440,26 @@ def main(arguments: list[str] | None = None) -> int:
     version = project_version(project_directory)
     fingerprint = source_fingerprint(project_directory)
     if environment_is_active():
-        prepare_active_environment(project_directory, home, version, force=selected[0] == "repair")
+        force = selected[0] == "repair"
+        prepared_now = prepare_active_environment(project_directory, home, version, force=force)
+        state = "environment repaired" if force else (
+            "fresh environment prepared" if prepared_now else "saved environment reused"
+        )
+        prepared = PreparedEnvironment(
+            Path(sys.executable), active_environment_kind(), Path(sys.prefix), state
+        )
         if selected[0] == "repair":
             print(f"Repaired SBK Dashboard {version} in active environment {sys.executable}")
             return 0
-        launch(Path(sys.executable), script_directory, selected, home)
+        launch(prepared, script_directory, selected, home)
         return 0
-    python = install_private_runtime(project_directory, home, version, fingerprint, force=selected[0] == "repair")
+    prepared = install_private_runtime(
+        project_directory, home, version, fingerprint, force=selected[0] == "repair"
+    )
     if selected[0] == "repair":
-        print(f"Repaired SBK Dashboard {version} runtime at {python.parent.parent}")
+        print(f"Repaired SBK Dashboard {version} runtime at {prepared.location}")
         return 0
-    launch(python, script_directory, selected, home)
+    launch(prepared, script_directory, selected, home)
     return 0
 
 

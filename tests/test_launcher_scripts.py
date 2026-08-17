@@ -36,7 +36,9 @@ class LauncherScriptTest(unittest.TestCase):
             ) as run,
         ):
             home = Path(temporary)
-            sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+            self.assertTrue(
+                sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+            )
         self.assertEqual([sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[1].args[0])
         self.assertEqual(str(home / "cache" / "pip"), run.call_args_list[1].kwargs["env"]["PIP_CACHE_DIR"])
 
@@ -55,8 +57,76 @@ class LauncherScriptTest(unittest.TestCase):
         self.assertEqual([sys.executable, "-m", "ensurepip", "--upgrade"], run.call_args_list[1].args[0])
         self.assertEqual([sys.executable, "-m", "pip", "install", str(ROOT)], run.call_args_list[2].args[0])
 
+    def test_private_runtime_is_created_once_then_reused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+
+            def create_venv(command, _failure, _environment=None):
+                staging = Path(command[-1]).parent
+                python = sbk_dashboard_bootstrap.runtime_python(staging)
+                python.parent.mkdir(parents=True)
+                python.write_text("prepared Python", encoding="utf-8")
+                python.chmod(0o700)
+
+            with (
+                patch.object(sbk_dashboard_bootstrap, "platform_id", return_value="linux-amd64"),
+                patch.object(sbk_dashboard_bootstrap, "run_checked", side_effect=create_venv) as venv,
+                patch.object(sbk_dashboard_bootstrap, "install_application") as install,
+            ):
+                first = sbk_dashboard_bootstrap.install_private_runtime(
+                    ROOT, home, "1.2.3.4", "fingerprint"
+                )
+                second = sbk_dashboard_bootstrap.install_private_runtime(
+                    ROOT, home, "1.2.3.4", "fingerprint"
+                )
+        self.assertEqual("fresh environment created", first.state)
+        self.assertEqual("saved environment reused", second.state)
+        self.assertEqual(first.python, second.python)
+        self.assertEqual(1, venv.call_count)
+        install.assert_called_once()
+
+    def test_active_environment_is_prepared_once_then_reused(self):
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(
+                sbk_dashboard_bootstrap,
+                "missing_modules",
+                side_effect=[["psutil"], [], [], [], []],
+            ),
+            patch.object(sbk_dashboard_bootstrap, "install_application") as install,
+        ):
+            home = Path(temporary)
+            self.assertTrue(
+                sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+            )
+            self.assertFalse(
+                sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+            )
+            marker = sbk_dashboard_bootstrap.active_environment_marker(home, ROOT)
+            marker.write_text("not JSON", encoding="utf-8")
+            self.assertTrue(
+                sbk_dashboard_bootstrap.prepare_active_environment(ROOT, home, "1.2.3.4")
+            )
+        self.assertEqual(2, install.call_count)
+
+    def test_active_environment_kind_distinguishes_venv_and_conda(self):
+        with patch.dict(os.environ, {"VIRTUAL_ENV": "/tmp/venv"}, clear=True):
+            self.assertEqual(
+                "active virtual environment", sbk_dashboard_bootstrap.active_environment_kind()
+            )
+        with patch.dict(os.environ, {"CONDA_PREFIX": "/tmp/conda"}, clear=True):
+            self.assertEqual(
+                "active Conda environment", sbk_dashboard_bootstrap.active_environment_kind()
+            )
+
     def test_bootstrap_creates_private_home_runtime_before_launching(self):
         private_python = Path("private") / "venv" / "bin" / "python"
+        prepared = sbk_dashboard_bootstrap.PreparedEnvironment(
+            private_python,
+            "private virtual environment",
+            Path("private"),
+            "fresh environment created",
+        )
         with (
             tempfile.TemporaryDirectory() as temporary,
             patch.object(sbk_dashboard_bootstrap, "environment_is_active", return_value=False),
@@ -70,13 +140,13 @@ class LauncherScriptTest(unittest.TestCase):
             patch.object(
                 sbk_dashboard_bootstrap,
                 "install_private_runtime",
-                return_value=private_python,
+                return_value=prepared,
             ) as install,
             patch.object(sbk_dashboard_bootstrap, "launch") as launch,
         ):
             self.assertEqual(0, sbk_dashboard_bootstrap.main(["foreground", "--help"]))
         install.assert_called_once_with(ROOT, Path(temporary), "1.2.3.4", "fingerprint", force=False)
-        launch.assert_called_once_with(private_python, ROOT / "scripts", ["foreground", "--help"], Path(temporary))
+        launch.assert_called_once_with(prepared, ROOT / "scripts", ["foreground", "--help"], Path(temporary))
 
     def test_bootstrap_reuses_active_environment_and_preserves_arguments(self):
         with (
@@ -84,17 +154,51 @@ class LauncherScriptTest(unittest.TestCase):
             patch.object(sbk_dashboard_bootstrap, "dashboard_home", return_value=ROOT / "home"),
             patch.object(sbk_dashboard_bootstrap, "project_version", return_value="1.2.3.4"),
             patch.object(sbk_dashboard_bootstrap, "source_fingerprint", return_value="fingerprint"),
-            patch.object(sbk_dashboard_bootstrap, "prepare_active_environment") as install,
+            patch.object(
+                sbk_dashboard_bootstrap, "prepare_active_environment", return_value=False
+            ) as install,
+            patch.object(
+                sbk_dashboard_bootstrap,
+                "active_environment_kind",
+                return_value="active virtual environment",
+            ),
             patch.object(sbk_dashboard_bootstrap, "launch") as launch,
         ):
             self.assertEqual(0, sbk_dashboard_bootstrap.main(["background", "-port", "19721"]))
         install.assert_called_once_with(ROOT, ROOT / "home", "1.2.3.4", force=False)
-        launch.assert_called_once_with(
-            Path(sys.executable),
-            ROOT / "scripts",
-            ["background", "-port", "19721"],
-            ROOT / "home",
+        prepared = launch.call_args.args[0]
+        self.assertEqual(Path(sys.executable), prepared.python)
+        self.assertEqual("saved environment reused", prepared.state)
+        self.assertEqual("active virtual environment", prepared.kind)
+        self.assertEqual(
+            (ROOT / "scripts", ["background", "-port", "19721"], ROOT / "home"),
+            launch.call_args.args[1:],
         )
+
+    def test_bootstrap_handoff_reports_runtime_selection(self):
+        prepared = sbk_dashboard_bootstrap.PreparedEnvironment(
+            Path(sys.executable),
+            "private virtual environment",
+            ROOT / "saved-runtime",
+            "saved environment reused",
+        )
+        home = ROOT / "portable-home"
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sbk_dashboard_bootstrap.os, "execv") as execute,
+        ):
+            sbk_dashboard_bootstrap.launch(prepared, ROOT / "scripts", ["foreground", "--help"], home)
+            self.assertEqual(
+                "private virtual environment",
+                os.environ["SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND"],
+            )
+            self.assertEqual(
+                "saved environment reused",
+                os.environ["SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE"],
+            )
+            self.assertEqual(str(ROOT / "saved-runtime"), os.environ["SBK_DASHBOARD_BOOTSTRAP_RUNTIME_PATH"])
+            self.assertEqual(str(home), os.environ["SBK_DASHBOARD_HOME"])
+        execute.assert_called_once()
 
     def test_bootstrap_home_and_fingerprint_are_stable_and_bounded(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -258,19 +362,45 @@ class LauncherScriptTest(unittest.TestCase):
                 recovered = sbk_dashboard_bootstrap.install_private_runtime(
                     ROOT, home, "1.2.3.4", "fingerprint"
                 )
-                self.assertEqual(sbk_dashboard_bootstrap.runtime_python(selected), recovered)
-                self.assertEqual("recovered runtime", recovered.read_text(encoding="utf-8"))
+                self.assertEqual(sbk_dashboard_bootstrap.runtime_python(selected), recovered.python)
+                self.assertEqual("saved environment reused", recovered.state)
+                self.assertEqual("recovered runtime", recovered.python.read_text(encoding="utf-8"))
 
     def test_environment_report_is_actionable_when_application_is_missing(self):
         missing = ModuleNotFoundError("No module named 'sbk_dashboard'", name="sbk_dashboard")
         output = io.StringIO()
         with (
+            patch.dict(
+                os.environ,
+                {
+                    "SBK_DASHBOARD_HOME": "/tmp/sbk-home",
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND": "private virtual environment",
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE": "saved environment reused",
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_PATH": "/tmp/sbk-runtime",
+                },
+                clear=True,
+            ),
             patch.object(sbk_dashboard_launcher.importlib, "import_module", side_effect=missing),
             redirect_stdout(output),
             self.assertRaisesRegex(SystemExit, "pip install"),
         ):
             sbk_dashboard_launcher.report_environment()
+        self.assertIn("Operating system:", output.getvalue())
         self.assertIn("Python available:", output.getvalue())
+        self.assertIn("Runtime preparation: saved environment reused", output.getvalue())
+        self.assertIn("Runtime location: /tmp/sbk-runtime", output.getvalue())
+
+    def test_successful_environment_report_marks_diagnostics_as_printed(self):
+        package = Mock(__version__="1.2.3.4")
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(sbk_dashboard_launcher.importlib, "import_module", return_value=package),
+            redirect_stdout(io.StringIO()),
+        ):
+            sbk_dashboard_launcher.report_environment()
+            self.assertEqual(
+                "1", os.environ["SBK_DASHBOARD_BOOTSTRAP_DIAGNOSTICS_REPORTED"]
+            )
 
     def write_fake_dashboard(self, root):
         package = root / "sbk_dashboard"
@@ -416,6 +546,20 @@ class LauncherScriptTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "between 1 and 65535"):
             sbk_dashboard_launcher.management_port(["-port", "0"])
 
+    def test_frozen_launcher_reenters_executable_for_children(self):
+        with (
+            patch.object(sbk_dashboard_launcher.sys, "frozen", True, create=True),
+            patch.object(sbk_dashboard_launcher.sys, "executable", "/portable/sbk-dashboard"),
+        ):
+            self.assertEqual(
+                ["/portable/sbk-dashboard", "--internal-launcher", "_watch", "1", "2"],
+                sbk_dashboard_launcher.launcher_command("_watch", "1", "2"),
+            )
+            self.assertEqual(
+                ["/portable/sbk-dashboard", "--internal-dashboard", "-port", "19721"],
+                sbk_dashboard_launcher.dashboard_command(["-port", "19721"]),
+            )
+
     def test_empty_windows_local_app_data_falls_back_to_home(self):
         fallback = Path("C:/Users/tester")
         expected = fallback / ".sbk-dashboard" / "launcher"
@@ -506,6 +650,9 @@ class LauncherScriptTest(unittest.TestCase):
             "python_requirement.py",
             "sbk-dashboard-launch.sh",
             "Invoke-SbkDashboard.ps1",
+            "Install-SbkDashboardPortable.ps1",
+            "install-portable.sh",
+            "portable-bootstrap.properties",
             "build_portable.py",
             "sbk_dashboard_bootstrap.py",
             "sbk_dashboard_launcher.py",

@@ -1,5 +1,6 @@
 import contextlib
 import io
+import os
 import socket
 import unittest
 from types import SimpleNamespace
@@ -68,12 +69,48 @@ class MainTest(unittest.TestCase):
         self.assertIn("|_____/|____/|_|\\_\\", text)
         self.assertIn("Supplied arguments: (none)", text)
         self.assertIn(f"SBK Dashboard version: {VERSION}", text)
+        self.assertIn("Operating system:", text)
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)
         self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged native-artifacts.json [default]", text)
+
+    def test_runtime_output_includes_bootstrap_selection(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND": "private virtual environment",
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE": "saved environment reused",
+                    "SBK_DASHBOARD_BOOTSTRAP_RUNTIME_PATH": "/tmp/sbk-runtime",
+                },
+                clear=True,
+            ),
+            self.assertLogs("sbk_dashboard.main", level="INFO") as captured,
+        ):
+            print_runtime([])
+        text = "\n".join(captured.output)
+        self.assertIn("Bootstrap runtime: private virtual environment", text)
+        self.assertIn("Runtime preparation: saved environment reused", text)
+        self.assertIn("Runtime location: /tmp/sbk-runtime", text)
+
+    def test_runtime_output_does_not_repeat_launcher_diagnostics(self):
+        with (
+            patch.dict(
+                os.environ,
+                {"SBK_DASHBOARD_BOOTSTRAP_DIAGNOSTICS_REPORTED": "1"},
+                clear=True,
+            ),
+            self.assertLogs("sbk_dashboard.main", level="INFO") as captured,
+        ):
+            print_runtime(["--help"])
+        text = "\n".join(captured.output)
+        self.assertIn(f"SBK Dashboard version: {VERSION}", text)
+        self.assertIn("Supplied arguments: --help", text)
+        self.assertNotIn("Operating system:", text)
+        self.assertNotIn("Python version:", text)
 
     @patch("sbk_dashboard.main.PortProcessManager.find_available")
     def test_default_native_ports_fall_back_and_update_default_grafana_url(self, available):

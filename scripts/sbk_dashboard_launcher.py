@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -31,6 +32,10 @@ except ModuleNotFoundError as error:
 
 try:
     from sbk_dashboard.contracts import (
+        BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT,
         DEFAULT_DASHBOARD_PORT,
         DEFAULT_HOME_DIRECTORY_NAME,
         LAUNCHER_DIRECTORY_ENVIRONMENT,
@@ -56,6 +61,12 @@ except ModuleNotFoundError as error:
     endpoint_policy = load_policy_module("endpoint_policy")
     DEFAULT_DASHBOARD_PORT = contracts.DEFAULT_DASHBOARD_PORT
     DEFAULT_HOME_DIRECTORY_NAME = contracts.DEFAULT_HOME_DIRECTORY_NAME
+    BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT = (
+        contracts.BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT
+    )
+    BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT
+    BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT
+    BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT
     LAUNCHER_DIRECTORY_ENVIRONMENT = contracts.LAUNCHER_DIRECTORY_ENVIRONMENT
     PORTABLE_HOME_ENVIRONMENT = contracts.PORTABLE_HOME_ENVIRONMENT
     PROCESS_CREATE_TIME_TOLERANCE_SECONDS = contracts.PROCESS_CREATE_TIME_TOLERANCE_SECONDS
@@ -73,6 +84,20 @@ STARTUP_HANDSHAKE_SECONDS = 10.0
 BACKGROUND_STARTUP_GRACE_SECONDS = 0.5
 WATCH_INTERVAL_SECONDS = 0.25
 FORCE_CLEANUP_SECONDS = 10.0
+
+
+def launcher_command(mode: str, *arguments: str) -> list[str]:
+    """Build a source or frozen command that re-enters this launcher."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--internal-launcher", mode, *arguments]
+    return [sys.executable, str(Path(__file__).resolve()), mode, *arguments]
+
+
+def dashboard_command(arguments: list[str]) -> list[str]:
+    """Build a source or frozen command that starts the application child."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--internal-dashboard", *arguments]
+    return [sys.executable, "-m", "sbk_dashboard", *arguments]
 
 
 def state_directory() -> Path:
@@ -296,7 +321,14 @@ def run_information_command(arguments: list[str]) -> int:
 
 
 def report_environment() -> None:
-    print(f"Python available: {sys.version.split()[0]} at {sys.executable}")
+    print(
+        f"Operating system: {platform.system()} {platform.release()} "
+        f"({platform.machine()}; {platform.platform()})"
+    )
+    print(
+        f"Python available: {platform.python_implementation()} {platform.python_version()} "
+        f"at {sys.executable}"
+    )
     if os.environ.get("VIRTUAL_ENV"):
         print(f"Environment: active virtual environment {os.environ['VIRTUAL_ENV']}")
     elif os.environ.get("CONDA_PREFIX"):
@@ -305,6 +337,20 @@ def report_environment() -> None:
         print(f"Environment: virtual environment {sys.prefix}")
     else:
         print("Environment: system/PATH Python")
+    runtime_kind = os.environ.get(BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT)
+    runtime_state = os.environ.get(BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT)
+    runtime_path = os.environ.get(BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT)
+    if runtime_kind:
+        print(f"Bootstrap runtime: {runtime_kind}")
+    elif getattr(sys, "frozen", False):
+        print("Bootstrap runtime: standalone frozen runtime")
+    if runtime_state:
+        print(f"Runtime preparation: {runtime_state}")
+    if runtime_path:
+        print(f"Runtime location: {runtime_path}")
+    portable_home = os.environ.get(PORTABLE_HOME_ENVIRONMENT)
+    if portable_home:
+        print(f"SBK Dashboard home: {portable_home}")
     try:
         package = importlib.import_module("sbk_dashboard")
     except ModuleNotFoundError as error:
@@ -319,6 +365,7 @@ def report_environment() -> None:
         ) from error
     version = getattr(package, "__version__", "unknown")
     print(f"sbk-dashboard available: version {version}")
+    os.environ[BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT] = "1"
 
 
 def foreground(arguments: list[str]) -> int:
@@ -387,16 +434,14 @@ def start_background(arguments: list[str]) -> int:
     started_marker = directory / f"startup-{startup_id}.started"
     try:
         child = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
+            launcher_command(
                 "_run",
                 str(parent.pid),
                 str(parent.create_time()),
                 str(marker),
                 str(started_marker),
                 *arguments,
-            ],
+            ),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -637,7 +682,7 @@ def run_dashboard(
     exit_code = 1
     try:
         child = subprocess.Popen(
-            [sys.executable, "-m", "sbk_dashboard", *arguments],
+            dashboard_command(arguments),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -652,15 +697,13 @@ def run_dashboard(
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             )
             subprocess.Popen(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
+                launcher_command(
                     "_watch",
                     str(supervisor.pid),
                     str(supervisor_created),
                     str(child_process.pid),
                     str(child_process.create_time()),
-                ],
+                ),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -708,7 +751,7 @@ def request_stop(process: psutil.Process, mode: str, create_time: float) -> None
             for child in process.children(recursive=True):
                 try:
                     command = child.cmdline()
-                    if any(
+                    if "--internal-dashboard" in command or any(
                         command[index] == "-m" and command[index + 1] == "sbk_dashboard"
                         for index in range(len(command) - 1)
                     ):

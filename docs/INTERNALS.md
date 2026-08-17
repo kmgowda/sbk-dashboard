@@ -29,13 +29,21 @@ Container packaging does not introduce another composition root. Production Comp
 image; the development override builds that image locally. Both invoke the same `sbk-dashboard` entry point, and the
 Python `run()` composition below remains the sole owner of Prometheus and Grafana in either delivery mode.
 
-The optional source-archive launchers are outside the package composition root. A dependency-free bootstrap first
+The optional source-archive launchers are outside the package composition root. A dependency-free dispatcher first
 reuses an active venv/Conda environment; with only Python 3.10+ available, it creates a versioned, platform-specific,
 source-fingerprinted private venv below `SBK_DASHBOARD_HOME`. An exclusive bounded lock protects a sibling staging
 directory and atomic promotion, two recent fingerprints are retained, and pip downloads are shared through
 `<home>/cache/pip`. It installs pip when necessary and prepares the local project before any launcher ownership
-state or native process can be acquired. Foreground mode then calls
-`main.main()` in the console-attached helper process. On Windows, an identity-specific stop-request file is watched
+state or native process can be acquired. Without supported Python, OS-native shell/PowerShell code downloads the
+exact-version portable archive and adjacent checksum, enforces bounded transfer and safe entries, and promotes a
+verified staging tree under `<home>/distributions/<version>/<platform>`. A valid cached tree bypasses the network.
+Both paths hand the launcher an environment kind, location, and fresh/reused/repaired state; the launcher combines
+that with OS and interpreter details before acquiring instance state or native processes.
+The repository URL and bootstrap transfer/lock bounds are shared through `scripts/portable-bootstrap.properties`
+so the dependency-free Unix and Windows implementations consume one policy contract.
+Foreground mode then calls
+`main.main()` in the console-attached helper process. The PyInstaller entry routes lifecycle verbs through the same
+launcher and uses internal executable modes for its dashboard child and watcher. On Windows, an identity-specific stop-request file is watched
 by one bounded thread and converted into `SIGINT` in that same process, while console interrupts are handled
 directly. Abrupt foreground death remains covered by the native-process guardians. Background mode first starts an empty supervisor, records its
 PID and creation time, and authorizes acquisition with a bounded marker handshake. Only then may the supervisor

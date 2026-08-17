@@ -26,6 +26,13 @@ IDs, samples, or registration persistence.
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.
 
+Source-checkout launchers can now fall back to the exact-version standalone release when Python 3.10+ is absent.
+The first fallback stores the verified runtime below `SBK_DASHBOARD_HOME/distributions`; later starts reuse it
+without Python or network access. Existing venv, Conda, private source runtimes, application data, registrations,
+native tools, and launcher ownership records remain compatible and retain precedence. No data migration is needed.
+The launcher now reports OS/Python/environment details and whether it created, reused, or repaired the selected
+runtime. This is informational output only and adds no persisted-data migration.
+
 Example systemd command after installing into `/opt/sbk-dashboard-venv`:
 
 ```ini
