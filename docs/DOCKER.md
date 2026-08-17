@@ -186,6 +186,10 @@ multi-architecture digests carry BuildKit SBOM/provenance attestations and a key
 the tagged GitHub Actions workflow. Verify the digest and signature as documented in `DOCKER_HUB.md`; a version tag
 alone is human-readable but remains registry-mutable.
 
+The Dockerfile pins a reviewed official Python multi-architecture digest and refreshes packages from the matching
+Debian security repository while building the final runtime stage. This keeps fixed operating-system findings out
+of a newly built image even when the upstream base digest has not yet been republished.
+
 Graceful `docker stop` sends the declared `SIGTERM` through `tini`; the Python lifecycle closes Grafana and
 Prometheus in reverse dependency order and removes ownership records. The existing guardian processes provide
 additional cleanup if the Python control plane dies unexpectedly. Compose allows 30 seconds for ordered

@@ -7,7 +7,7 @@ from sbk_dashboard.version import VERSION
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_BASE = (
     "python:3.12.13-slim-trixie@"
-    "sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de"
+    "sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36"
 )
 
 
@@ -79,6 +79,7 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("psutil==7.2.2", self.container_runtime_requirements)
         self.assertEqual(2, self.container_runtime_requirements.count("--hash=sha256:"))
         self.assertIn("--require-hashes", self.dockerfile)
+        self.assertIn("apt-get upgrade --yes --no-install-recommends", self.dockerfile)
         self.assertIn("--no-build-isolation --no-deps", self.dockerfile)
         self.assertIn('test "${installed_version}" = "${APPLICATION_VERSION}"', self.dockerfile)
         self.assertNotIn("--chown=10001:10001 /opt/prometheus", self.dockerfile)
