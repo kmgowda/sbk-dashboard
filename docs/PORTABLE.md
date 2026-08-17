@@ -31,6 +31,11 @@ downloads the archive and adjacent SHA-256 from the release matching `version.py
 it, and executes the same arguments through the frozen lifecycle launcher. It acquires no launcher state or native
 process until preparation succeeds.
 
+Bootstrap deliberately does not install Conda or modify the system Python. Each invocation reports the detected
+OS/release/architecture, Python implementation/version/executable, selected active/private/standalone environment,
+runtime location, portable home, and whether preparation created a fresh environment, reused the saved validated
+environment, or repaired it. This report is emitted before launcher ownership or native services are acquired.
+
 On Linux/macOS this fallback requires standard `tar` plus `curl` or `wget`; Windows uses PowerShell 5.1+ and .NET.
 Set `SBK_DASHBOARD_PORTABLE_BASE_URL` to an HTTPS release mirror containing the same filenames and checksum files.
 The default is the exact `v<version>` GitHub release, never a mutable latest-release URL. An unreleased checkout must

@@ -81,6 +81,8 @@ Documentation map:
 - A cloned repository or source archive uses Python 3.10+ when available and otherwise installs the exact-version
   standalone runtime under `SBK_DASHBOARD_HOME`; Python, pip, venv, and Conda are optional.
 - An activated venv or Conda environment is reused when present.
+- The bootstrap never installs Conda or modifies the system Python. It prepares an active environment, creates a
+  private venv from supported Python, or uses a verified standalone runtime that carries its own Python.
 - Network access is needed on the first start when the standalone runtime, Python packages, Prometheus, or Grafana
   are not cached. A Python-free POSIX start also needs `curl` or `wget`; Windows uses PowerShell and .NET.
 
@@ -106,6 +108,9 @@ runtime when Python is absent or too old. Every prepared runtime is reused on la
 
 Windows Command Prompt can use `sbk-dashboard.cmd`. Use `repair` to rebuild or redownload the selected runtime. Set
 `SBK_DASHBOARD_HOME` before the first start to relocate packages, caches, native tools, data, state, and logs.
+Every start reports the operating system/release/architecture, Python implementation/version/executable,
+venv/Conda/standalone kind, runtime location, portable home, and whether it created a fresh environment, reused a
+saved environment, or repaired one.
 
 GitHub releases also provide standalone Linux AMD64, macOS Apple-silicon, and Windows AMD64 archives. Extract the
 matching archive and run its `sbk-dashboard` executable; these bundles need no system Python. Verify the adjacent
@@ -308,8 +313,8 @@ Defaults:
 - Existing-process continuation: disabled
 - Short-status interval: 60 seconds
 
-Startup prints the SBK Dashboard version, Python version and executable, environment type, supplied arguments,
-selected native platform,
+Startup prints the SBK Dashboard version, operating-system details, Python version and executable, environment type
+and location, fresh/reused preparation state, supplied arguments, selected native platform,
 all effective options and their sources, and dashboard links reachable through the configured address family. An
 IPv4 wildcard includes `localhost`, `127.0.0.1`, and discovered IPv4 addresses; an IPv6 wildcard includes `::1` and
 discovered IPv6 addresses.

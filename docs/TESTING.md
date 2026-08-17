@@ -242,14 +242,16 @@ page, and confirm both named series remain live in representative throughput, la
 Launcher bootstrap tests verify active venv/Conda precedence, private-home runtime selection when only Python is
 present, deterministic source fingerprints, bounded stale-lock recovery, automatic installation when `psutil` or
 `sbk-dashboard` is missing, pip bootstrapping, argument preservation, and failure before launcher acquisition when
-environment preparation cannot complete. Portable-builder tests verify archive naming, internal manifests,
+environment preparation cannot complete. They also verify the explicit OS/Python/environment diagnostic handoff and
+fresh-versus-saved runtime state. Portable-builder tests verify archive naming, internal manifests,
 external SHA-256 files, frozen guardian/lifecycle dispatch, Python-free first installation, exact argument forwarding,
 and a second offline cached invocation. Static cross-platform contracts cover the PowerShell bounded downloader and
 safe ZIP extraction; native Windows and macOS smoke tests remain required before claiming validation there.
 
 For a clean source-bootstrap smoke test, set `SBK_DASHBOARD_HOME` to a unique temporary directory, remove
 `VIRTUAL_ENV`/`CONDA_PREFIX` from that test process, and run `./sbk-dashboard --help` twice. Confirm the first start
-creates one runtime and the second performs no installation. Remove only that exact test home after confirming no
+reports `fresh environment created`, creates one runtime, and the second reports `saved environment reused` without
+installation. Confirm both runs print OS, Python, environment, runtime path, and portable home. Remove only that exact test home after confirming no
 launcher/native process remains.
 
 For the no-Python fallback, run the root command from a clean native host after removing Python from `PATH` (without

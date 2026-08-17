@@ -45,6 +45,11 @@ Standalone release archives contain a frozen `sbk-dashboard` executable and need
 foreground/background startup and selective/all-instance stop. See [`PORTABLE.md`](PORTABLE.md) for verification, platform
 coverage, private-home layout, offline behavior, and recovery.
 
+The bootstrap does not install Conda or replace the host Python. It prepares an already active venv/Conda
+environment, creates an isolated private venv when supported Python exists, or selects the standalone bundle with
+its own Python. Startup identifies the OS/release/architecture, Python implementation/version/executable,
+environment kind and location, portable home, and `fresh environment created`/`saved environment reused` state.
+
 ## Python venv lifecycle
 
 Create, activate, install, and run on Linux or macOS:
@@ -146,7 +151,8 @@ sbk-dashboard
 
 On first start the control plane:
 
-1. prints its version, Python executable/environment, supplied arguments, and effective configuration sources;
+1. prints its version, OS details, Python executable/environment, fresh/reused bootstrap state, supplied arguments,
+   and effective configuration sources;
 2. resolves installed Prometheus and Grafana or downloads the platform-specific pinned archives;
 3. verifies SHA-256, safely extracts, and atomically installs missing tools;
 4. loads endpoint registrations and regenerates monitoring configuration;

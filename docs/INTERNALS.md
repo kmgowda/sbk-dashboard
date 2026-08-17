@@ -37,6 +37,8 @@ directory and atomic promotion, two recent fingerprints are retained, and pip do
 state or native process can be acquired. Without supported Python, OS-native shell/PowerShell code downloads the
 exact-version portable archive and adjacent checksum, enforces bounded transfer and safe entries, and promotes a
 verified staging tree under `<home>/distributions/<version>/<platform>`. A valid cached tree bypasses the network.
+Both paths hand the launcher an environment kind, location, and fresh/reused/repaired state; the launcher combines
+that with OS and interpreter details before acquiring instance state or native processes.
 The repository URL and bootstrap transfer/lock bounds are shared through `scripts/portable-bootstrap.properties`
 so the dependency-free Unix and Windows implementations consume one policy contract.
 Foreground mode then calls

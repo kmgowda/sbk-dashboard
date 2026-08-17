@@ -312,7 +312,8 @@ Python-free shell/PowerShell stage zero downloads the exact-version standalone r
 `SBK_DASHBOARD_HOME/distributions`, verifies its published SHA-256, safely extracts it, and atomically promotes it. An exclusive,
 bounded installation lock protects a sibling staging build and atomic promotion, and two recent source fingerprints
 are retained per version/platform. Shared pip/native caches, default application data, launcher state, and logs stay
-under the dedicated portable home. Preparation completes before launcher acquisition. Launchers keep one
+under the dedicated portable home. Preparation completes before launcher acquisition and passes an explicit
+fresh/reused/repaired state plus environment kind/location into the OS-neutral launcher diagnostic. Launchers keep one
 port-plus-mode-plus-PID-plus-creation-time identity per script-started instance. Help
 and version requests bypass ownership checks. Different management ports
 have independent state and logs; the stop launcher targets one port when supplied or every recorded instance by

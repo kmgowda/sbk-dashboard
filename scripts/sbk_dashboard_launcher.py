@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -31,6 +32,10 @@ except ModuleNotFoundError as error:
 
 try:
     from sbk_dashboard.contracts import (
+        BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT,
+        BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT,
         DEFAULT_DASHBOARD_PORT,
         DEFAULT_HOME_DIRECTORY_NAME,
         LAUNCHER_DIRECTORY_ENVIRONMENT,
@@ -56,6 +61,12 @@ except ModuleNotFoundError as error:
     endpoint_policy = load_policy_module("endpoint_policy")
     DEFAULT_DASHBOARD_PORT = contracts.DEFAULT_DASHBOARD_PORT
     DEFAULT_HOME_DIRECTORY_NAME = contracts.DEFAULT_HOME_DIRECTORY_NAME
+    BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT = (
+        contracts.BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT
+    )
+    BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT
+    BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT
+    BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT = contracts.BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT
     LAUNCHER_DIRECTORY_ENVIRONMENT = contracts.LAUNCHER_DIRECTORY_ENVIRONMENT
     PORTABLE_HOME_ENVIRONMENT = contracts.PORTABLE_HOME_ENVIRONMENT
     PROCESS_CREATE_TIME_TOLERANCE_SECONDS = contracts.PROCESS_CREATE_TIME_TOLERANCE_SECONDS
@@ -310,7 +321,14 @@ def run_information_command(arguments: list[str]) -> int:
 
 
 def report_environment() -> None:
-    print(f"Python available: {sys.version.split()[0]} at {sys.executable}")
+    print(
+        f"Operating system: {platform.system()} {platform.release()} "
+        f"({platform.machine()}; {platform.platform()})"
+    )
+    print(
+        f"Python available: {platform.python_implementation()} {platform.python_version()} "
+        f"at {sys.executable}"
+    )
     if os.environ.get("VIRTUAL_ENV"):
         print(f"Environment: active virtual environment {os.environ['VIRTUAL_ENV']}")
     elif os.environ.get("CONDA_PREFIX"):
@@ -319,6 +337,20 @@ def report_environment() -> None:
         print(f"Environment: virtual environment {sys.prefix}")
     else:
         print("Environment: system/PATH Python")
+    runtime_kind = os.environ.get(BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT)
+    runtime_state = os.environ.get(BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT)
+    runtime_path = os.environ.get(BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT)
+    if runtime_kind:
+        print(f"Bootstrap runtime: {runtime_kind}")
+    elif getattr(sys, "frozen", False):
+        print("Bootstrap runtime: standalone frozen runtime")
+    if runtime_state:
+        print(f"Runtime preparation: {runtime_state}")
+    if runtime_path:
+        print(f"Runtime location: {runtime_path}")
+    portable_home = os.environ.get(PORTABLE_HOME_ENVIRONMENT)
+    if portable_home:
+        print(f"SBK Dashboard home: {portable_home}")
     try:
         package = importlib.import_module("sbk_dashboard")
     except ModuleNotFoundError as error:
@@ -333,6 +365,7 @@ def report_environment() -> None:
         ) from error
     version = getattr(package, "__version__", "unknown")
     print(f"sbk-dashboard available: version {version}")
+    os.environ[BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT] = "1"
 
 
 def foreground(arguments: list[str]) -> int:

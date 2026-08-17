@@ -20,6 +20,12 @@ import psutil
 
 from sbk_dashboard.bootstrap import NativeToolBootstrap
 from sbk_dashboard.config import MonitoringConfig, ParsedConfiguration, parse_configuration, parser
+from sbk_dashboard.contracts import (
+    BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT,
+    BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT,
+    BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT,
+    BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT,
+)
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.processes import PortProcessManager
 from sbk_dashboard.registry import TargetRegistry
@@ -211,10 +217,33 @@ def print_runtime(arguments: list[str]) -> None:
     except OSError as error:
         LOGGER.warning("Unable to load startup banner: %s", error)
     LOGGER.info("SBK Dashboard version: %s", VERSION)
-    LOGGER.info("Python version: %s (%s)", platform.python_version(), platform.python_implementation())
-    LOGGER.info("Python executable: %s", sys.executable)
-    environment = "Conda" if os.environ.get("CONDA_PREFIX") else "venv" if sys.prefix != sys.base_prefix else "system"
-    LOGGER.info("Python environment: %s (%s)", environment, sys.prefix)
+    if not os.environ.get(BOOTSTRAP_DIAGNOSTICS_REPORTED_ENVIRONMENT):
+        LOGGER.info(
+            "Operating system: %s %s (%s; %s)",
+            platform.system(),
+            platform.release(),
+            platform.machine(),
+            platform.platform(),
+        )
+        LOGGER.info("Python version: %s (%s)", platform.python_version(), platform.python_implementation())
+        LOGGER.info("Python executable: %s", sys.executable)
+        environment = (
+            "Conda"
+            if os.environ.get("CONDA_PREFIX")
+            else "venv"
+            if sys.prefix != sys.base_prefix
+            else "system"
+        )
+        LOGGER.info("Python environment: %s (%s)", environment, sys.prefix)
+        runtime_kind = os.environ.get(BOOTSTRAP_RUNTIME_KIND_ENVIRONMENT)
+        runtime_state = os.environ.get(BOOTSTRAP_RUNTIME_STATE_ENVIRONMENT)
+        runtime_path = os.environ.get(BOOTSTRAP_RUNTIME_PATH_ENVIRONMENT)
+        if runtime_kind:
+            LOGGER.info("Bootstrap runtime: %s", runtime_kind)
+        if runtime_state:
+            LOGGER.info("Runtime preparation: %s", runtime_state)
+        if runtime_path:
+            LOGGER.info("Runtime location: %s", runtime_path)
     LOGGER.info("Supplied arguments: %s", " ".join(arguments) if arguments else "(none)")
 
 

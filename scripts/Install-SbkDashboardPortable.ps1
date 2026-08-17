@@ -172,7 +172,10 @@ $ArchivePart = $null
 $Staging = $null
 try {
     $Force = $Mode -eq 'repair'
-    if ($Force -or -not (Test-PortableRuntime)) {
+    $RuntimeValid = Test-PortableRuntime
+    $RuntimeState = 'saved environment reused'
+    if ($Force -or -not $RuntimeValid) {
+        $RuntimeState = if ($Force) { 'environment repaired' } else { 'fresh environment created' }
         $ChecksumPart = Join-Path $CacheDirectory "$ArchiveName.sha256.part-$PID"
         $ArchivePart = Join-Path $CacheDirectory "$ArchiveName.part-$PID"
         $Archive = Join-Path $CacheDirectory $ArchiveName
@@ -241,8 +244,17 @@ try {
 }
 
 $env:SBK_DASHBOARD_HOME = $PortableHome
+$env:SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND = 'standalone runtime with bundled Python'
+$env:SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE = $RuntimeState
+$env:SBK_DASHBOARD_BOOTSTRAP_RUNTIME_PATH = $InstallDirectory
 Write-Host "Using standalone SBK Dashboard $Version from $InstallDirectory"
 if ($Mode -eq 'repair') {
+    $OsDescription = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+    Write-Host "Operating system: $OsDescription ($Architecture; $PlatformId)"
+    Write-Host "Bootstrap runtime: $env:SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND"
+    Write-Host "Runtime preparation: $RuntimeState"
+    Write-Host "Runtime location: $InstallDirectory"
+    Write-Host "SBK Dashboard home: $PortableHome"
     Write-Host "Repaired standalone SBK Dashboard $Version runtime."
     exit 0
 }

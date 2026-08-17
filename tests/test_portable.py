@@ -116,7 +116,10 @@ class PortableReleaseTest(unittest.TestCase):
             bundle.mkdir()
             executable = bundle / "sbk-dashboard"
             executable.write_text(
-                "#!/bin/sh\nprintf '%s\\n' \"$SBK_DASHBOARD_HOME\" \"$@\" >\"$PORTABLE_TEST_OUTPUT\"\n",
+                "#!/bin/sh\nprintf '%s\\n' \"$SBK_DASHBOARD_HOME\" "
+                "\"$SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND\" "
+                "\"$SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE\" \"$@\" "
+                '>"$PORTABLE_TEST_OUTPUT"\n',
                 encoding="utf-8",
             )
             executable.chmod(0o755)
@@ -125,7 +128,7 @@ class PortableReleaseTest(unittest.TestCase):
                 output.add(bundle, arcname=bundle.name)
             checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
             (release / f"{archive_name}.sha256").write_text(
-                f"{checksum}  {archive_name}\n", encoding="utf-8"
+                f"{checksum.upper()}  {archive_name}\n", encoding="utf-8"
             )
             home = root / "home"
             observed = root / "arguments.txt"
@@ -178,9 +181,17 @@ class PortableReleaseTest(unittest.TestCase):
             self.assertEqual(0, first.returncode, first.stdout + first.stderr)
             self.assertIn("Preparing standalone", first.stdout)
             self.assertEqual(
-                [str(home), "foreground", "-name", "Dashboard with spaces"],
+                [
+                    str(home),
+                    "standalone runtime with bundled Python",
+                    "fresh environment created",
+                    "foreground",
+                    "-name",
+                    "Dashboard with spaces",
+                ],
                 observed.read_text(encoding="utf-8").splitlines(),
             )
+            self.assertEqual([], list((home / "cache" / "releases").glob("*.listing-*")))
             shutil.rmtree(release)
             second = subprocess.run(
                 [str(installer), "stop", "-port", "19721"],
@@ -191,7 +202,14 @@ class PortableReleaseTest(unittest.TestCase):
             self.assertEqual(0, second.returncode, second.stdout + second.stderr)
             self.assertNotIn("Preparing standalone", second.stdout)
             self.assertEqual(
-                [str(home), "stop", "-port", "19721"],
+                [
+                    str(home),
+                    "standalone runtime with bundled Python",
+                    "saved environment reused",
+                    "stop",
+                    "-port",
+                    "19721",
+                ],
                 observed.read_text(encoding="utf-8").splitlines(),
             )
 
@@ -263,6 +281,17 @@ class PortableReleaseTest(unittest.TestCase):
             self.assertNotEqual(0, failed.returncode)
             self.assertIn("dedicated subdirectory", failed.stderr)
 
+            for broad_home in ("~/", "/", "//"):
+                environment["SBK_DASHBOARD_HOME"] = broad_home
+                failed = subprocess.run(
+                    [str(installer), "foreground"],
+                    capture_output=True,
+                    text=True,
+                    env=environment,
+                )
+                self.assertNotEqual(0, failed.returncode, broad_home)
+                self.assertIn("dedicated subdirectory", failed.stderr)
+
     def test_windows_target_always_creates_zip_archive(self):
         with (
             tempfile.TemporaryDirectory() as temporary,
@@ -319,6 +348,7 @@ class PortableReleaseTest(unittest.TestCase):
         self.assertIn("$HomeValue -eq '~'", powershell_installer)
         self.assertIn("$HomeValue -split '[\\\\/]'", powershell_installer)
         self.assertIn("$UnixType -notin @(0, 0x4000, 0x8000)", powershell_installer)
+        self.assertIn("SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE", powershell_installer)
 
 
 if __name__ == "__main__":

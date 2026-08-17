@@ -38,18 +38,26 @@ case $(uname -m) in
 esac
 PLATFORM_ID="$OS_ID-$ARCH_ID"
 
+USER_HOME=${HOME:?}
+while [ "$USER_HOME" != / ] && [ "${USER_HOME%/}" != "$USER_HOME" ]; do
+    USER_HOME=${USER_HOME%/}
+done
+
 if [ -n "${SBK_DASHBOARD_HOME:-}" ]; then
     case "$SBK_DASHBOARD_HOME" in
-        /*) PORTABLE_HOME=${SBK_DASHBOARD_HOME%/} ;;
-        \~) PORTABLE_HOME=${HOME:?} ;;
-        \~/*) PORTABLE_HOME=${HOME:?}/${SBK_DASHBOARD_HOME#\~/} ;;
-        *) PORTABLE_HOME=$PWD/${SBK_DASHBOARD_HOME%/} ;;
+        /*) PORTABLE_HOME=$SBK_DASHBOARD_HOME ;;
+        \~) PORTABLE_HOME=$USER_HOME ;;
+        \~/*) PORTABLE_HOME=$USER_HOME/${SBK_DASHBOARD_HOME#\~/} ;;
+        *) PORTABLE_HOME=$PWD/$SBK_DASHBOARD_HOME ;;
     esac
 else
-    PORTABLE_HOME="${HOME:?}/.sbk-dashboard"
+    PORTABLE_HOME="$USER_HOME/.sbk-dashboard"
 fi
+while [ "$PORTABLE_HOME" != / ] && [ "${PORTABLE_HOME%/}" != "$PORTABLE_HOME" ]; do
+    PORTABLE_HOME=${PORTABLE_HOME%/}
+done
 case "$PORTABLE_HOME" in
-    /|"$HOME"|*/../*|*/..|*/./*|*/.) echo "SBK_DASHBOARD_HOME must be a dedicated subdirectory without traversal." >&2; exit 1 ;;
+    /|"$USER_HOME"|*/../*|*/..|*/./*|*/.) echo "SBK_DASHBOARD_HOME must be a dedicated subdirectory without traversal." >&2; exit 1 ;;
 esac
 
 ARCHIVE_NAME="sbk-dashboard-$VERSION-$PLATFORM_ID.tar.gz"
@@ -166,8 +174,18 @@ printf '%s\n%s\n' "$$" "$(date +%s)" >"$LOCK_DIRECTORY/pid"
 FORCE=false
 [ "$MODE" != repair ] || FORCE=true
 BACKUP=
+RUNTIME_VALID=false
+if runtime_valid; then
+    RUNTIME_VALID=true
+fi
+RUNTIME_STATE="saved environment reused"
 
-if [ "$FORCE" = true ] || ! runtime_valid; then
+if [ "$FORCE" = true ] || [ "$RUNTIME_VALID" = false ]; then
+    if [ "$FORCE" = true ]; then
+        RUNTIME_STATE="environment repaired"
+    else
+        RUNTIME_STATE="fresh environment created"
+    fi
     CHECKSUM_PART="$CACHE_DIRECTORY/$ARCHIVE_NAME.sha256.part-$$"
     ARCHIVE_PART="$CACHE_DIRECTORY/$ARCHIVE_NAME.part-$$"
     ARCHIVE="$CACHE_DIRECTORY/$ARCHIVE_NAME"
@@ -183,6 +201,7 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
     EXPECTED=$(awk 'NR == 1 {print $1}' "$CHECKSUM_PART")
     case "$EXPECTED" in *[!0-9a-fA-F]*|'') echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1 ;; esac
     [ "${#EXPECTED}" -eq 64 ] || { echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1; }
+    EXPECTED=$(printf '%s' "$EXPECTED" | tr '[:upper:]' '[:lower:]')
     if [ ! -f "$ARCHIVE" ] || [ "$(sha256_file "$ARCHIVE")" != "$EXPECTED" ]; then
         download "$BASE_URL/$ARCHIVE_NAME" "$ARCHIVE_PART" "$MAXIMUM_ARCHIVE_BYTES" || {
             echo "Unable to download $ARCHIVE_NAME from $BASE_URL." >&2
@@ -222,6 +241,8 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
     chmod +x "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard"
     EXECUTABLE_SHA256=$(sha256_file "$STAGING/sbk-dashboard-$VERSION-$PLATFORM_ID/sbk-dashboard")
     printf '%s\n%s\n' "$EXPECTED" "$EXECUTABLE_SHA256" >"$STAGING/.installed-sha256"
+    rm -f "$LISTING"
+    LISTING=
     if [ -d "$INSTALL_DIRECTORY" ]; then
         BACKUP="$INSTALL_PARENT/.backup-$ARCHIVE_NAME-$$"
         mv "$INSTALL_DIRECTORY" "$BACKUP"
@@ -234,7 +255,6 @@ if [ "$FORCE" = true ] || ! runtime_valid; then
     CHECKSUM_PART=
     ARCHIVE_PART=
     STAGING=
-    LISTING=
 fi
 
 if [ -n "$BACKUP" ]; then
@@ -243,8 +263,16 @@ fi
 cleanup
 trap - EXIT HUP INT TERM
 export SBK_DASHBOARD_HOME="$PORTABLE_HOME"
+export SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND="standalone runtime with bundled Python"
+export SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE="$RUNTIME_STATE"
+export SBK_DASHBOARD_BOOTSTRAP_RUNTIME_PATH="$INSTALL_DIRECTORY"
 echo "Using standalone SBK Dashboard $VERSION from $INSTALL_DIRECTORY"
 if [ "$MODE" = repair ]; then
+    echo "Operating system: $(uname -s) $(uname -r) ($(uname -m); $PLATFORM_ID)"
+    echo "Bootstrap runtime: $SBK_DASHBOARD_BOOTSTRAP_RUNTIME_KIND"
+    echo "Runtime preparation: $RUNTIME_STATE"
+    echo "Runtime location: $INSTALL_DIRECTORY"
+    echo "SBK Dashboard home: $PORTABLE_HOME"
     echo "Repaired standalone SBK Dashboard $VERSION runtime."
     exit 0
 fi
