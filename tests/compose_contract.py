@@ -19,7 +19,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = "sbk-dashboard"
 ACQUISITION_KEYS = ("image", "pull_policy", "build")
-RESOURCE_KEYS = ("cpus", "mem_limit", "pids_limit")
+RESOURCE_KEYS = ("cpus", "mem_limit")
 
 
 def resolved(*files: str) -> dict[str, Any]:
@@ -50,6 +50,13 @@ def main() -> None:
         raise AssertionError("Production Compose must consume a published image without a build section")
     if production_service.get("pull_policy") != "missing":
         raise AssertionError("Production Compose must pull only when the pinned image is missing")
+    if production_service.get("pids_limit") != 512:
+        raise AssertionError("Production Compose must bound the process count by default")
+    if production_service.get("logging") != {
+        "driver": "json-file",
+        "options": {"max-file": "3", "max-size": "10m"},
+    }:
+        raise AssertionError("Production Compose must rotate local container logs by default")
     if "build" not in development_service or development_service.get("pull_policy") != "never":
         raise AssertionError("Development Compose must select an explicit local-only source build")
     if runtime_definition(production) != runtime_definition(development):
@@ -58,9 +65,9 @@ def main() -> None:
     selected_resources = {key: resource_service.pop(key, None) for key in RESOURCE_KEYS}
     if resources != production:
         raise AssertionError("Resource overlay changes more than container resource limits")
-    if selected_resources != {"cpus": 2, "mem_limit": "4294967296", "pids_limit": 512}:
+    if selected_resources != {"cpus": 2, "mem_limit": "4294967296"}:
         raise AssertionError(f"Unexpected default resource limits: {selected_resources}")
-    print("Production/development runtime definitions and optional resource limits match")
+    print("Production/development runtime definitions and bounded resource contracts match")
 
 
 if __name__ == "__main__":

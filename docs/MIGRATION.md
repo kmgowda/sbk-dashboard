@@ -121,8 +121,11 @@ firewall or authenticated proxy. Compose also runs with a read-only root filesys
 under the existing `/var/lib/sbk-dashboard` volume, so no data migration is required. Native binaries under `/opt`
 are now immutable root-owned image content.
 
-The optional `compose.resources.yaml` overlay supplies default 4 GiB memory, 2 CPU, and 512 PID limits. It is not
-automatically applied, allowing existing deployments to select limits appropriate to their target cardinality.
+The base `compose.yaml` now applies a 512 PID limit and Docker `json-file` rotation of 10 MiB with three files.
+Override these with `SBK_DASHBOARD_PIDS_LIMIT`, `SBK_DASHBOARD_LOG_MAX_SIZE`, and
+`SBK_DASHBOARD_LOG_MAX_FILES`. The optional `compose.resources.yaml` overlay supplies default 4 GiB memory and 2
+CPU limits; it is not automatically applied, allowing existing deployments to select capacity appropriate to their
+target cardinality.
 Release images are vulnerability-gated, carry SBOM/provenance attestations, and are signed by the GitHub release
 workflow. Existing version tags remain usable; production operators can adopt immutable digest references without
 changing stored registrations or monitoring data.

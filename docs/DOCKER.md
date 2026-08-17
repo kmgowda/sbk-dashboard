@@ -67,6 +67,7 @@ Release tags publish `linux/amd64` and `linux/arm64` images to Docker Hub. Run a
 ```bash
 docker run --detach --name sbk-dashboard --restart unless-stopped \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
+  --pids-limit 512 --log-opt max-size=10m --log-opt max-file=3 \
   --publish 127.0.0.1:9721:9721 --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
@@ -82,7 +83,9 @@ checksums come from the same packaged `native-artifacts.json` used by direct ins
 as Docker build arguments. Native archive downloads are checksum-verified,
 time-bounded, retried, and capped at the same 2 GiB per-download maximum as automatic native installation.
 Python build tools and the Linux AMD64/ARM64 `psutil` wheels are exact-version and SHA-256 pinned. The build verifies
-that the installed application version equals the OCI `APPLICATION_VERSION` label input.
+that the installed application version equals the OCI `APPLICATION_VERSION` label input. Direct final-image Debian
+packages are exact-version locked in `requirements/container-os.txt`; the base image digest owns the remaining
+transitive OS inventory. Builds fail closed when a reviewed direct package version is no longer available.
 
 Resolve an immutable digest after pulling or publishing:
 
@@ -156,21 +159,40 @@ For a bind mount, create the directory in advance and make it writable by UID/GI
 or volume while the container is stopped for a consistent Prometheus/Grafana snapshot. Never copy runtime PID state
 from a running instance into another simultaneously running instance.
 
+Back up and restore a named volume with the pinned application image as a minimal tar helper:
+
+```bash
+docker compose stop
+docker volume create sbk-dashboard-restore
+docker run --rm --user 0:0 --entrypoint sh \
+  --volume sbk-dashboard_sbk-dashboard-data:/source:ro \
+  --volume sbk-dashboard-restore:/restore \
+  kmgowda/sbk-dashboard:1.26.8.2 \
+  -c 'set -eu; tar -C /source -cf - . | tar -C /restore -xf -'
+```
+
+Replace `sbk-dashboard_sbk-dashboard-data` with the name reported by `docker volume ls`. Test the restored volume
+with a separate stopped deployment before treating the backup as recoverable. The automated container smoke test
+does this copy into a fresh volume and revalidates registrations, dashboards, comparisons, and Prometheus history.
+
 ## Optional resource limits
 
-The base Compose definition does not assume that a small development host and a high-cardinality production host
-have the same capacity. Apply the optional overlay to select explicit bounds:
+The base Compose definition always limits the container to 512 PIDs. It does not assume that a small development
+host and a high-cardinality production host have the same CPU and memory capacity. Apply the optional overlay to
+select those bounds:
 
 ```bash
 docker compose -f compose.yaml -f compose.resources.yaml up --detach
 ```
 
-Its defaults are 4 GiB memory, 2 CPUs, and 512 PIDs. Override them when necessary:
+Its defaults are 4 GiB memory and 2 CPUs. Override them, the base PID limit, and log rotation when necessary:
 
 ```bash
 SBK_DASHBOARD_MEMORY_LIMIT=8g \
 SBK_DASHBOARD_CPU_LIMIT=4 \
 SBK_DASHBOARD_PIDS_LIMIT=768 \
+SBK_DASHBOARD_LOG_MAX_SIZE=20m \
+SBK_DASHBOARD_LOG_MAX_FILES=5 \
 docker compose -f compose.yaml -f compose.resources.yaml up --detach
 ```
 
@@ -183,22 +205,24 @@ Authentication is not implemented. Restrict ports 9721 and 3000 with host firewa
 network, or an authenticated reverse proxy. Prometheus 9090 is intentionally neither exposed nor published.
 
 The Compose definition drops all Linux capabilities, enables `no-new-privileges`, makes the image root filesystem
-read-only, and provides a bounded temporary `/tmp`. Only the `/var/lib/sbk-dashboard` volume is persistent and
+read-only, provides a bounded temporary `/tmp`, limits the process count, and rotates the Docker `json-file` log.
+Only the `/var/lib/sbk-dashboard` volume is persistent and
 writable. Prometheus and Grafana installations under `/opt` remain root-owned and non-writable by UID 10001. Do not
 add privileged mode or mount the Docker socket. Native child logs and control-plane state remain bounded according
 to normal sbk-dashboard settings. The image health check reports unhealthy when the management/native stack health
 endpoint cannot respond successfully.
 
-Release CI scans the runnable AMD64 image with pinned Trivy and fails for fixed `HIGH` or `CRITICAL` OS/library
+Release and weekly scheduled CI scan the runnable AMD64 image with pinned Trivy and fail for fixed `HIGH` or `CRITICAL` OS/library
 vulnerabilities. `.trivyignore.yaml` contains only target-scoped, explained, expiring exceptions for findings still
 present in the newest official native builds; an expired exception fails the next build. Published
 multi-architecture digests carry BuildKit SBOM/provenance attestations and a keyless Cosign signature issued from
 the tagged GitHub Actions workflow. Verify the digest and signature as documented in `DOCKER_HUB.md`; a version tag
 alone is human-readable but remains registry-mutable.
 
-The Dockerfile pins a reviewed official Python multi-architecture digest and refreshes packages from the matching
-Debian security repository while building the final runtime stage. This keeps fixed operating-system findings out
-of a newly built image even when the upstream base digest has not yet been republished.
+The Dockerfile pins a reviewed official Python multi-architecture digest and exact direct runtime package versions.
+The installed package lock is retained in the image beside OCI creation, documentation, revision, version, and base
+identity labels. Updating the base digest or OS lock is an explicit maintenance change followed by both architecture
+gates and the vulnerability scan.
 
 Graceful `docker stop` sends the declared `SIGTERM` through `tini`; the Python lifecycle closes Grafana and
 Prometheus in reverse dependency order and removes ownership records. The existing guardian processes provide
@@ -223,7 +247,9 @@ topology remain inherited from `compose.yaml`.
 Build and smoke-test the local architecture directly:
 
 ```bash
-docker build --build-arg VCS_REF=local --tag sbk-dashboard:1.26.8.2 .
+docker build --build-arg VCS_REF=local \
+  --build-arg BUILD_DATE="$(git show -s --format=%cI HEAD)" \
+  --tag sbk-dashboard:1.26.8.2 .
 python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
 ```
 
@@ -242,8 +268,9 @@ Docker cannot load a multi-platform image into the classic local image store. Fo
 host platform with `--load`; for a release manifest, use the authenticated `--push` workflow in `DOCKER_HUB.md`.
 
 The live smoke test validates host port access, read-only-root execution, immutable native tools, registration, a
-generated Grafana dashboard, persistent state after `SIGKILL`, stale-ownership recovery, graceful exit, and absence
-of surviving native child PIDs. The real-SBK mode is documented in `docs/TESTING.md`.
+generated Grafana dashboard, persistent state after `SIGKILL`, backup restoration into a fresh volume,
+stale-ownership recovery, graceful exit, bounded PID/log settings, and absence of surviving native child PIDs. The
+real-SBK mode is documented in `docs/TESTING.md`.
 
 Prometheus and Grafana downloads are separate Docker stages backed by independent checksum-validated BuildKit cache
 mounts, allowing cold downloads to run in parallel.

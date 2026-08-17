@@ -62,7 +62,8 @@ python tests/compose_contract.py
 
 The first resolved configuration must contain the pinned Docker Hub image and no build definition. The merged
 development configuration must retain the same ports, volume, network, security, and lifecycle settings while
-adding only the local image/build policy. The resource overlay must add only its CPU, memory, and PID limits.
+adding only the local image/build policy. The resource overlay must add only CPU and memory limits; the base
+definition always owns PID and log bounds.
 
 Build and run the live Linux smoke test:
 
@@ -105,12 +106,16 @@ This mode additionally requires the target to become `up`, verifies endpoint-sco
 container's internal Prometheus, counts exactly 53 panels in the generated dashboard, and repeats those assertions
 after a full container restart. Stop SBK and remove only `/tmp/sbk-dashboard-container-test.bin` afterward.
 
-CI uses the stable `ubuntu-24.04` runner, builds/runs Linux AMD64, and builds Linux ARM64 under QEMU. A successful
-QEMU build is not a native ARM runtime claim. Docker Desktop behavior on macOS/Windows and native ARM execution still
-require their respective smoke tests. Before runtime validation, CI scans the loaded AMD64 image with pinned Trivy
+CI uses stable `ubuntu-24.04` AMD64 and `ubuntu-24.04-arm` native ARM64 runners. Both architectures build, load, and
+run the complete container smoke test; release publication requires both gates. Docker Desktop behavior on
+macOS/Windows still requires its own smoke test. Before AMD64 runtime validation, CI scans the loaded image with pinned Trivy
 and rejects fixed high/critical OS, Python, and native Go-binary vulnerabilities. Reviewed exceptions must name
 exact target paths, explain the decision, and expire in `.trivyignore.yaml`; do not extend an expiry without
 checking for newer official Prometheus and Grafana builds first.
+
+The same workflow runs every Monday even without a source change so newly disclosed vulnerabilities are detected.
+The smoke test also stops the source volume, copies it to a new disposable volume, and proves that registrations,
+endpoint dashboards, comparison dashboards, and ingested history restore correctly.
 
 Container contract tests also keep the Dockerfile Grafana build number, archive checksums, download-size cap,
 application version build arguments, stable Linux runner labels, and best-effort pull-request cache export aligned

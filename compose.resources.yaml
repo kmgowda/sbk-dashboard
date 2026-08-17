@@ -9,7 +9,6 @@
 
 services:
   sbk-dashboard:
-    # Optional production guardrails. Override these values for the expected target count and metric cardinality.
+    # Optional CPU and memory guardrails. The base definition always applies the PID limit.
     mem_limit: ${SBK_DASHBOARD_MEMORY_LIMIT:-4g}
     cpus: ${SBK_DASHBOARD_CPU_LIMIT:-2.0}
-    pids_limit: ${SBK_DASHBOARD_PIDS_LIMIT:-512}

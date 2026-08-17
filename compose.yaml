@@ -23,6 +23,12 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
     stop_grace_period: 30s
+    pids_limit: ${SBK_DASHBOARD_PIDS_LIMIT:-512}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${SBK_DASHBOARD_LOG_MAX_SIZE:-10m}
+        max-file: ${SBK_DASHBOARD_LOG_MAX_FILES:-3}
     security_opt:
       - no-new-privileges:true
     cap_drop:

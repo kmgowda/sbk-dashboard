@@ -21,15 +21,19 @@ on:
       - ".trivyignore.yaml"
       - "pyproject.toml"
       - "requirements/container-build.txt"
+      - "requirements/container-os.txt"
       - "requirements/container-runtime.txt"
       - "scripts/docker_safe_extract.py"
       - "src/**"
       - "tests/test_docker_safe_extract.py"
       - "tests/container_smoke.py"
+      - "tests/compose_contract.py"
       - "tests/test_container.py"
   push:
     branches: [main]
     tags: ["v*"]
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -50,23 +54,30 @@ jobs:
       - name: Resolve application version
         id: version
         run: |
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH=src python3 - <<'PY'
           import os
+          import subprocess
           from pathlib import Path
 
           from sbk_dashboard.version import VERSION
 
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
               output.write(f"value={VERSION}\n")
+              output.write(
+                  "build_date="
+                  + subprocess.check_output(
+                      ["git", "show", "-s", "--format=%cI", "HEAD"], text=True
+                  ).strip()
+                  + "\n"
+              )
           PY
-      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Validate production and development Compose definitions
         run: |
           docker compose config --quiet
           docker compose -f compose.yaml -f compose.dev.yaml config --quiet
           docker compose -f compose.yaml -f compose.resources.yaml config --quiet
-          python tests/compose_contract.py
+          python3 tests/compose_contract.py
       - name: Build runnable AMD64 image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -77,6 +88,7 @@ jobs:
           build-args: |
             APPLICATION_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
           cache-from: type=gha,scope=sbk-dashboard-amd64
           cache-to: type=gha,mode=max,scope=sbk-dashboard-amd64,ignore-error=true
       - name: Enforce container vulnerability policy
@@ -91,21 +103,54 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
       - name: Validate runtime, ports, dashboards, persistence, and shutdown
-        run: python tests/container_smoke.py --image sbk-dashboard:ci
-      - name: Build ARM64 image
+        run: python3 tests/container_smoke.py --image sbk-dashboard:ci
+  arm64-validate:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Resolve application version
+        id: version
+        run: |
+          PYTHONPATH=src python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          from sbk_dashboard.version import VERSION
+
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"value={VERSION}\n")
+              output.write(
+                  "build_date="
+                  + subprocess.check_output(
+                      ["git", "show", "-s", "--format=%cI", "HEAD"], text=True
+                  ).strip()
+                  + "\n"
+              )
+          PY
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Build runnable ARM64 image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
+          load: true
           platforms: linux/arm64
+          tags: sbk-dashboard:ci-arm64
           build-args: |
             APPLICATION_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
           cache-from: type=gha,scope=sbk-dashboard-arm64
           cache-to: type=gha,mode=max,scope=sbk-dashboard-arm64,ignore-error=true
+      - name: Validate ARM64 runtime, persistence, restore, and shutdown
+        run: python3 tests/container_smoke.py --image sbk-dashboard:ci-arm64
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: validate
+    needs: [validate, arm64-validate]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -125,8 +170,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          PYTHONPATH=src python - <<'PY'
+          PYTHONPATH=src python3 - <<'PY'
           import os
+          import subprocess
           from sbk_dashboard.version import VERSION
 
           release = os.environ["RELEASE_TAG"].removeprefix("v")
@@ -134,6 +180,13 @@ jobs:
               raise SystemExit(f"release tag {release!r} does not match package version {VERSION!r}")
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"value={VERSION}\n")
+              output.write(
+                  "build_date="
+                  + subprocess.check_output(
+                      ["git", "show", "-s", "--format=%cI", "HEAD"], text=True
+                  ).strip()
+                  + "\n"
+              )
           PY
       - name: Generate OCI metadata
         id: metadata
@@ -143,6 +196,8 @@ jobs:
           tags: |
             type=match,pattern=v(.*),group=1
             type=raw,value=latest
+          labels: |
+            org.opencontainers.image.created=${{ steps.version.outputs.build_date }}
       - name: Log in to Docker Hub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
@@ -161,6 +216,7 @@ jobs:
           build-args: |
             APPLICATION_VERSION=${{ steps.version.outputs.value }}
             VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.version.outputs.build_date }}
           cache-from: |
             type=gha,scope=sbk-dashboard-amd64
             type=gha,scope=sbk-dashboard-arm64

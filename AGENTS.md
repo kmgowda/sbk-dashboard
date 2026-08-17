@@ -150,6 +150,7 @@ runtime data as source material.
 | `scripts/build_portable.py`, `scripts/sbk_dashboard_portable_entry.py` | Frozen archive construction and entry dispatch |
 | `sbk-dashboard`, `sbk-dashboard.ps1`, `sbk-dashboard.cmd` | Root source-checkout command dispatchers |
 | `Dockerfile`, `compose.yaml`, `compose.dev.yaml`, `compose.resources.yaml` | Non-root release image, production deployment, development build and optional resource overrides |
+| `requirements/container-*.txt` | Exact Python build/runtime hashes and direct final-image OS package inventory |
 | `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |
 | `tests/container_smoke.py` | Live container, dashboard, persistence, and lifecycle validation |

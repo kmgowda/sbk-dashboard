@@ -9,7 +9,9 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 ##
 
-ARG PYTHON_BASE=python:3.12.13-slim-trixie@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+ARG PYTHON_BASE_NAME=python:3.12.13-slim-trixie
+ARG PYTHON_BASE_DIGEST=sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+ARG PYTHON_BASE=${PYTHON_BASE_NAME}@${PYTHON_BASE_DIGEST}
 
 FROM ${PYTHON_BASE} AS package-builder
 WORKDIR /source
@@ -93,15 +95,31 @@ RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-
 FROM ${PYTHON_BASE} AS runtime
 ARG APPLICATION_VERSION=1.26.8.2
 ARG VCS_REF=unknown
+ARG BUILD_DATE=1970-01-01T00:00:00Z
+ARG PYTHON_BASE_NAME
+ARG PYTHON_BASE_DIGEST
 LABEL org.opencontainers.image.title="SBK Dashboard" \
       org.opencontainers.image.description="SBK/SBM performance dashboard with managed Prometheus and Grafana" \
       org.opencontainers.image.source="https://github.com/kmgowda/sbk-dashboard" \
+      org.opencontainers.image.documentation="https://github.com/kmgowda/sbk-dashboard/blob/main/docs/DOCKER.md" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.version="${APPLICATION_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.base.name="${PYTHON_BASE_NAME}" \
+      org.opencontainers.image.base.digest="${PYTHON_BASE_DIGEST}"
+COPY requirements/container-os.txt /usr/local/share/sbk-dashboard/container-os-packages.txt
 RUN apt-get update \
-    && apt-get upgrade --yes --no-install-recommends \
-    && apt-get install --yes --no-install-recommends ca-certificates tini \
+    && locked_packages="$(sed -e '/^#/d' -e '/^[[:space:]]*$/d' \
+      /usr/local/share/sbk-dashboard/container-os-packages.txt)" \
+    && apt-get install --yes --no-install-recommends ${locked_packages} \
+    && while IFS= read -r requirement; do \
+         case "${requirement}" in ''|'#'*) continue ;; esac; \
+         package="${requirement%%=*}"; \
+         expected="${requirement#*=}"; \
+         actual="$(dpkg-query --show --showformat='${Version}' "${package}")"; \
+         test "${actual}" = "${expected}"; \
+       done < /usr/local/share/sbk-dashboard/container-os-packages.txt \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 sbk-dashboard \
     && useradd --uid 10001 --gid 10001 --home-dir /var/lib/sbk-dashboard \

@@ -153,7 +153,8 @@ archive without placing it in the final image.
 
 Open `http://localhost:9721/` in the host browser. Dashboard links opened from that page use
 `http://localhost:3000/`. Compose publishes both ports, persists registrations, Prometheus history, and Grafana
-state in the `sbk-dashboard-data` named volume, and restarts the service unless it is explicitly stopped. Both
+state in the `sbk-dashboard-data` named volume, and restarts the service unless it is explicitly stopped. Compose
+also applies a 512-process ceiling and rotates Docker's local logs at 10 MiB with three files by default. Both
 ports bind to host loopback by default because authentication is disabled. Set
 `SBK_DASHBOARD_PUBLISH_HOST=0.0.0.0` only when firewall or reverse-proxy controls protect network access.
 
@@ -163,8 +164,10 @@ Apply optional production resource guardrails with the dedicated overlay:
 docker compose -f compose.yaml -f compose.resources.yaml up --detach
 ```
 
-The defaults are 4 GiB memory, 2 CPUs, and 512 PIDs; override them with `SBK_DASHBOARD_MEMORY_LIMIT`,
-`SBK_DASHBOARD_CPU_LIMIT`, and `SBK_DASHBOARD_PIDS_LIMIT` for the expected target count and metric cardinality.
+The optional defaults are 4 GiB memory and 2 CPUs; override them with `SBK_DASHBOARD_MEMORY_LIMIT` and
+`SBK_DASHBOARD_CPU_LIMIT`. The base Compose definition always applies the PID ceiling; override it with
+`SBK_DASHBOARD_PIDS_LIMIT`. Log bounds use `SBK_DASHBOARD_LOG_MAX_SIZE` and
+`SBK_DASHBOARD_LOG_MAX_FILES`.
 
 A container cannot launch a graphical application on its host, so browser auto-open is intentionally skipped in
 this headless environment. Port publication makes the landing page and generated dashboards immediately accessible
@@ -182,6 +185,7 @@ For a released image without a source checkout:
 ```bash
 docker run --detach --name sbk-dashboard --restart unless-stopped \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
+  --pids-limit 512 --log-opt max-size=10m --log-opt max-file=3 \
   --publish 127.0.0.1:9721:9721 --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
