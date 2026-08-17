@@ -10,6 +10,27 @@ You may obtain a copy of the License at
 
 # Testing
 
+The suite is layered so inexpensive contract failures arrive before native or container integration failures:
+
+```mermaid
+flowchart BT
+    Unit[Unit and focused platform tests] --> Quality[Ruff, mypy, documentation contracts]
+    Quality --> Package[Wheel and source distribution]
+    Package --> Native[Native Prometheus/Grafana lifecycle tests]
+    Native --> RealSBK[Real SBK metrics and 53-panel validation]
+    Package --> Container[AMD64 and ARM64 container smoke tests]
+    Container --> Security[Trivy, SBOM, provenance, signature gates]
+
+    classDef quick fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef build fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef integration fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef release fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class Unit,Quality quick;
+    class Package build;
+    class Native,RealSBK,Container integration;
+    class Security release;
+```
+
 ## Automated validation
 
 Create either supported development environment and execute:
@@ -30,6 +51,29 @@ sbk-dashboard -h
 sbk-dashboard -v
 git diff --check
 ```
+
+Documentation-only changes still run the complete fast checks. Mermaid diagrams must also be rendered with the
+procedure in [Documentation validation](#documentation-validation), because a fenced block can be syntactically
+closed while containing invalid Mermaid.
+
+## Documentation validation
+
+The documentation tests enforce license headers, local links, required agent entry points, configuration-option
+coverage, and a minimum set of Mermaid diagrams. For visual syntax validation, render every Markdown file that
+contains Mermaid with the pinned CLI version used by the project:
+
+```bash
+python scripts/check_mermaid.py
+npx --yes @mermaid-js/mermaid-cli@11.12.0 \
+  --input docs/ARCHITECTURE.md \
+  --output /tmp/sbk-dashboard-architecture.md
+```
+
+`check_mermaid.py` discovers all repository Markdown files, extracts every Mermaid block, and asks `mmdc` to
+render each block when the executable is installed. Pass `--require-renderer` in CI or review environments where
+missing `mmdc` must fail. When a trusted development container runs as root, the checker supplies Chromium's
+required no-sandbox launch flag only to this temporary documentation render. The direct `npx` example is a
+convenient one-file review; generated SVG/Markdown belongs under `/tmp`, not in the repository.
 
 The standard-library suite is also runnable without pytest. Promoting `ResourceWarning` to an error checks leaked
 files, sockets, subprocess streams, and threads:

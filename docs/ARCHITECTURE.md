@@ -19,25 +19,38 @@ This document defines system boundaries and design decisions. For operator proce
 `sbk-dashboard` is a Python control plane around two official native servers. Prometheus and Grafana are not Python
 modules and are never embedded in the Python interpreter.
 
-```text
-                    +---------------- Python process ----------------+
- Browser ---------->| BoundedThreadPoolHttpServer                    |
-                    |   |                                             |
-                    |   +-- TargetRegistry ---- targets.json          |
-                    |   +-- PrometheusTargetDiscovery                 |
-                    |   +-- GrafanaDashboardProvisioner               |
-                    |   +-- ManagedMonitoringStack facade             |
-                    |         +-- single native supervisor            |
-                    |         +-- ManagedNativeService x 2            |
-                    +---|---------------------|-----------------------+
-                        | guardian process    | guardian process
-                        v                     v
-                  Prometheus              Grafana
-                  loopback default        public bind default
-                  scrape + TSDB           PromQL + dashboards
-                        |
-                        v
-               remote SBK/SBM /metrics endpoints
+```mermaid
+flowchart LR
+    Browser([Browser]) --> HTTP
+    subgraph Python[Python control plane]
+        HTTP[Bounded HTTP server]
+        Registry[Target registry]
+        Discovery[Prometheus discovery]
+        Provisioner[Grafana provisioner]
+        Stack[Monitoring facade and supervisor]
+        HTTP --> Registry
+        Registry --> Discovery
+        Registry --> Provisioner
+        HTTP --> Stack
+    end
+    Registry --> State[(Atomic registration state)]
+    Stack --> PG[Prometheus guardian]
+    Stack --> GG[Grafana guardian]
+    PG --> Prometheus[Native Prometheus]
+    GG --> Grafana[Native Grafana]
+    Exporters[Remote SBK/SBM endpoints] -->|scraped| Prometheus
+    Prometheus --> TSDB[(Persistent TSDB)]
+    Grafana -->|PromQL| Prometheus
+    Provisioner --> Grafana
+
+    classDef user fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef control fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
+    class Browser,Exporters user;
+    class HTTP,Registry,Discovery,Provisioner,Stack control;
+    class PG,GG,Prometheus,Grafana native;
+    class State,TSDB state;
 ```
 
 There is one Prometheus process and one Grafana process per `sbk-dashboard` instance. There is not one native process
@@ -54,46 +67,47 @@ local constants when they are intrinsic to their owning boundary rather than ope
 
 Startup is dependency ordered. The management port is not opened until the native monitoring stack is ready:
 
-```text
-arguments/environment
-        |
-        v
-parse + validate configuration
-        |
-        v
-resolve/download native tools
-        |
-        v
-load registry -> generate configuration -> reconcile dashboards
-        |
-        v
-validate Prometheus config -> apply port ownership policy
-        |
-        v
-start Prometheus -> start Grafana -> start supervisor
-        |
-        v
-start bounded management HTTP server -> optionally open browser
+```mermaid
+flowchart TD
+    Input[CLI and environment] --> Parse[Parse, validate, report sources]
+    Parse --> Bootstrap[Resolve or safely download native tools]
+    Bootstrap --> Restore[Load registry and generate configuration]
+    Restore --> Validate[Validate Prometheus and port ownership]
+    Validate --> Prometheus[Start Prometheus and await readiness]
+    Prometheus --> Grafana[Start Grafana and await readiness]
+    Grafana --> Supervisor[Start native supervisor]
+    Supervisor --> HTTP[Open bounded management server]
+    HTTP --> Browser[Optionally open browser]
+
+    classDef input fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef prepare fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef runtime fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class Input input;
+    class Parse,Bootstrap,Restore,Validate prepare;
+    class Prometheus,Grafana,Supervisor,HTTP,Browser runtime;
 ```
 
 Endpoint registration is a serialized compensating transaction:
 
-```text
-validate request
-      |
-      v
-existing exact registration? -- yes --> return existing dashboard (HTTP 200)
-      |
-      no
-      v
-atomically persist targets.json
-      |
-      v
-rewrite discovery + dashboard clones + mappings + status snapshot
-      |
-      +-- success --> new dashboard (HTTP 201)
-      |
-      `-- failure --> restore previous registry + best-effort reconcile + HTTP 500
+```mermaid
+flowchart TD
+    Request[Validate JSON request] --> Existing{Exact normalized target exists?}
+    Existing -->|Yes| Reuse[Return existing dashboard, HTTP 200]
+    Existing -->|No| Persist[Atomically replace targets.json]
+    Persist --> Reconcile[Rewrite discovery, dashboards, mappings, status]
+    Reconcile --> Result{Reconciliation succeeds?}
+    Result -->|Yes| Created[Return new dashboard, HTTP 201]
+    Result -->|No| Rollback[Restore registry and best-effort reconcile]
+    Rollback --> Failure[Return HTTP 500]
+
+    classDef request fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef failure fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    class Request,Persist,Reconcile request;
+    class Existing,Result decision;
+    class Reuse,Created success;
+    class Rollback,Failure failure;
 ```
 
 Deletion uses the same transaction in reverse. Request-specific Grafana hostnames are computed only while rendering
@@ -215,11 +229,17 @@ services are attached rather than owned.
 
 Each stack and component follows a validated lifecycle state machine:
 
-```text
-new -> starting -> running -> stopping -> stopped
-          |           |
-          v           v
-        failed <--- starting (supervised restart)
+```mermaid
+stateDiagram-v2
+    [*] --> New
+    New --> Starting: start()
+    Starting --> Running: readiness succeeds
+    Starting --> Failed: acquisition fails
+    Running --> Starting: supervised restart
+    Running --> Stopping: close()
+    Starting --> Stopping: shutdown requested
+    Stopping --> Stopped: bounded cleanup completes
+    Stopped --> [*]
 ```
 
 Illegal transitions fail immediately. Construction has no process side effects; `start()` acquires resources and

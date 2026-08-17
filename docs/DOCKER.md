@@ -14,6 +14,37 @@ The supported image packages the Python control plane, official Prometheus, and 
 container. Prometheus and Grafana remain managed native child processes; they are not embedded Python modules or
 independent service containers.
 
+```mermaid
+flowchart LR
+    Browser([Host browser]) -->|127.0.0.1:9721| Published[Docker published ports]
+    Browser -->|127.0.0.1:3000| Published
+    subgraph Container[One non-root, read-only-root container]
+        Tini[tini as PID 1] --> Control[Python control plane]
+        Control --> Prometheus[Native Prometheus<br/>container loopback]
+        Control --> Grafana[Native Grafana]
+        Control --> Data[(var/lib/sbk-dashboard)]
+        Prometheus --> Data
+        Grafana --> Data
+    end
+    Published --> Control
+    Published --> Grafana
+    Prometheus -->|bridge DNS, IPv4, or IPv6| Remote[SBK/SBM exporter]
+    Prometheus -->|host.docker.internal| Host[Docker-host exporter]
+
+    classDef edge fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef container fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
+    class Browser,Remote,Host,Published edge;
+    class Tini,Control container;
+    class Prometheus,Grafana native;
+    class Data state;
+```
+
+Stopping the container first gives the application a bounded graceful-cleanup window. If it does not exit, Docker
+terminates the container PID namespace/cgroup; the guardians and process-group or Job Object rules remain active
+inside the same topology.
+
 ## Quick start
 
 Use the pinned release image:

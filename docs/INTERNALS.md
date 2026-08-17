@@ -101,8 +101,21 @@ and starts one supervisor. The management server begins admission only after bot
 
 Configuration selection is centralized in `config.py`:
 
-```text
-command line > environment variable > built-in default
+```mermaid
+flowchart LR
+    CLI[Command line<br/>highest precedence] --> Select{Value supplied?}
+    Environment[Environment variable] --> Select
+    Default[Built-in contract default<br/>lowest precedence] --> Select
+    Select --> Effective[Validated effective value<br/>plus source metadata]
+
+    classDef high fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    classDef medium fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef low fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef result fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class CLI high;
+    class Environment medium;
+    class Default low;
+    class Select,Effective result;
 ```
 
 Every selected public/operational value records its source for startup logging. Service classes receive frozen

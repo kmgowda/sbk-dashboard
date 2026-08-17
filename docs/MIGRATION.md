@@ -10,6 +10,26 @@ You may obtain a copy of the License at
 
 # Migration from the Java implementation
 
+```mermaid
+flowchart LR
+    Java[Stop Java dashboard] --> Backup[Back up existing data directory]
+    Backup --> Install[Install Python, standalone, or container package]
+    Install --> SameData{Reuse the same data directory?}
+    SameData -->|Yes| Recover[Load registrations, TSDB, Grafana state]
+    SameData -->|No| Fresh[Start with empty persistent state]
+    Recover --> Verify[Verify targets, 53 panels, history, shutdown]
+    Fresh --> Verify
+
+    classDef old fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    classDef action fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    class Java old;
+    class Backup,Install action;
+    class SameData decision;
+    class Recover,Fresh,Verify success;
+```
+
 The Python rewrite preserves the external contract:
 
 - the command name remains `sbk-dashboard`;

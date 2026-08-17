@@ -11,7 +11,8 @@ You may obtain a copy of the License at
 # Devin Project Entry Point
 
 The complete repository instructions are in [`AGENTS.md`](AGENTS.md), with implementation navigation and change
-recipes in [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). Read both before planning or editing.
+recipes in [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). Read both before planning or editing. The cross-tool
+discovery and task-routing guide is [`docs/AI_AGENTS.md`](docs/AI_AGENTS.md).
 
 Container packaging is supported, but it must preserve the native Prometheus/Grafana child-process architecture;
 do not replace those servers with embedded libraries or separate service containers. Preserve bounded resources,

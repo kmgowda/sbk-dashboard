@@ -7,8 +7,11 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 ##
 
+import re
 import unittest
 from pathlib import Path
+
+from sbk_dashboard.config import parser
 
 ROOT = Path(__file__).resolve().parents[1]
 COPYRIGHT_NOTICE = "Copyright (c) KMG. All Rights Reserved."
@@ -47,6 +50,16 @@ REPOSITORY_SOURCE_DIRECTORIES = {
     "scripts",
     "src",
     "tests",
+}
+MARKDOWN_LINK = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
+REQUIRED_AGENT_ENTRIES = {
+    "CODEX.md",
+    "DEVIN.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    ".cursor/rules/sbk-dashboard.mdc",
+    ".windsurf/rules/sbk-dashboard.md",
+    ".github/copilot-instructions.md",
 }
 
 
@@ -109,6 +122,55 @@ class DocumentationContractTest(unittest.TestCase):
         self.assertIn("DOCKERHUB_USERNAME", docker_hub)
         self.assertIn("DOCKERHUB_TOKEN", docker_hub)
         self.assertIn("docker compose -f compose.yaml -f compose.dev.yaml build", docker_hub)
+
+    def test_new_engineer_documentation_covers_public_options(self):
+        configuration = (ROOT / "docs/CONFIGURATION.md").read_text(encoding="utf-8")
+        getting_started = (ROOT / "docs/GETTING_STARTED.md").read_text(encoding="utf-8")
+        development = (ROOT / "docs/DEVELOPMENT.md").read_text(encoding="utf-8")
+        for action in parser()._actions:
+            for option in action.option_strings:
+                with self.subTest(option=option):
+                    self.assertIn(f"`{option}`", configuration)
+        self.assertIn("./sbk-dashboard", getting_started)
+        self.assertIn("docker compose up --detach", getting_started)
+        self.assertIn("Run the application safely", development)
+        self.assertIn("Required validation", development)
+
+    def test_agent_entry_points_reference_the_canonical_contract(self):
+        guide = (ROOT / "docs/AI_AGENTS.md").read_text(encoding="utf-8")
+        for relative in REQUIRED_AGENT_ENTRIES:
+            with self.subTest(path=relative):
+                path = ROOT / relative
+                self.assertTrue(path.is_file())
+                self.assertIn("AGENTS.md", path.read_text(encoding="utf-8"))
+                self.assertIn(relative, guide)
+        self.assertIn("docs/AI_AGENTS.md", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+
+    def test_local_markdown_links_resolve(self):
+        markdown_paths = [ROOT / "README.md", ROOT / "AGENTS.md", *(ROOT / "docs").glob("*.md")]
+        for source in markdown_paths:
+            text = source.read_text(encoding="utf-8")
+            for raw_target in MARKDOWN_LINK.findall(text):
+                target = raw_target.strip().strip("<>")
+                if target.startswith(("#", "http://", "https://", "mailto:")):
+                    continue
+                path_text = target.split("#", 1)[0]
+                if not path_text:
+                    continue
+                resolved = (source.parent / path_text).resolve()
+                with self.subTest(source=source.relative_to(ROOT), target=raw_target):
+                    self.assertTrue(resolved.exists(), f"broken local link: {raw_target}")
+
+    def test_mermaid_diagrams_are_closed_and_widely_used(self):
+        markdown_paths = [ROOT / "README.md", *(ROOT / "docs").glob("*.md")]
+        diagram_count = 0
+        for path in markdown_paths:
+            text = path.read_text(encoding="utf-8")
+            openings = text.count("```mermaid")
+            diagram_count += openings
+            if openings:
+                self.assertEqual(0, text.count("```") % 2, path.relative_to(ROOT))
+        self.assertGreaterEqual(diagram_count, 15)
 
     def test_cross_platform_ci_uses_an_explicit_macos_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

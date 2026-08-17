@@ -23,6 +23,7 @@ include scripts/sbk_dashboard_bootstrap.py
 include scripts/sbk_dashboard_launcher.py
 include scripts/sbk_dashboard_portable_entry.py
 include scripts/build_portable.py
+include scripts/check_mermaid.py
 include scripts/start-sbk-dashboard.sh
 include scripts/start-sbk-dashboard-background.sh
 include scripts/stop-sbk-dashboard.sh

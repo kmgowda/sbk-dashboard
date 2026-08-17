@@ -27,6 +27,28 @@ upgrades, and common operational checks. See [`ARCHITECTURE.md`](ARCHITECTURE.md
 All modes run the same control plane and one Prometheus/Grafana pair. Docker is packaging, not a distributed
 service topology.
 
+```mermaid
+flowchart TD
+    Need[Choose how to run] --> Container{Need an immutable Linux image?}
+    Container -->|Yes| Docker[Docker or Compose]
+    Container -->|No| PythonFree{System Python unavailable?}
+    PythonFree -->|Yes| Standalone[Standalone archive or source fallback]
+    PythonFree -->|No| Existing{Existing environment policy?}
+    Existing -->|Conda| Conda[Conda environment]
+    Existing -->|venv or none| Source[Root source command or Python venv]
+    Docker --> Same[Same control plane and native pair]
+    Standalone --> Same
+    Conda --> Same
+    Source --> Same
+
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef option fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef outcome fill:#dcfce7,stroke:#16a34a,color:#14532d,stroke-width:2px;
+    class Container,PythonFree,Existing decision;
+    class Need,Docker,Standalone,Conda,Source option;
+    class Same outcome;
+```
+
 Production Compose pulls the prebuilt pinned image, so starting the service does not compile Python or separately
 download Prometheus/Grafana. `compose.dev.yaml` is used only when deliberately building the same image from source.
 

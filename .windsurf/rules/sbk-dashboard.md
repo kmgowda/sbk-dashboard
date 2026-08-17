@@ -14,8 +14,9 @@ You may obtain a copy of the License at
 
 # SBK Dashboard Workspace Rule
 
-Read and follow `/AGENTS.md` and `/docs/AGENT_GUIDE.md` before modifying this repository. Those files are canonical;
-do not invent separate Windsurf-only architecture or workflow rules.
+Read and follow `/AGENTS.md` and `/docs/AGENT_GUIDE.md` before modifying this repository. Use
+`/docs/AI_AGENTS.md` for cross-tool discovery and task routing. Those files are canonical; do not invent separate
+Windsurf-only architecture or workflow rules.
 
 Preserve the documented Python 3.10+ control plane and native Prometheus/Grafana process ownership, including the
 supported Linux Docker/Compose delivery of that same architecture. Keep bounded concurrency and memory, persistent

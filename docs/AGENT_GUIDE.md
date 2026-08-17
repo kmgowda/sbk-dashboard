@@ -12,25 +12,38 @@ You may obtain a copy of the License at
 
 This guide gives software agents enough context to make safe, reviewable changes without rediscovering the project
 on every task. The normative rules are in [`AGENTS.md`](../AGENTS.md); this document explains how to apply them.
-Use [`USAGE.md`](USAGE.md) for operator workflows, [`ARCHITECTURE.md`](ARCHITECTURE.md) for design decisions, and
-[`INTERNALS.md`](INTERNALS.md) for module-level ownership and call paths.
+Use the [documentation center](README.md) to select a guide, [`USAGE.md`](USAGE.md) for operator workflows,
+[`ARCHITECTURE.md`](ARCHITECTURE.md) for design decisions, and [`INTERNALS.md`](INTERNALS.md) for module-level
+ownership and call paths.
 
 ## Mental model
 
-Treat `sbk-dashboard` as a lifecycle and configuration control plane, not as the metrics data plane:
+Treat `sbk-dashboard` as a lifecycle and configuration control plane, not as the metrics data plane. The companion
+[AI agent guide](AI_AGENTS.md) explains discovery behavior for Codex, Devin, Cursor, Windsurf, Copilot, Claude,
+Gemini, and other tools.
 
-```text
-browser
-   |
-   v
-bounded Python HTTP/API server
-   |-- persistent endpoint registry
-   |-- dynamic Prometheus file discovery
-   |-- endpoint-scoped copies of the canonical Grafana dashboard
-   `-- lifecycle facade/supervisor
-          |-- owned Prometheus guardian --> native process --> remote SBK/SBM /metrics
-          |-- owned Grafana guardian    --> native process --> Prometheus datasource
-          `-- attached native services are observed without guardians
+```mermaid
+flowchart LR
+    Browser([Browser]) --> API[Bounded Python HTTP/API]
+    API --> Registry[(Endpoint registry)]
+    API --> Reconcile[Discovery and dashboard reconciliation]
+    API --> Supervisor[Lifecycle facade and supervisor]
+    Supervisor --> PG[Prometheus guardian]
+    Supervisor --> GG[Grafana guardian]
+    PG --> Prometheus[Native Prometheus]
+    GG --> Grafana[Native Grafana]
+    Exporters[SBK/SBM metrics] --> Prometheus
+    Grafana --> Prometheus
+    Attached[Compatible attached services] -. observed only .-> Supervisor
+
+    classDef edge fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef control fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
+    class Browser,Exporters,Attached edge;
+    class API,Reconcile,Supervisor control;
+    class PG,GG,Prometheus,Grafana native;
+    class Registry state;
 ```
 
 The Python process must stay small and predictable. Prometheus owns scraping/TSDB retention, and Grafana owns query

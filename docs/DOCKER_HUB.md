@@ -36,6 +36,28 @@ release workflow also publishes SBOM/provenance attestations and a keyless Cosig
 The image still runs one Python control plane, one native Prometheus child process, and one native Grafana child
 process. Publishing a multi-architecture image does not split those services into separate containers.
 
+```mermaid
+flowchart LR
+    Tag[Version tag] --> ValidateAMD[Build and smoke-test AMD64]
+    Tag --> ValidateARM[Build and smoke-test ARM64]
+    ValidateAMD --> Gate{Both validations pass?}
+    ValidateARM --> Gate
+    Gate -->|Yes| Publish[Publish multi-architecture manifest]
+    Gate -->|No| Stop[Do not publish]
+    Publish --> Attest[Attach SBOM and provenance]
+    Attest --> Sign[Keyless-sign immutable digest]
+    Sign --> Verify[Pull and verify digest/platforms]
+
+    classDef source fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef validation fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef release fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef failure fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+    class Tag source;
+    class ValidateAMD,ValidateARM,Gate validation;
+    class Publish,Attest,Sign,Verify release;
+    class Stop failure;
+```
+
 ## 1. Prepare the tools and repository
 
 Install Docker Engine with the Compose and Buildx plugins, or install Docker Desktop. Confirm all three commands are

@@ -10,8 +10,9 @@ You may obtain a copy of the License at
 
 # Copilot Repository Instructions
 
-Before proposing or editing code, read and follow `/AGENTS.md` and `/docs/AGENT_GUIDE.md`. They are the canonical
-repository instructions and override this discovery file.
+Before proposing or editing code, read and follow `/AGENTS.md` and `/docs/AGENT_GUIDE.md`. Use
+`/docs/AI_AGENTS.md` for cross-tool discovery and task routing. They are the canonical repository instructions and
+override this discovery file.
 
 Core constraints: this is a Python 3.10+ control plane for native Prometheus and Grafana, with direct and supported
 single-container delivery; preserve bounded concurrency, explicit owned-versus-attached process lifecycle, seven-day

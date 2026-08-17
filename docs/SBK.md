@@ -19,14 +19,25 @@ and driver options, use the documentation and `-help` output from the SBK versio
 
 ## How the pieces connect
 
-```text
-SBK benchmark + PrometheusLogger
-        http://<sbk-host>:9718/metrics
-                       |
-                       | scraped every 5 seconds by default
-                       v
-SBK Dashboard --> managed Prometheus --> managed Grafana
-    :9721              :9090                 :3000
+```mermaid
+flowchart LR
+    SBK[SBK benchmark] --> Logger[PrometheusLogger<br/>:9718/metrics]
+    Dashboard[SBK Dashboard<br/>:9721] -->|configures| Prometheus[Managed Prometheus<br/>:9090]
+    Dashboard -->|provisions| Grafana[Managed Grafana<br/>:3000]
+    Logger -->|scraped every 5 seconds by default| Prometheus
+    Prometheus --> TSDB[(Retained samples)]
+    Grafana -->|PromQL| Prometheus
+    Browser([Browser]) --> Dashboard
+    Browser --> Grafana
+
+    classDef benchmark fill:#dbeafe,stroke:#2563eb,color:#172554;
+    classDef control fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
+    class SBK,Logger,Browser benchmark;
+    class Dashboard control;
+    class Prometheus,Grafana native;
+    class TSDB state;
 ```
 
 The exporter belongs to the SBK process and normally exists only while that benchmark is running. The dashboard

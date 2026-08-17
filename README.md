@@ -51,26 +51,35 @@ The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 
 ## Architecture
 
-```text
-Browser
-   |
-   +--> Python sbk-dashboard :9721  (registration UI and API)
-           |
-           +--> targets.json + dashboard-mappings.json
-           +--> native Prometheus 127.0.0.1:9090 ---> remote-host:9718/metrics
-           |         |
-           |         +--> persistent TSDB and background retention
-           |
-           +--> native Grafana :3000
-                     |
-                     +--> sbk-<endpoint-id>.json (one per host:port)
+```mermaid
+flowchart LR
+    Browser([Browser]) -->|UI and API :9721| Control[Python control plane]
+    Control --> Registry[(targets.json<br/>dashboard mappings)]
+    Control -->|owns and supervises| Prometheus[Native Prometheus<br/>127.0.0.1:9090]
+    Control -->|owns and supervises| Grafana[Native Grafana<br/>:3000]
+    Exporter[SBK or SBM<br/>metrics endpoint] -->|scraped by| Prometheus
+    Prometheus --> TSDB[(Persistent TSDB<br/>bounded retention)]
+    Grafana -->|PromQL| Prometheus
+    Control --> Dashboards[(Endpoint-scoped<br/>dashboard JSON)]
+    Dashboards --> Grafana
+
+    classDef user fill:#dbeafe,stroke:#2563eb,color:#172554,stroke-width:2px;
+    classDef control fill:#f3e8ff,stroke:#9333ea,color:#581c87,stroke-width:2px;
+    classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
+    class Browser,Exporter user;
+    class Control control;
+    class Prometheus,Grafana native;
+    class Registry,TSDB,Dashboards state;
 ```
 
 The Python process is the control plane. Metrics ingestion, storage, PromQL, dashboard provisioning, and rendering
 remain in the official Prometheus and Grafana servers. See [the architecture document](docs/ARCHITECTURE.md).
 
-Documentation map:
+Start at the [documentation center](docs/README.md). The most useful paths are:
 
+- [Getting started](docs/GETTING_STARTED.md): clone-to-dashboard tutorial for a new user.
+- [Configuration reference](docs/CONFIGURATION.md): every CLI option, environment variable, bound, and example.
 - [Usage guide](docs/USAGE.md): environment activation/deactivation, daily operation, endpoints, backup, upgrades,
   and troubleshooting.
 - [Portable installation](docs/PORTABLE.md): one-command source startup, standalone release bundles, cache layout,
@@ -84,6 +93,8 @@ Documentation map:
 - [Docker Hub build and publishing](docs/DOCKER_HUB.md): copy-and-paste local build, versioned multi-architecture
   publishing, verification, pull, run, and upgrade procedures.
 - [Testing](docs/TESTING.md): automated validation and real SBK procedures.
+- [Development guide](docs/DEVELOPMENT.md): repository map, safe local workflow, ownership, and completion checks.
+- [AI software agent guide](docs/AI_AGENTS.md): instruction discovery and safe task routing for coding agents.
 
 ## Requirements
 

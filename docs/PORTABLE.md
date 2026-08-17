@@ -15,6 +15,36 @@ otherwise downloads its exact-version standalone GitHub release. The standalone 
 application, `psutil`, and the lifecycle launcher, so Python, pip, venv, and Conda are optional on the destination.
 Both paths run the same control plane and keep Prometheus and Grafana as owned native child processes.
 
+```mermaid
+flowchart TD
+    Start[Run root sbk-dashboard command] --> Active{Supported active venv or Conda?}
+    Active -->|Yes| Validate[Validate prepared-environment marker]
+    Validate -->|Valid| ReuseActive[Reuse active environment]
+    Validate -->|Missing or stale| PrepareActive[Install and record active environment]
+    Active -->|No| Python{Python 3.10 or newer available?}
+    Python -->|Yes| Private{Matching private runtime cached?}
+    Private -->|Yes| ReusePrivate[Reuse immutable private venv]
+    Private -->|No| BuildPrivate[Create and atomically promote private venv]
+    Python -->|No| Standalone{Verified standalone runtime cached?}
+    Standalone -->|Yes| ReuseStandalone[Reuse standalone runtime]
+    Standalone -->|No| Download[Download, verify, safely extract, promote]
+    ReuseActive --> Launch[Start common lifecycle launcher]
+    PrepareActive --> Launch
+    ReusePrivate --> Launch
+    BuildPrivate --> Launch
+    ReuseStandalone --> Launch
+    Download --> Launch
+
+    classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
+    classDef fresh fill:#f3e8ff,stroke:#9333ea,color:#581c87;
+    classDef reuse fill:#dcfce7,stroke:#16a34a,color:#14532d;
+    classDef entry fill:#dbeafe,stroke:#2563eb,color:#172554;
+    class Active,Python,Private,Standalone decision;
+    class PrepareActive,BuildPrivate,Download fresh;
+    class ReuseActive,ReusePrivate,ReuseStandalone,Launch reuse;
+    class Start entry;
+```
+
 ## Source checkout or source archive
 
 Run one root command after clone or extraction:

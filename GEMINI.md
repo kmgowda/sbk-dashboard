@@ -12,5 +12,5 @@ You may obtain a copy of the License at
 
 Read and follow [`AGENTS.md`](AGENTS.md) and [`docs/AGENT_GUIDE.md`](docs/AGENT_GUIDE.md). They are the canonical
 architecture, safety, implementation, testing, and completion instructions for this repository. Do not maintain
-Gemini-specific project rules here.
-
+Gemini-specific project rules here. See [`docs/AI_AGENTS.md`](docs/AI_AGENTS.md) for cross-tool discovery and task
+routing.
