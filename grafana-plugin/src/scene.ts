@@ -11,8 +11,9 @@
 import {
   EmbeddedScene,
   SceneControlsSpacer,
-  SceneFlexItem,
-  SceneFlexLayout,
+  SceneGridItem,
+  SceneGridLayout,
+  SceneGridRow,
   SceneQueryRunner,
   SceneRefreshPicker,
   SceneObject,
@@ -24,7 +25,7 @@ import {
 } from '@grafana/scenes';
 import {DataSourceRef} from '@grafana/schema';
 import {FieldConfigSource} from '@grafana/data';
-import {scopedQueries, visualPanels} from './dashboard';
+import {dashboardLayout, gridPlacement, scopedQueries} from './dashboard';
 import {DashboardPanel, TimeGroup} from './types';
 
 const DATASOURCE: DataSourceRef = {type: 'prometheus', uid: 'PBFA97CFB590B2093'};
@@ -37,16 +38,25 @@ export function buildGroupScene(panels: DashboardPanel[], group: TimeGroup): Emb
   }
   return new EmbeddedScene({
     $timeRange: new SceneTimeRange({from: group.from, to: group.to}),
-    body: new SceneFlexLayout({
-      direction: 'row',
-      wrap: 'wrap',
-      children: visualPanels(panels).map((panel) => buildPanel(panel, group)),
+    body: new SceneGridLayout({
+      isDraggable: false,
+      isResizable: false,
+      children: dashboardLayout(panels).map((item) => {
+        if (item.kind === 'panel') return buildPanel(item.panel, group);
+        return new SceneGridRow({
+          title: item.title,
+          isCollapsed: item.collapsed,
+          isCollapsible: true,
+          y: item.gridPos.y || 0,
+          children: item.panels.map((panel) => buildPanel(panel, group)),
+        });
+      }),
     }),
     controls,
   });
 }
 
-function buildPanel(panel: DashboardPanel, group: TimeGroup): SceneFlexItem {
+function buildPanel(panel: DashboardPanel, group: TimeGroup): SceneGridItem {
   const runner = new SceneQueryRunner({datasource: DATASOURCE, queries: scopedQueries(panel, group.targetIds)});
   let data: SceneDataProvider = runner;
   if (panel.transformations?.length) {
@@ -65,7 +75,10 @@ function buildPanel(panel: DashboardPanel, group: TimeGroup): SceneFlexItem {
     options: panel.options || {},
     fieldConfig: (panel.fieldConfig || {defaults: {}, overrides: []}) as FieldConfigSource,
   });
-  const width = `${Math.max(25, Math.min(100, ((panel.gridPos?.w || 12) / 24) * 100))}%`;
-  const height = Math.max(180, Math.min(640, (panel.gridPos?.h || 8) * 30));
-  return new SceneFlexItem({body: visualization, width, height});
+  return new SceneGridItem({
+    body: visualization,
+    ...gridPlacement(panel),
+    isDraggable: false,
+    isResizable: false,
+  });
 }

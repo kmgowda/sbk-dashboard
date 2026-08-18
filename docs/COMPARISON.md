@@ -124,9 +124,10 @@ runtime, npm install, additional process, service, port, or network download is 
 or container deployments.
 
 The app loads only a validated `sbk-comparison-*` descriptor through Grafana's same-origin API. It converts the
-canonical visual panels to Grafana Scenes, replaces the descriptor's endpoint-variable token with the IDs assigned
-to each time group, and uses the already provisioned Prometheus datasource. Endpoint IDs are fixed lowercase hex,
-and the descriptor itself is created only from registered targets.
+canonical dashboard to Grafana Scenes, preserving its six named rows, expanded/collapsed state, exact 24-column
+panel positions, and panel heights in every time group. It replaces the descriptor's endpoint-variable token with
+the IDs assigned to each time group and uses the already provisioned Prometheus datasource. Endpoint IDs are fixed
+lowercase hex, and the descriptor itself is created only from registered targets.
 
 ```mermaid
 sequenceDiagram

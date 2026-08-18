@@ -146,7 +146,9 @@ opens. Every target starts in one global live scene. Detaching a target creates 
 or fixed historical scene, while reattaching it returns to global time. Each scene replaces the descriptor's
 `${sbk_endpoints:regex}` token with only its assigned fixed-hex endpoint IDs. This preserves endpoint isolation while
 allowing different ranges without duplicating persisted dashboards. Four time groups and a 31-day fixed range bound
-query amplification. Generated descriptors form a bounded 128-entry cache; reconciliation removes cached
+query amplification. Each scene retains the canonical row hierarchy, collapse state, 24-column coordinates, and
+grid heights; row containers are not flattened into an unstructured panel list. Generated descriptors form a
+bounded 128-entry cache; reconciliation removes cached
 comparisons containing deleted registrations.
 
 The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct

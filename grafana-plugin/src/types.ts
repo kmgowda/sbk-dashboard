@@ -30,6 +30,7 @@ export interface TimeGroup {
 export interface DashboardPanel {
   type?: string;
   title?: string;
+  collapsed?: boolean;
   description?: string;
   pluginVersion?: string;
   transparent?: boolean;
@@ -37,9 +38,18 @@ export interface DashboardPanel {
   fieldConfig?: {defaults: Record<string, unknown>; overrides: unknown[]};
   transformations?: DataTransformerConfig[];
   targets?: Array<Record<string, unknown>>;
-  gridPos?: {h?: number; w?: number};
+  gridPos?: {h?: number; w?: number; x?: number; y?: number};
   panels?: DashboardPanel[];
 }
+export interface DashboardPanelItem {kind: 'panel'; panel: DashboardPanel;}
+export interface DashboardRowItem {
+  kind: 'row';
+  title: string;
+  collapsed: boolean;
+  gridPos: {h?: number; w?: number; x?: number; y?: number};
+  panels: DashboardPanel[];
+}
+export type DashboardLayoutItem = DashboardPanelItem | DashboardRowItem;
 export interface ComparisonDashboard {
   uid: string;
   title?: string;
