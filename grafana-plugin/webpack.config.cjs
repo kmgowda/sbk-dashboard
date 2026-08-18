@@ -9,9 +9,41 @@
  */
 
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const TerserPlugin = require('terser-webpack-plugin');
 const webpack = require('webpack');
+
+const pluginRoot = __dirname;
+const packageMetadata = require('./package.json');
+
+function collectFiles(directory) {
+  return fs.readdirSync(directory, {withFileTypes: true})
+    .flatMap((entry) => {
+      const candidate = path.join(directory, entry.name);
+      return entry.isDirectory() ? collectFiles(candidate) : [candidate];
+    });
+}
+
+function frontendBuildRevision() {
+  const inputs = [
+    ...collectFiles(path.join(pluginRoot, 'src')),
+    path.join(pluginRoot, 'package.json'),
+    path.join(pluginRoot, 'package-lock.json'),
+    __filename,
+  ].sort();
+  const digest = crypto.createHash('sha256');
+  for (const input of inputs) {
+    digest.update(path.relative(pluginRoot, input).replaceAll(path.sep, '/'));
+    digest.update('\0');
+    digest.update(fs.readFileSync(input));
+    digest.update('\0');
+  }
+  return digest.digest('hex').slice(0, 12);
+}
+
+const packagedPluginVersion = `${packageMetadata.version}-build.${frontendBuildRevision()}`;
 
 const licenseBanner = `Copyright (c) KMG. All Rights Reserved.
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,7 +97,15 @@ module.exports = {
     new webpack.BannerPlugin({banner: licenseBanner}),
     new webpack.optimize.LimitChunkCountPlugin({maxChunks: 1}),
     new CopyWebpackPlugin({patterns: [
-      {from: 'plugin.json', to: 'plugin.json'},
+      {
+        from: 'plugin.json',
+        to: 'plugin.json',
+        transform(content) {
+          const descriptor = JSON.parse(content.toString('utf-8'));
+          descriptor.info.version = packagedPluginVersion;
+          return `${JSON.stringify(descriptor, null, 2)}\n`;
+        },
+      },
       {from: 'README.md', to: 'README.md'},
       {from: '../LICENSE', to: 'LICENSE.txt'},
     ]}),

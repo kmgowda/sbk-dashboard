@@ -125,6 +125,12 @@ Landing-page JavaScript and CSS URLs now include a content fingerprint, and all 
 Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
 compatible control script and stylesheet automatically.
 
+The bundled Grafana comparison plugin now receives a deterministic build suffix in its packaged version. This
+invalidates Grafana's browser module cache when comparison sources change without requiring an application-version
+bump. Restart sbk-dashboard after updating the checkout so the managed plugin is atomically replaced; newly opened
+comparison pages then load the matching descriptor and canonical row layout automatically. Tabs already open before
+the restart must be reloaded because their JavaScript process is already running.
+
 Periodic status now reports bounded recent browser activity: `clients_recent`, `landing_clients_2m`, and
 `grafana_opens_5m`. This adds only an in-memory control-plane heartbeat endpoint and opaque per-tab browser IDs; it
 does not change persisted data, command options, native Prometheus/Grafana configuration, or direct-server routing.

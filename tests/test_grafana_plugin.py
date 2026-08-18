@@ -7,12 +7,16 @@
 #     http://www.apache.org/licenses/LICENSE-2.0
 ##
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from sbk_dashboard.grafana_plugin import install_comparison_plugin
+from sbk_dashboard.version import VERSION
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class GrafanaPluginInstallationTest(unittest.TestCase):
@@ -22,6 +26,8 @@ class GrafanaPluginInstallationTest(unittest.TestCase):
             installed = install_comparison_plugin(root)
             self.assertTrue((installed / "module.js").is_file())
             self.assertTrue((installed / "plugin.json").is_file())
+            descriptor = json.loads((installed / "plugin.json").read_text(encoding="utf-8"))
+            self.assertRegex(descriptor["info"]["version"], rf"^{VERSION}-build\.[0-9a-f]{{12}}$")
             (installed / "stale.txt").write_text("old", encoding="utf-8")
             self.assertEqual(installed, install_comparison_plugin(root))
             self.assertFalse((installed / "stale.txt").exists())
@@ -39,3 +45,15 @@ class GrafanaPluginInstallationTest(unittest.TestCase):
             ):
                 install_comparison_plugin(root)
             self.assertEqual(original, (installed / "module.js").read_bytes())
+
+    def test_packaged_plugin_uses_a_cache_busting_build_version(self):
+        source = json.loads((ROOT / "grafana-plugin/src/plugin.json").read_text(encoding="utf-8"))
+        packaged = json.loads(
+            (
+                ROOT
+                / "src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app/plugin.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(VERSION, source["info"]["version"])
+        self.assertRegex(packaged["info"]["version"], rf"^{VERSION}-build\.[0-9a-f]{{12}}$")
+        self.assertNotEqual(source["info"]["version"], packaged["info"]["version"])

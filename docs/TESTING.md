@@ -296,8 +296,9 @@ comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-h
 comparisons when an endpoint is removed. Plugin tests additionally prove bounded descriptor-provisioning retries,
 stale-schema refresh handling, identical-range grouping, per-target URL round trips, invalid/oversized fixed-range
 rejection, preservation of all six canonical rows and their 47 visual panels, exact grid placement, and
-group-specific query scoping. CI rebuilds
-the prebuilt plugin and fails if the committed package differs. A native smoke test should run two concurrent
+group-specific query scoping. The packaged plugin metadata must also carry the deterministic
+`<application-version>-build.<sha256-prefix>` cache revision. CI rebuilds the prebuilt plugin and fails if the
+committed package differs. A native smoke test should run two concurrent
 exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200, detach one target to a
 fixed range, and confirm both named series in representative throughput, latency, connection, and stat panels.
 

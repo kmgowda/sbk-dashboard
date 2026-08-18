@@ -34,9 +34,6 @@ TARGETS: dict[str, tuple[str, ...]] = {
     "grafana-plugin/package.json": (rf'("version": "){VERSION_PATTERN}(")',),
     "grafana-plugin/package-lock.json": (rf'("version": "){VERSION_PATTERN}(")',),
     "grafana-plugin/src/plugin.json": (rf'("version": "){VERSION_PATTERN}(")',),
-    "src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app/plugin.json": (
-        rf'("version": "){VERSION_PATTERN}(")',
-    ),
 }
 
 

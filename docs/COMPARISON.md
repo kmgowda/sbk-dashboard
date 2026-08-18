@@ -165,6 +165,10 @@ sequenceDiagram
 
 The plugin source is in `grafana-plugin/`; the committed production bundle is under
 `src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app/`. Node.js is a build/test dependency only.
+The source descriptor retains the application release version. The production build adds a deterministic
+`-build.<sha256-prefix>` suffix to the packaged plugin version from all frontend sources and build inputs. Grafana
+uses that version in the browser module URL, so rebuilding this feature within the same application release cannot
+reuse an older descriptor loader or panel layout from the browser cache.
 
 ```bash
 npm ci --prefix grafana-plugin

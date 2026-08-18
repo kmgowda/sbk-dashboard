@@ -219,6 +219,12 @@ and scopes each scene's queries to its group. Global and relative scenes refresh
 Time state is URL-only and never enters `targets.json` or dashboard mappings. Four groups and a 31-day absolute span
 bound each view. The classic URL retains one Grafana-wide time range for compatibility.
 
+The source plugin descriptor uses the application version, while webpack derives the packaged plugin version as
+`<application-version>-build.<sha256-prefix>` from the frontend source tree, package metadata/lock, and build
+configuration. Grafana keys the loaded browser module by this version. The deterministic suffix therefore changes
+when the committed module changes, preventing a same-release source update from serving an older cached comparison
+implementation; identical inputs still reproduce identical metadata and bundles.
+
 Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
 an explicit schema version. The comparison app treats HTTP 404 and an older or incomplete schema as transient
 provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
