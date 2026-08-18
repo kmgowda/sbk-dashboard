@@ -216,9 +216,11 @@ that the obsolete response cannot remove the new endpoint's `pending` state or r
 tests assert the configured `--storage.tsdb.retention.time=<days>d` value. When `promtool` is installed beside
 Prometheus, startup runs `promtool check config` before either native service is started.
 
-The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs and
-`Cache-Control: no-cache` on both resources. This protects upgrades from the regression where new counter markup was
-rendered while a cached older script updated only the Total value.
+The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs,
+`Cache-Control: no-cache` on both resources, and equality between that fingerprint and the final substituted
+JavaScript plus stylesheet bytes. A focused policy-constant override proves that a substitution changes both the
+served script and its cache key. This protects upgrades from the regression where new counter markup was rendered
+while a cached older script updated only the Total value.
 
 ## Manual Linux end-to-end test
 
@@ -293,8 +295,24 @@ unchanged; direct native-server clients are deliberately not asserted as observa
 Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
 complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
 comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-host URL behavior, and removal of cached
-comparisons when an endpoint is removed. A native smoke test should run two concurrent exporters, select both on the landing
-page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
+comparisons when an endpoint is removed. Plugin tests additionally prove bounded descriptor-provisioning retries,
+stale-schema refresh handling, identical-range grouping, per-target URL round trips, invalid/oversized fixed-range
+rejection, preservation of all six canonical rows and their 47 visual panels, exact grid placement, and
+group-specific query scoping. The packaged plugin metadata must also carry the deterministic
+`<application-version>-build.<sha256-prefix>` cache revision. CI rebuilds the prebuilt plugin and fails if the
+committed package differs. A native smoke test should run two concurrent
+exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200, detach one target to a
+fixed range, and confirm both named series in representative throughput, latency, connection, and stat panels.
+
+Run the frontend-only checks with Node.js 22:
+
+```bash
+npm ci --prefix grafana-plugin
+npm run typecheck --prefix grafana-plugin
+npm test --prefix grafana-plugin
+npm run build --prefix grafana-plugin
+git diff --exit-code -- src/sbk_dashboard/resources/grafana/plugins
+```
 
 ## venv and Conda checks
 

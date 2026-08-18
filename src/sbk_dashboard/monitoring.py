@@ -23,6 +23,7 @@ from pathlib import Path
 
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform, executable, resolve_on_path
 from sbk_dashboard.files import atomic_write
+from sbk_dashboard.grafana_plugin import install_comparison_plugin
 from sbk_dashboard.layout import DashboardDataLayout
 from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.processes import (
@@ -35,6 +36,7 @@ from sbk_dashboard.processes import (
     PortProcessManager,
 )
 from sbk_dashboard.provisioning import (
+    COMPARISON_APP_PLUGIN_ID,
     DATASOURCE_UID,
     GrafanaDashboardProvisioner,
     PrometheusTargetDiscovery,
@@ -171,6 +173,13 @@ class ManagedMonitoringStack:
             raise ValueError("Every comparison endpoint must be reconciled") from error
         self.dashboard_provisioner.ensure_comparison_dashboard(selected)
         return self.dashboard_provisioner.comparison_dashboard_url(target_ids, dynamic_host)
+
+    def classic_comparison_dashboard_url(
+        self, target_ids: list[str], browser_host: str | None = None
+    ) -> str:
+        """Return the classic provisioned-dashboard URL for fallback and compatibility."""
+        dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
+        return self.dashboard_provisioner.classic_comparison_dashboard_url(target_ids, dynamic_host)
 
     def comparison_dashboard_id(self, target_ids: list[str]) -> str:
         return self.dashboard_provisioner.comparison_dashboard_uid(target_ids)
@@ -344,10 +353,12 @@ class ManagedMonitoringStack:
             grafana / "logs",
             grafana / "provisioning/datasources",
             grafana / "provisioning/dashboards",
+            grafana / "provisioning/plugins",
             grafana / "dashboards",
             self.layout.logs,
         ):
             path.mkdir(parents=True, exist_ok=True)
+        install_comparison_plugin(grafana / "data/plugins")
         targets = _portable(prometheus / "targets.json").replace("'", "''")
         atomic_write(
             prometheus / "prometheus.yml",
@@ -371,6 +382,7 @@ class ManagedMonitoringStack:
                 f"http_port = {self.monitoring.grafana_port}\n\n"
                 "[auth]\ndisable_login_form = true\n\n[auth.anonymous]\nenabled = true\n"
                 "org_name = Main Org.\norg_role = Viewer\n\n[users]\ndefault_theme = dark\n\n"
+                f"[plugins]\nallow_loading_unsigned_plugins = {COMPARISON_APP_PLUGIN_ID}\n\n"
                 "[dashboards]\nmin_refresh_interval = 1s\n\n[log]\nmode = console\nlevel = info\n"
             ).encode(),
         )
@@ -381,6 +393,14 @@ class ManagedMonitoringStack:
                 f"    uid: {DATASOURCE_UID}\n    type: prometheus\n    access: proxy\n"
                 f"    url: http://{self._prometheus_host()}:{self.monitoring.prometheus_port}\n"
                 "    isDefault: true\n    editable: false\n"
+            ).encode(),
+        )
+        atomic_write(
+            grafana / "provisioning/plugins/sbk-comparison.yml",
+            (
+                "apiVersion: 1\napps:\n"
+                f"  - type: {COMPARISON_APP_PLUGIN_ID}\n"
+                "    org_id: 1\n    disabled: false\n"
             ).encode(),
         )
         dashboards = _portable(grafana / "dashboards").replace("'", "''")

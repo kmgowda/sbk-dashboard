@@ -19,6 +19,8 @@ __pycache__
 build
 dist
 downloads
+grafana-plugin/.jest-cache
+grafana-plugin/node_modules
 runtime
 tests
 docs

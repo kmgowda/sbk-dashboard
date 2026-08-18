@@ -59,6 +59,13 @@ class FakeMonitoring:
         formatted = f"[{host}]" if ":" in host else host
         normalized = sorted(set(target_ids))
         digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        return f"http://{formatted}:3000/a/kmg-sbkcomparison-app?comparisonUid=sbk-comparison-{digest}"
+
+    def classic_comparison_dashboard_url(self, target_ids, browser_host=None):
+        host = browser_host or "grafana"
+        formatted = f"[{host}]" if ":" in host else host
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
         query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in normalized)
         return f"http://{formatted}:3000/d/sbk-comparison-{digest}/?{query}"
 
@@ -69,22 +76,38 @@ class FakeMonitoring:
 
 
 class AssetRenderingTest(unittest.TestCase):
+    @staticmethod
+    def render(server, path):
+        request = SimpleNamespace(
+            command="GET",
+            wfile=io.BytesIO(),
+            send_response=lambda _status: None,
+            send_header=lambda _name, _value: None,
+            end_headers=lambda: None,
+        )
+        server._asset(request, path)
+        return request.wfile.getvalue()
+
     def test_index_renders_validated_native_and_container_defaults(self):
         for host in ("127.0.0.1", "host.docker.internal"):
             with self.subTest(host=host):
                 server = object.__new__(DashboardHttpServer)
                 server._default_target_host = host
-                request = SimpleNamespace(
-                    command="GET",
-                    wfile=io.BytesIO(),
-                    send_response=lambda _status: None,
-                    send_header=lambda _name, _value: None,
-                    end_headers=lambda: None,
-                )
-                server._asset(request, "/")
-                page = request.wfile.getvalue()
+                page = self.render(server, "/")
                 self.assertIn(f'value="{host}"'.encode(), page)
                 self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
+
+    def test_asset_fingerprint_uses_the_final_substituted_javascript(self):
+        server = object.__new__(DashboardHttpServer)
+        server._default_target_host = "127.0.0.1"
+        with mock.patch("sbk_dashboard.web.MAX_COMPARISON_TARGETS", 9):
+            page = self.render(server, "/")
+            javascript = self.render(server, "/app.js")
+            stylesheet = self.render(server, "/app.css")
+        expected = hashlib.sha256(stylesheet + javascript).hexdigest()[:12].encode("ascii")
+        versions = re.findall(rb'(?:app\.css|app\.js)\?v=([0-9a-f]{12})', page)
+        self.assertEqual([expected, expected], versions)
+        self.assertIn(b"maxComparisonTargets: 9", javascript)
 
 
 class WebTest(unittest.TestCase):
@@ -219,10 +242,10 @@ class WebTest(unittest.TestCase):
         self.assertTrue(body["dashboardId"].startswith("sbk-comparison-"))
         self.assertTrue(
             body["dashboardUrl"].startswith(
-                f"http://dashboard.example:3000/d/{body['dashboardId']}/"
+                "http://dashboard.example:3000/a/kmg-sbkcomparison-app?comparisonUid="
             )
         )
-        self.assertEqual(2, body["dashboardUrl"].count("var-sbk_endpoints="))
+        self.assertEqual(2, body["classicDashboardUrl"].count("var-sbk_endpoints="))
         repeated = urllib.request.Request(
             self.base + "/api/comparison-dashboard",
             method="POST",
@@ -474,12 +497,16 @@ class MonitoringContinueTest(unittest.TestCase):
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
         self.assertEqual(
-            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            f"http://198.51.100.7:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
             default_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
         self.assertEqual(
-            f"https://grafana.example/base/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            f"https://grafana.example/base/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
             explicit_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
+        )
+        self.assertEqual(
+            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            default_stack.classic_comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):

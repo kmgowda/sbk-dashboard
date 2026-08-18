@@ -23,6 +23,8 @@ flowchart TB
     Entry --> Stack[monitoring.py]
     Entry --> Web[web.py]
     Stack --> Provision[provisioning.py]
+    Stack --> PluginInstall[grafana_plugin.py]
+    PluginInstall --> Plugin[Grafana Scenes app]
     Stack --> Process[processes.py]
     Process --> Guardian[guardian.py and windows_job.py]
     Entry --> Bootstrap[bootstrap.py]
@@ -41,8 +43,8 @@ flowchart TB
     classDef test fill:#fef3c7,stroke:#d97706,color:#78350f;
     class Entry,Launchers root;
     class Config,Registry,Web policy;
-    class Stack,Provision,Process,Guardian,Bootstrap runtime;
-    class Manifest,Assets,Canonical artifact;
+    class Stack,Provision,PluginInstall,Process,Guardian,Bootstrap runtime;
+    class Manifest,Assets,Canonical,Plugin artifact;
     class Tests test;
 ```
 
@@ -71,6 +73,18 @@ Confirm the source checkout is selected:
 python -c "import sbk_dashboard; print(sbk_dashboard.__file__)"
 python -m sbk_dashboard --version
 ```
+
+Node.js 22 is required only when changing the bundled Grafana comparison app. It is not a runtime dependency:
+
+```bash
+npm ci --prefix grafana-plugin
+npm run typecheck --prefix grafana-plugin
+npm test --prefix grafana-plugin
+npm run build --prefix grafana-plugin
+git diff --exit-code -- src/sbk_dashboard/resources/grafana/plugins
+```
+
+Commit the reviewed production bundle together with its TypeScript source. Do not edit `module.js` directly.
 
 ## Run the application safely
 

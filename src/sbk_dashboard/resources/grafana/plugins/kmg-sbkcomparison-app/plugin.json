@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "SBK/SBM Time Comparison",
+  "id": "kmg-sbkcomparison-app",
+  "info": {
+    "keywords": [
+      "sbk",
+      "sbm",
+      "benchmark",
+      "comparison"
+    ],
+    "description": "Compare SBK/SBM targets with shared or independent live and historical time ranges.",
+    "author": {
+      "name": "KMG"
+    },
+    "logos": {},
+    "screenshots": [],
+    "version": "1.26.8.2-build.9f35abd5130d",
+    "updated": "2026-08-18"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "SBK/SBM comparison",
+      "path": "/a/kmg-sbkcomparison-app",
+      "addToNav": false,
+      "defaultNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=13.1.0",
+    "plugins": []
+  }
+}

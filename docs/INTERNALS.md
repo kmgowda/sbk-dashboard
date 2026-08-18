@@ -23,6 +23,7 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 | `bootstrap.py` | `NativeToolBootstrap` | Verified download, partial file, safe extraction, atomic tool installation |
 | `registry.py` | `TargetRegistry` | Validated endpoint snapshot and `targets.json` |
 | `provisioning.py` | discovery/provisioner classes | Prometheus file discovery, dashboard clones, mappings |
+| `grafana_plugin.py` | `install_comparison_plugin()` | Atomic packaged Grafana app installation |
 | `monitoring.py` | `ManagedMonitoringStack` | Generated native configuration, two services, supervisor, target status |
 | `processes.py` | lifecycle/process classes | Port ownership, guardians, process trees, PID records, bounded logs |
 | `guardian.py` | `guard()` | One owned native child and hard-parent-death cleanup |
@@ -206,16 +207,35 @@ the canonical dashboard.
 
 `POST /api/comparison-dashboard` validates 2–8 unique registered IDs, sorts the set, and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
-selection's canonical-dashboard clone and returns a request-host-aware Grafana URL. Repeating the same set in any
-order reuses the UID and file. The dashboard adds a multi-select variable containing only the selected endpoint IDs
-and rewrites all canonical `SBK_*` selectors with the variable's regex matcher. Variable choices display endpoint
-name, SBK/SBM kind, and exporter address. Legends use the readable dashboard name and kind followed by the immutable
-endpoint ID, so duplicate display names remain distinguishable.
+selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
+provisioned-dashboard fallback URL. Repeating the same set in any order reuses the UID and file. The descriptor adds
+a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
+legends retain the readable name, kind, and immutable endpoint ID.
+
+`grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
+`monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates
+the descriptor, groups identical target time selections, converts the canonical visual panels to Grafana Scenes,
+and scopes each scene's queries to its group. Global and relative scenes refresh; fixed historical scenes do not.
+Time state is URL-only and never enters `targets.json` or dashboard mappings. Four groups and a 31-day absolute span
+bound each view. The classic URL retains one Grafana-wide time range for compatibility.
+
+The source plugin descriptor uses the application version, while webpack derives the packaged plugin version as
+`<application-version>-build.<sha256-prefix>` from the frontend source tree, package metadata/lock, and build
+configuration. Grafana keys the loaded browser module by this version. The deterministic suffix therefore changes
+when the committed module changes, preventing a same-release source update from serving an older cached comparison
+implementation; identical inputs still reproduce identical metadata and bundles.
+
+Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
+an explicit schema version. The comparison app treats HTTP 404 and an older or incomplete schema as transient
+provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
+Other backend errors fail immediately with their HTTP status. If the bounded retries expire, the view offers a
+manual retry instead of retaining an unrecoverable blank state. Reconciliation upgrades a cached descriptor from an
+older schema when all of its endpoint IDs remain registered.
 
 Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
 selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains
 entries whose endpoints remain registered, and removes malformed entries or entries containing a deleted endpoint.
-Comparison definitions do not alter endpoint registration or mapping persistence.
+Comparison definitions and time selections do not alter endpoint registration or mapping persistence.
 
 Dashboard mappings persist deterministic default URLs. API responses do not blindly return that stored hostname:
 when `grafana-url` is still the default, the validated direct request `Host` supplies only the browser hostname while
@@ -242,7 +262,9 @@ without network waits. Repeated identical refresh failures produce one warning u
 - each accepted socket receives a configurable timeout.
 
 JSON bodies are limited to 64 KiB, including explicit rejection of negative `Content-Length`. Assets use a
-SHA-256-derived query fingerprint and `no-cache` revalidation. API responses use `no-store`.
+SHA-256-derived query fingerprint over the final substituted JavaScript and stylesheet response bytes plus
+`no-cache` revalidation. Policy-constant substitutions therefore participate in cache identity. API responses use
+`no-store`.
 
 The shared `index.html` contains a default-target placeholder. `DashboardHttpServer` replaces it with the validated
 `DashboardConfig.default_target_host` while serving the page. Configuration defaults it to `127.0.0.1`; the Docker

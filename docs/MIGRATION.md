@@ -53,6 +53,13 @@ generated shared file is removed by reconciliation; bookmarks using that old UID
 landing page or comparison API. The new generated-file cache is bounded to 128 entries and does not change endpoint
 IDs, samples, or registration persistence.
 
+The comparison URL now opens the bundled `kmg-sbkcomparison-app`. Existing deterministic comparison descriptors and
+UIDs remain valid, and the API also returns `classicDashboardUrl` for the earlier single-range provisioned view.
+Every target initially follows one global live range; per-target relative-live or fixed historical selections are
+URL state and require no data migration. The app is installed automatically into the managed Grafana data directory
+on startup in direct, portable, wheel, and container deployments. Fixed ranges are capped at 31 days and each view
+at four distinct time groups.
+
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.
 
@@ -114,9 +121,16 @@ Registered endpoints missing from a successful Prometheus target response now tr
 `down`. Earlier versions left this case pending indefinitely, causing the landing-page Down counter to omit stale
 session endpoints. This status correction requires no configuration or data migration.
 
-Landing-page JavaScript and CSS URLs now include a content fingerprint, and all assets require browser revalidation.
-Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
+Landing-page JavaScript and CSS URLs now include a content fingerprint of the final substituted response bytes, and
+all assets require browser revalidation. Source edits and server-owned UI policy changes both invalidate the cache
+key. Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
 compatible control script and stylesheet automatically.
+
+The bundled Grafana comparison plugin now receives a deterministic build suffix in its packaged version. This
+invalidates Grafana's browser module cache when comparison sources change without requiring an application-version
+bump. Restart sbk-dashboard after updating the checkout so the managed plugin is atomically replaced; newly opened
+comparison pages then load the matching descriptor and canonical row layout automatically. Tabs already open before
+the restart must be reloaded because their JavaScript process is already running.
 
 Periodic status now reports bounded recent browser activity: `clients_recent`, `landing_clients_2m`, and
 `grafana_opens_5m`. This adds only an in-memory control-plane heartbeat endpoint and opaque per-tab browser IDs; it

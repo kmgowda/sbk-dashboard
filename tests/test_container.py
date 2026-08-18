@@ -138,7 +138,10 @@ class ContainerContractTest(unittest.TestCase):
 
     def test_build_context_excludes_generated_and_runtime_data(self):
         ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-        for required in (".git", ".venv", ".coverage*", "build", "dist", "downloads", "runtime"):
+        for required in (
+            ".git", ".venv", ".coverage*", "build", "dist", "downloads",
+            "grafana-plugin/.jest-cache", "grafana-plugin/node_modules", "runtime",
+        ):
             self.assertIn(required, ignored)
 
     def test_container_smoke_uses_ephemeral_host_ports_and_bounded_exporters(self):

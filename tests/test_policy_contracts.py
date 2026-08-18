@@ -55,6 +55,20 @@ class PolicyContractTest(unittest.TestCase):
             for platform_id in platforms:
                 self.assertRegex(manifest_value(manifest, tool, platform_id, "sha256"), r"^[0-9a-f]{64}$")
 
+    def test_grafana_plugin_build_contract_matches_managed_grafana(self):
+        manifest = json.loads(
+            (ROOT / "src/sbk_dashboard/resources/native-artifacts.json").read_text(encoding="utf-8")
+        )
+        grafana_versions = {
+            value["archiveDirectory"].removeprefix("grafana-")
+            for value in manifest["artifacts"]["grafana"].values()
+        }
+        self.assertEqual(1, len(grafana_versions))
+        grafana_version = grafana_versions.pop()
+        package = json.loads((ROOT / "grafana-plugin/package.json").read_text(encoding="utf-8"))
+        for dependency in ("data", "i18n", "runtime", "schema", "ui"):
+            self.assertEqual(grafana_version, package["dependencies"][f"@grafana/{dependency}"])
+
     def test_release_metadata_matches_version_source(self):
         self.assertEqual([], synchronize(write=False))
 

@@ -144,7 +144,9 @@ curl --fail --request POST http://127.0.0.1:9721/api/comparison-dashboard \
 ```
 
 The UI provides the same operation with checkboxes. Repeating the same endpoint set in a different order reuses the
-same comparison dashboard.
+same comparison dashboard. All targets initially follow Grafana's global live range. From the opened view, detach a
+target to an independent live window or fixed historical range without creating another dashboard. Follow the
+[comparison guide](COMPARISON.md) for examples.
 
 ## Stop cleanly
 

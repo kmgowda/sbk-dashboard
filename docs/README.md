@@ -23,6 +23,7 @@ flowchart LR
     Choice -->|Change it| Development[Development guide]
     Choice -->|Use an AI agent| Agents[AI agent guide]
     Getting --> SBK[Run SBK and register metrics]
+    Usage --> Comparison[Compare live and historical runs]
     Usage --> Docker[Docker deployment]
     Architecture --> Internals[Implementation internals]
     Development --> Testing[Testing guide]
@@ -33,7 +34,7 @@ flowchart LR
     classDef engineer fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef agent fill:#f3e8ff,stroke:#9333ea,color:#581c87;
     class Start,Choice entry;
-    class Getting,Usage,Config,SBK,Docker operator;
+    class Getting,Usage,Config,SBK,Comparison,Docker operator;
     class Architecture,Internals,Development,Testing engineer;
     class Agents,AgentContract agent;
 ```
@@ -66,6 +67,7 @@ flowchart LR
 | [Usage and operations](USAGE.md) | How do I start, stop, back up, upgrade, and troubleshoot it? |
 | [Configuration reference](CONFIGURATION.md) | What does every CLI option and environment variable do? |
 | [SBK integration](SBK.md) | How does `PrometheusLogger` connect a benchmark to the dashboard? |
+| [Comparison](COMPARISON.md) | How do multiple targets use shared or independent live and historical ranges? |
 | [Portable installation](PORTABLE.md) | How does first-run bootstrap work without Python, and what is cached? |
 | [Docker deployment](DOCKER.md) | How do I securely run the supported container package? |
 | [Architecture](ARCHITECTURE.md) | Why is the system designed this way, and what invariants must remain? |

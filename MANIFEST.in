@@ -31,3 +31,14 @@ include sbk-dashboard
 include sbk-dashboard.ps1
 include sbk-dashboard.cmd
 recursive-include docs *.md
+include grafana-plugin/LICENSE
+include grafana-plugin/package.json
+include grafana-plugin/package-lock.json
+include grafana-plugin/jest.config.cjs
+include grafana-plugin/webpack.config.cjs
+include grafana-plugin/tsconfig.json
+recursive-include grafana-plugin/src *.json *.md *.ts *.tsx *.css
+recursive-include grafana-plugin/tests *.ts
+prune grafana-plugin/node_modules
+prune grafana-plugin/.jest-cache
+recursive-include src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app *

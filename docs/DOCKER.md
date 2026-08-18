@@ -108,6 +108,9 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 Use a pinned release in production instead of `latest`; use its immutable manifest digest where change control
 requires byte-identical deployment. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
+The per-target-time comparison app is already present in the Python package and is atomically installed into the
+persistent managed Grafana directory on startup. The runtime image does not include Node.js/npm and does not fetch a
+plugin from the network. The exact app ID is the only unsigned plugin allowed by generated Grafana configuration.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
 digest so AMD64 and ARM64 builds resolve the same reviewed manifest. Native archive URLs, filenames, formats, and
 checksums come from the same packaged `native-artifacts.json` used by direct installations; they are not duplicated
@@ -284,9 +287,10 @@ docker build --build-arg VCS_REF=local \
 python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
 ```
 
-The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Current
-Docker Desktop and Docker Engine installations normally provide it; legacy-builder-only installations must install
-Buildx before building.
+The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Docker
+Desktop and Docker Engine installations normally provide it; legacy-builder-only installations must install Buildx
+before building. Docker build contexts exclude local Grafana-plugin `node_modules` and Jest cache trees; those
+development-only files are never needed because the committed production plugin bundle is the runtime input.
 
 Build both published architectures into a local OCI archive without publishing them:
 

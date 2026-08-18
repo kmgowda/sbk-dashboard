@@ -128,7 +128,7 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 2–8 registered endpoints and return a deterministic ID/URL for the set |
+| `POST /api/comparison-dashboard` | Validate 2–8 endpoints and return deterministic app and classic-fallback URLs |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 
@@ -247,6 +247,10 @@ registration and deletion serialized through reconciliation and preserve compens
 4. Add selection/extraction/checksum/traversal tests.
 5. Mark native validation pending until executed on the target OS/architecture.
 
+When upgrading managed Grafana, update the exact `@grafana/data`, `i18n`, `runtime`, `schema`, and `ui` versions in
+`grafana-plugin/package.json` to the same Grafana release, refresh the lock file, rebuild the committed app, and run
+the real browser plus container smoke tests. `test_policy_contracts.py` rejects version drift.
+
 ## Testing layers
 
 Use the least expensive layer that proves the change, then add the higher layers required by risk:
@@ -339,6 +343,7 @@ Review changes in this order:
 - `docs/ARCHITECTURE.md`: design decisions and invariants.
 - `docs/TESTING.md`: executable validation procedures.
 - `docs/USAGE.md`: operator installation, environment, endpoint, backup, upgrade, and troubleshooting procedures.
+- `docs/COMPARISON.md`: comparison controls, time-group semantics, bounds, URL state, and Grafana app internals.
 - `docs/PORTABLE.md`: source bootstrap, standalone bundles, cache layout, repair, and platform coverage.
 - `docs/INTERNALS.md`: implementation-level call paths, locks, processes, persistence formats, and failure boundaries.
 - `docs/MIGRATION.md`: compatibility and upgrade behavior.
