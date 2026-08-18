@@ -8,18 +8,23 @@
 ##
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sbk_dashboard.grafana_plugin import install_comparison_plugin
+from sbk_dashboard.grafana_plugin import Traversable, install_comparison_plugin
 from sbk_dashboard.version import VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class GrafanaPluginInstallationTest(unittest.TestCase):
+    def test_uses_the_resource_traversable_available_for_this_python(self):
+        expected_module = "importlib.resources.abc" if sys.version_info >= (3, 11) else "importlib.abc"
+        self.assertEqual(expected_module, Traversable.__module__)
+
     def test_installs_and_replaces_the_bundled_plugin(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

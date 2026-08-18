@@ -13,13 +13,18 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import uuid
 from contextlib import suppress
-from importlib.abc import Traversable
 from importlib.resources import files
 from pathlib import Path
 
 from sbk_dashboard.provisioning import COMPARISON_APP_PLUGIN_ID
+
+if sys.version_info >= (3, 11):
+    from importlib.resources.abc import Traversable
+else:
+    from importlib.abc import Traversable
 
 
 def install_comparison_plugin(plugin_root: Path) -> Path:
