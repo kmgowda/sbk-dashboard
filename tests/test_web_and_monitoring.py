@@ -59,6 +59,13 @@ class FakeMonitoring:
         formatted = f"[{host}]" if ":" in host else host
         normalized = sorted(set(target_ids))
         digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
+        return f"http://{formatted}:3000/a/kmg-sbkcomparison-app?comparisonUid=sbk-comparison-{digest}"
+
+    def classic_comparison_dashboard_url(self, target_ids, browser_host=None):
+        host = browser_host or "grafana"
+        formatted = f"[{host}]" if ":" in host else host
+        normalized = sorted(set(target_ids))
+        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
         query = "&".join(f"var-sbk_endpoints={target_id}" for target_id in normalized)
         return f"http://{formatted}:3000/d/sbk-comparison-{digest}/?{query}"
 
@@ -219,10 +226,10 @@ class WebTest(unittest.TestCase):
         self.assertTrue(body["dashboardId"].startswith("sbk-comparison-"))
         self.assertTrue(
             body["dashboardUrl"].startswith(
-                f"http://dashboard.example:3000/d/{body['dashboardId']}/"
+                "http://dashboard.example:3000/a/kmg-sbkcomparison-app?comparisonUid="
             )
         )
-        self.assertEqual(2, body["dashboardUrl"].count("var-sbk_endpoints="))
+        self.assertEqual(2, body["classicDashboardUrl"].count("var-sbk_endpoints="))
         repeated = urllib.request.Request(
             self.base + "/api/comparison-dashboard",
             method="POST",
@@ -474,12 +481,16 @@ class MonitoringContinueTest(unittest.TestCase):
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
         self.assertEqual(
-            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            f"http://198.51.100.7:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
             default_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
         self.assertEqual(
-            f"https://grafana.example/base/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            f"https://grafana.example/base/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
             explicit_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
+        )
+        self.assertEqual(
+            f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
+            default_stack.classic_comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):

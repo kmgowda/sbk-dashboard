@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) KMG. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+.sbk-comparison { padding: 20px; }
+.sbk-comparison header { margin-bottom: 20px; }
+.sbk-comparison header p { color: #c7d0d9; max-width: 1000px; }
+.target-time-controls { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.target-time-card { background: #181b1f; border: 1px solid #343a40; border-radius: 6px; display: grid; gap: 10px; padding: 14px; }
+.target-time-card small { color: #9fa7b3; display: block; overflow-wrap: anywhere; }
+.target-time-card label { display: grid; font-size: 12px; gap: 4px; }
+.target-time-card input, .target-time-card select { background: #111217; border: 1px solid #464c54; border-radius: 4px; color: #f4f5f5; min-height: 34px; padding: 6px 8px; }
+.absolute-fields { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.comparison-summary { color: #9fa7b3; margin: 18px 0 8px; }
+.time-group { border-top: 2px solid #5794f2; margin-top: 20px; padding-top: 12px; }
+.time-group-heading { align-items: baseline; display: flex; flex-wrap: wrap; gap: 12px; }
+.time-group-heading h2 { margin: 0; }
+.time-group-heading span { color: #9fa7b3; }
+@media (max-width: 700px) { .absolute-fields { grid-template-columns: 1fr; } }

@@ -255,12 +255,16 @@ class ContainerSmoke:
         self, comparison: dict[str, Any], target_ids: list[str]
     ) -> None:
         dashboard_id = comparison.get("dashboardId")
-        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/d/{dashboard_id}/"
+        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/a/kmg-sbkcomparison-app?comparisonUid={dashboard_id}"
         if not isinstance(dashboard_id, str) or not dashboard_id.startswith("sbk-comparison-"):
             raise AssertionError(f"Invalid comparison dashboard ID: {comparison}")
         if not str(comparison.get("dashboardUrl", "")).startswith(expected_prefix):
             raise AssertionError(f"Comparison URL is not host-accessible: {comparison}")
         self._wait_for_dashboard(str(comparison["dashboardUrl"]))
+        classic_url = str(comparison.get("classicDashboardUrl", ""))
+        if not classic_url.startswith(f"http://127.0.0.1:{self.grafana_port}/d/{dashboard_id}/"):
+            raise AssertionError(f"Classic comparison fallback is invalid: {comparison}")
+        self._wait_for_dashboard(classic_url)
         dashboard = f"/var/lib/sbk-dashboard/monitoring/grafana/dashboards/{dashboard_id}.json"
         verification_script = (
             "import json\n"
@@ -272,13 +276,20 @@ class ContainerSmoke:
             "        return sum(panels(v) for v in node)\n"
             "    return 0\n"
             "print(json.dumps({'panels': panels(root), "
-            "'ids': root.get('sbkDashboardComparisonEndpointIds')}))\n"
+            "'ids': root.get('sbkDashboardComparisonEndpointIds'), "
+            "'timeGroups': root.get('sbkDashboardComparisonPolicy', {}).get('maxTimeGroups'), "
+            "'absoluteDays': root.get('sbkDashboardComparisonPolicy', {}).get('maxAbsoluteRangeDays')}))\n"
         )
         details = json.loads(
             command("docker", "exec", self.name, "python", "-c", verification_script).stdout
         )
-        if details != {"panels": 53, "ids": sorted(target_ids)}:
+        if details != {"panels": 53, "ids": sorted(target_ids), "timeGroups": 4, "absoluteDays": 31}:
             raise AssertionError(f"Invalid generated comparison dashboard: {details}")
+        command(
+            "docker", "exec", self.name, "test", "-f",
+            "/var/lib/sbk-dashboard/monitoring/grafana/data/plugins/"
+            "kmg-sbkcomparison-app/module.js",
+        )
 
     def _start(self) -> None:
         docker_arguments = [

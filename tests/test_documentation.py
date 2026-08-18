@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COPYRIGHT_NOTICE = "Copyright (c) KMG. All Rights Reserved."
 COMMENTABLE_SUFFIXES = {
     ".cmd",
+    ".cjs",
     ".css",
     ".html",
     ".js",
@@ -27,6 +28,8 @@ COMMENTABLE_SUFFIXES = {
     ".py",
     ".sh",
     ".toml",
+    ".ts",
+    ".tsx",
     ".yaml",
     ".yml",
 }
@@ -34,9 +37,11 @@ COMMENTABLE_NAMES = {".dockerignore", ".gitignore", "Dockerfile", "MANIFEST.in",
 IGNORED_DIRECTORY_NAMES = {
     ".git",
     ".mypy_cache",
+    ".jest-cache",
     ".pytest_cache",
     ".ruff_cache",
     ".venv",
+    "node_modules",
     "build",
     "dist",
     "sbk_dashboard.egg-info",
@@ -46,6 +51,7 @@ REPOSITORY_SOURCE_DIRECTORIES = {
     ".github",
     ".windsurf",
     "docs",
+    "grafana-plugin",
     "requirements",
     "scripts",
     "src",

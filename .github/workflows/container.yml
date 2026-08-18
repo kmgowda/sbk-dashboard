@@ -20,6 +20,7 @@ on:
       - "compose.resources.yaml"
       - ".trivyignore.yaml"
       - "pyproject.toml"
+      - "grafana-plugin/**"
       - "requirements/container-build.txt"
       - "requirements/container-os.txt"
       - "requirements/container-runtime.txt"

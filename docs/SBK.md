@@ -168,8 +168,10 @@ different registered endpoints isolated.
 
 To compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
 checkboxes, and choose **Compare selected**. The selector displays name, type, and exporter address; chart legends
-show the registered dashboard name and type plus the immutable endpoint ID. Comparison uses wall-clock time and does
-not shift sequential historical runs to a common elapsed-time origin.
+show the registered dashboard name and type plus the immutable endpoint ID. All targets begin on one global live
+range. A target can then use an independent relative-live or fixed historical range and later rejoin global time.
+Comparison uses wall-clock time and does not shift sequential historical runs to a common elapsed-time origin. See
+[the comparison guide](COMPARISON.md) for controls and limits.
 
 ## Change the exporter port or path
 

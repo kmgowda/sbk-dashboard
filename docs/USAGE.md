@@ -332,17 +332,19 @@ A down endpoint is non-fatal. Existing Prometheus history remains queryable unti
 ## Compare live SBK and SBM results
 
 Select between two and eight endpoint checkboxes on the landing page, then choose **Compare selected**. The opened
-Grafana dashboard applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
+Grafana comparison app applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
 friendly dashboard name, benchmark type, and stable endpoint ID. For example: `Primary NVMe [SBK · f9720cad…] —
-Average Latency`. The selector also displays the exporter address. The generated URL contains the selection and can
-be bookmarked or shared. The normalized endpoint set deterministically produces one
+Average Latency`. Every target initially follows the global live range. After inspecting the shared view, set an
+individual target to an independent relative-live window or a fixed historical interval; choose **Follow global** to
+resynchronize it. Equal ranges share one query group. The generated URL contains endpoint and time state and can be
+bookmarked or shared. The normalized endpoint set deterministically produces one
 `sbk-comparison-<16-hex>` ID: repeating the same selection in any order reuses the same dashboard ID and URL.
 Generated comparison files are a bounded cache of 128 entries rather than a separate user-managed registry.
 
-Comparison is intended for concurrent or otherwise wall-clock-overlapping exporters. It does not align separate
-historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already
+The view permits at most four distinct time groups and 31 days per fixed range. It compares wall-clock ranges and
+does not align separate historical runs by elapsed benchmark time. Removing an endpoint removes it from future selections, while already
 scraped samples remain subject to normal Prometheus retention and removes cached comparisons containing that
-endpoint during reconciliation.
+endpoint during reconciliation. See [Compare SBK and SBM results](COMPARISON.md) for a complete walkthrough.
 
 ## Use public and remote addresses
 

@@ -139,6 +139,7 @@ runtime data as source material.
 | `src/sbk_dashboard/guardian.py` | Parent-death monitoring and orphaned native-process tree cleanup |
 | `src/sbk_dashboard/windows_job.py` | Windows kill-on-close Job Object containment and suspended launch |
 | `src/sbk_dashboard/provisioning.py` | Prometheus discovery and endpoint-scoped Grafana dashboard generation |
+| `src/sbk_dashboard/grafana_plugin.py`, `grafana-plugin/` | Atomic bundled-app installation and Grafana Scenes source/tests/build |
 | `src/sbk_dashboard/bootstrap.py` | Native download, verification, extraction, and installation |
 | `src/sbk_dashboard/files.py` | Atomic file/JSON primitives |
 | `src/sbk_dashboard/models.py` | Immutable endpoint/status values |
@@ -154,7 +155,7 @@ runtime data as source material.
 | `docs/README.md`, `docs/GETTING_STARTED.md` | Documentation portal and first-run tutorial |
 | `docs/CONFIGURATION.md` | Complete CLI, environment, bounds, precedence, and example reference |
 | `docs/DEVELOPMENT.md`, `docs/AI_AGENTS.md` | Engineer workflow and cross-tool software-agent onboarding |
-| `docs/USAGE.md` | Operator environments, daily use, endpoints, backup, upgrades, and troubleshooting |
+| `docs/USAGE.md`, `docs/COMPARISON.md` | Daily operation and shared/per-target comparison time ranges |
 | `docs/INTERNALS.md` | Module ownership, call paths, locks, persisted formats, and failure boundaries |
 | `tests/container_smoke.py` | Live container, dashboard, persistence, and lifecycle validation |
 | `tests/compose_contract.py` | Resolved production/development Compose runtime-equivalence validation |

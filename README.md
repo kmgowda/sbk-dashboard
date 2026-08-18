@@ -28,8 +28,8 @@ The current release is `1.26.8.2`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
-- A deterministic live comparison dashboard for any 2–8 selected SBK or SBM endpoints, with a reusable ID and
-  shareable URL for the same endpoint set.
+- A deterministic comparison view for any 2–8 selected SBK or SBM endpoints, with shared or per-target live and
+  historical ranges, a reusable ID, and a shareable URL.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
@@ -615,11 +615,14 @@ Conflicting metadata for an already registered `host:port` is rejected instead o
 configuration.
 
 The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
-selected** to open a live comparison dashboard. The sorted endpoint-ID set produces a deterministic
+selected** to open the comparison app. Every target initially follows one global live range; after it opens, a
+target can be detached to an independent relative-live range or a fixed historical range and later rejoined. Targets
+with identical ranges share one bounded query group. The sorted endpoint-ID set produces a deterministic
 `sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
-same ID and URL. Selection is also encoded in repeated Grafana `var-sbk_endpoints` URL parameters for bookmarking
-and sharing. The generated cache is bounded to 128 comparison dashboards. Live comparison uses wall-clock time;
-independently timed historical runs are not shifted to a common run-relative origin.
+same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
+Comparison is bounded to four distinct time groups and a 31-day fixed range; the generated descriptor cache is
+bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
+See the [comparison guide](docs/COMPARISON.md) for examples, controls, limits, and implementation details.
 
 ## Persistent files
 

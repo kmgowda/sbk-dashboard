@@ -27,10 +27,12 @@ flowchart LR
         Registry[Target registry]
         Discovery[Prometheus discovery]
         Provisioner[Grafana provisioner]
+        PluginInstaller[Bundled app installer]
         Stack[Monitoring facade and supervisor]
         HTTP --> Registry
         Registry --> Discovery
         Registry --> Provisioner
+        Stack --> PluginInstaller
         HTTP --> Stack
     end
     Registry --> State[(Atomic registration state)]
@@ -38,17 +40,19 @@ flowchart LR
     Stack --> GG[Grafana guardian]
     PG --> Prometheus[Native Prometheus]
     GG --> Grafana[Native Grafana]
+    Browser -->|comparison view| Grafana
     Exporters[Remote SBK/SBM endpoints] -->|scraped| Prometheus
     Prometheus --> TSDB[(Persistent TSDB)]
     Grafana -->|PromQL| Prometheus
     Provisioner --> Grafana
+    PluginInstaller --> Grafana
 
     classDef user fill:#dbeafe,stroke:#2563eb,color:#172554;
     classDef control fill:#f3e8ff,stroke:#9333ea,color:#581c87;
     classDef native fill:#dcfce7,stroke:#16a34a,color:#14532d;
     classDef state fill:#fef3c7,stroke:#d97706,color:#78350f;
     class Browser,Exporters user;
-    class HTTP,Registry,Discovery,Provisioner,Stack control;
+    class HTTP,Registry,Discovery,Provisioner,PluginInstaller,Stack control;
     class PG,GG,Prometheus,Grafana native;
     class State,TSDB state;
 ```
@@ -133,11 +137,17 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 9. `dashboard-mappings.json` records the deterministic relationship.
 
 The comparison API normalizes 2–8 unique registered endpoint IDs by sorting them and derives
-`sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard clone
-for the selection; the same set in any order therefore reuses the same Grafana UID, file, and URL. Its multi-value
-`sbk_endpoints` variable contains only that selection, and every `SBK_*` selector uses the regex matcher
-`sbk_endpoint_id=~"${sbk_endpoints:regex}"`. Generated comparisons form a bounded 128-entry cache. Oldest entries
-are evicted deterministically, and reconciliation removes cached comparisons containing deleted registrations.
+`sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
+descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
+classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`.
+
+The frontend-only Grafana app uses Grafana Scenes to build one query scene per distinct time range after the view
+opens. Every target starts in one global live scene. Detaching a target creates or joins an independent relative-live
+or fixed historical scene, while reattaching it returns to global time. Each scene replaces the descriptor's
+`${sbk_endpoints:regex}` token with only its assigned fixed-hex endpoint IDs. This preserves endpoint isolation while
+allowing different ranges without duplicating persisted dashboards. Four time groups and a 31-day fixed range bound
+query amplification. Generated descriptors form a bounded 128-entry cache; reconciliation removes cached
+comparisons containing deleted registrations.
 
 The host is the same uniqueness component for DNS, IPv4, and IPv6 names; changing only the port creates a distinct
 endpoint and dashboard.

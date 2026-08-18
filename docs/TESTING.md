@@ -293,8 +293,21 @@ unchanged; direct native-server clients are deliberately not asserted as observa
 Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
 complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
 comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-host URL behavior, and removal of cached
-comparisons when an endpoint is removed. A native smoke test should run two concurrent exporters, select both on the landing
-page, and confirm both named series remain live in representative throughput, latency, connection, and stat panels.
+comparisons when an endpoint is removed. Plugin tests additionally prove identical-range grouping, per-target URL
+round trips, invalid/oversized fixed-range rejection, panel flattening, and group-specific query scoping. CI rebuilds
+the prebuilt plugin and fails if the committed package differs. A native smoke test should run two concurrent
+exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200, detach one target to a
+fixed range, and confirm both named series in representative throughput, latency, connection, and stat panels.
+
+Run the frontend-only checks with Node.js 22:
+
+```bash
+npm ci --prefix grafana-plugin
+npm run typecheck --prefix grafana-plugin
+npm test --prefix grafana-plugin
+npm run build --prefix grafana-plugin
+git diff --exit-code -- src/sbk_dashboard/resources/grafana/plugins
+```
 
 ## venv and Conda checks
 

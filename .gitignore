@@ -16,6 +16,8 @@ __pycache__/
 build/
 dist/
 htmlcov/
+grafana-plugin/.jest-cache/
+grafana-plugin/node_modules/
 .venv/
 .conda/
 data/

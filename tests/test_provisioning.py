@@ -90,14 +90,21 @@ class ProvisioningTest(unittest.TestCase):
         self.assertFalse(variable["includeAll"])
         self.assertEqual(["first", "second"], [option["value"] for option in variable["options"]])
         self.assertIn("SBM two (SBM)", variable["options"][1]["text"])
+        self.assertEqual(["first", "second"], [value["id"] for value in generated["sbkDashboardComparisonTargets"]])
+        self.assertEqual(4, generated["sbkDashboardComparisonPolicy"]["maxTimeGroups"])
+        self.assertEqual(31, generated["sbkDashboardComparisonPolicy"]["maxAbsoluteRangeDays"])
         legends = _values_for_key(generated, "legendFormat")
         self.assertTrue(all("{{sbk_dashboard_name}}" in legend for legend in legends))
         self.assertTrue(all("{{sbk_kind}}" in legend for legend in legends))
         self.assertTrue(all("{{sbk_endpoint_id}}" in legend for legend in legends))
         self.assertEqual(53, sum(1 for _ in _panels(generated)))
         self.assertEqual(
-            f"http://grafana:3000/d/{comparison_uid}/?var-sbk_endpoints=first&var-sbk_endpoints=second",
+            f"http://grafana:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
             self.provisioner.comparison_dashboard_url(["first", "second"]),
+        )
+        self.assertEqual(
+            f"http://grafana:3000/d/{comparison_uid}/?var-sbk_endpoints=first&var-sbk_endpoints=second",
+            self.provisioner.classic_comparison_dashboard_url(["first", "second"]),
         )
 
     def test_same_comparison_set_reuses_uid_and_url_regardless_of_selection_order(self):

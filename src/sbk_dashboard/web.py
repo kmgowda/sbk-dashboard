@@ -262,8 +262,19 @@ class DashboardHttpServer:
             dashboard_url = self.monitoring.comparison_dashboard_url(
                 target_ids, self._request_hostname(request)
             )
+            classic_dashboard_url = self.monitoring.classic_comparison_dashboard_url(
+                target_ids, self._request_hostname(request)
+            )
             dashboard_id = self.monitoring.comparison_dashboard_id(target_ids)
-        self._json(request, 200, {"dashboardId": dashboard_id, "dashboardUrl": dashboard_url})
+        self._json(
+            request,
+            200,
+            {
+                "dashboardId": dashboard_id,
+                "dashboardUrl": dashboard_url,
+                "classicDashboardUrl": classic_dashboard_url,
+            },
+        )
 
     def _target(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
         identifier, separator, action = encoded.partition("/")
