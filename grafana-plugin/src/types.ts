@@ -44,6 +44,7 @@ export interface ComparisonDashboard {
   uid: string;
   title?: string;
   panels: DashboardPanel[];
+  sbkDashboardComparisonSchemaVersion: number;
   sbkDashboardComparisonEndpointIds: string[];
   sbkDashboardComparisonTargets: TargetDescriptor[];
   sbkDashboardComparisonPolicy: ComparisonPolicy;

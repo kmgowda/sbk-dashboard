@@ -13,6 +13,15 @@ import {AppRootProps} from '@grafana/data';
 import {getBackendSrv} from '@grafana/runtime';
 import {Alert, Button, Spinner} from '@grafana/ui';
 import {SceneTimeRange} from '@grafana/scenes';
+import {
+  COMPARISON_DESCRIPTOR_SCHEMA_VERSION,
+  DESCRIPTOR_LOAD_ATTEMPTS,
+  DESCRIPTOR_RETRY_DELAY_MS,
+  DescriptorLoadCancelledError,
+  DescriptorNotReadyError,
+  errorStatus,
+  loadComparisonDescriptor,
+} from './descriptor';
 import {buildGroupScene} from './scene';
 import {
   DEFAULT_RELATIVE_FROM,
@@ -38,21 +47,38 @@ function App(_props: AppRootProps) {
   const [targets, setTargets] = useState<TargetDescriptor[]>([]);
   const [selections, setSelections] = useState<Record<string, TargetTimeSelection>>({});
   const [error, setError] = useState('');
+  const [loadGeneration, setLoadGeneration] = useState(0);
 
   useEffect(() => {
     if (!COMPARISON_UID.test(comparisonUid)) {
       setError('Open this view from the SBK Dashboard “Compare selected” action.');
       return;
     }
-    getBackendSrv()
-      .get<GrafanaDashboardResponse>(`/api/dashboards/uid/${encodeURIComponent(comparisonUid)}`)
-      .then((response) => {
-        const selected = validateTargets(
-          response.dashboard.sbkDashboardComparisonTargets,
-          response.dashboard.sbkDashboardComparisonEndpointIds,
-          response.dashboard.sbkDashboardComparisonPolicy.minTargets,
-          response.dashboard.sbkDashboardComparisonPolicy.maxTargets
-        );
+    const controller = new AbortController();
+    setError('');
+    setDashboard(null);
+    loadComparisonDescriptor(
+      async () => {
+        const response = await getBackendSrv()
+          .get<GrafanaDashboardResponse>(`/api/dashboards/uid/${encodeURIComponent(comparisonUid)}`);
+        if (response.dashboard.sbkDashboardComparisonSchemaVersion !== COMPARISON_DESCRIPTOR_SCHEMA_VERSION) {
+          throw new DescriptorNotReadyError();
+        }
+        try {
+          const selected = validateTargets(
+            response.dashboard.sbkDashboardComparisonTargets,
+            response.dashboard.sbkDashboardComparisonEndpointIds,
+            response.dashboard.sbkDashboardComparisonPolicy.minTargets,
+            response.dashboard.sbkDashboardComparisonPolicy.maxTargets
+          );
+          return {response, selected};
+        } catch {
+          throw new DescriptorNotReadyError();
+        }
+      },
+      {signal: controller.signal}
+    )
+      .then(({response, selected}) => {
         setDashboard(response.dashboard);
         setTargets(selected);
         setSelections(selectionsFromUrl(
@@ -62,8 +88,23 @@ function App(_props: AppRootProps) {
           response.dashboard.sbkDashboardComparisonPolicy.maxTimeGroups
         ));
       })
-      .catch(() => setError('The comparison descriptor is unavailable or no longer contains registered targets.'));
-  }, [comparisonUid]);
+      .catch((loadError: unknown) => {
+        if (loadError instanceof DescriptorLoadCancelledError || controller.signal.aborted) return;
+        const status = errorStatus(loadError);
+        if (status === 404 || loadError instanceof DescriptorNotReadyError) {
+          const seconds = Math.ceil(
+            (DESCRIPTOR_LOAD_ATTEMPTS - 1) * DESCRIPTOR_RETRY_DELAY_MS / 1000
+          );
+          setError(
+            `Grafana did not finish provisioning this comparison within ${seconds} seconds. ` +
+            'Retry now, or return to SBK Dashboard and select Compare again.'
+          );
+          return;
+        }
+        setError(`Grafana could not load the comparison descriptor${status ? ` (HTTP ${status})` : ''}.`);
+      });
+    return () => controller.abort();
+  }, [comparisonUid, loadGeneration]);
 
   const groups = useMemo(
     () => groupSelections(
@@ -136,7 +177,14 @@ function App(_props: AppRootProps) {
     );
   };
 
-  if (error && !dashboard) return <Alert title="Unable to open comparison">{error}</Alert>;
+  if (error && !dashboard) return (
+    <Alert title="Unable to open comparison">
+      <p>{error}</p>
+      <Button size="sm" variant="secondary" onClick={() => setLoadGeneration((value) => value + 1)}>
+        Retry
+      </Button>
+    </Alert>
+  );
   if (!dashboard) return <Spinner />;
 
   return (

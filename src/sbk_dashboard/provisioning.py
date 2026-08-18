@@ -25,6 +25,7 @@ from sbk_dashboard.models import BenchmarkTarget
 DATASOURCE_UID = "PBFA97CFB590B2093"
 COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
 COMPARISON_APP_PLUGIN_ID = "kmg-sbkcomparison-app"
+COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 1
 MIN_COMPARISON_TARGETS = 2
 MAX_COMPARISON_TARGETS = 8
 MAX_COMPARISON_TIME_GROUPS = 4
@@ -130,6 +131,7 @@ class GrafanaDashboardProvisioner:
         dashboard["uid"] = self.comparison_dashboard_uid(target_ids)
         dashboard["title"] = "SBK/SBM Live Comparison"
         dashboard["version"] = 1
+        dashboard["sbkDashboardComparisonSchemaVersion"] = COMPARISON_DESCRIPTOR_SCHEMA_VERSION
         dashboard["sbkDashboardComparisonEndpointIds"] = target_ids
         dashboard["sbkDashboardComparisonTargets"] = [
             {
@@ -197,9 +199,15 @@ class GrafanaDashboardProvisioner:
                 atomic_json(path, self.generated_dashboard(target))
             targets_by_id = {target.id: target for target in targets}
             for path in self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"):
-                comparison_ids = self._comparison_target_ids(path)
-                if comparison_ids is None or any(target_id not in targets_by_id for target_id in comparison_ids):
+                descriptor = self._comparison_descriptor(path)
+                if descriptor is None:
                     continue
+                comparison_ids, schema_current = descriptor
+                if any(target_id not in targets_by_id for target_id in comparison_ids):
+                    continue
+                if not schema_current:
+                    selected = [targets_by_id[target_id] for target_id in comparison_ids]
+                    atomic_json(path, self.generated_comparison_dashboard(selected))
                 expected.add(path)
             for path in self.dashboard_directory.glob("sbk-*.json"):
                 if path not in expected:
@@ -207,7 +215,7 @@ class GrafanaDashboardProvisioner:
             self._prune_comparison_dashboards("")
 
     @staticmethod
-    def _comparison_target_ids(path: Path) -> list[str] | None:
+    def _comparison_descriptor(path: Path) -> tuple[list[str], bool] | None:
         try:
             with path.open("rb") as source:
                 content = source.read(MAX_GENERATED_DASHBOARD_BYTES + 1)
@@ -225,7 +233,8 @@ class GrafanaDashboardProvisioner:
             or value.get("uid") != GrafanaDashboardProvisioner.comparison_dashboard_uid(target_ids)
         ):
             return None
-        return target_ids
+        schema_current = value.get("sbkDashboardComparisonSchemaVersion") == COMPARISON_DESCRIPTOR_SCHEMA_VERSION
+        return target_ids, schema_current
 
     def _prune_comparison_dashboards(self, retained_uid: str) -> None:
         paths = list(self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"))

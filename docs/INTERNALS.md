@@ -219,6 +219,13 @@ and scopes each scene's queries to its group. Global and relative scenes refresh
 Time state is URL-only and never enters `targets.json` or dashboard mappings. Four groups and a 31-day absolute span
 bound each view. The classic URL retains one Grafana-wide time range for compatibility.
 
+Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
+an explicit schema version. The comparison app treats HTTP 404 and an older or incomplete schema as transient
+provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
+Other backend errors fail immediately with their HTTP status. If the bounded retries expire, the view offers a
+manual retry instead of retaining an unrecoverable blank state. Reconciliation upgrades a cached descriptor from an
+older schema when all of its endpoint IDs remain registered.
+
 Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
 selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains
 entries whose endpoints remain registered, and removes malformed entries or entries containing a deleted endpoint.

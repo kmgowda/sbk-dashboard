@@ -293,7 +293,8 @@ unchanged; direct native-server clients are deliberately not asserted as observa
 Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
 complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
 comparison UIDs, bounded 2–8-ID API validation and comparison cache, request-host URL behavior, and removal of cached
-comparisons when an endpoint is removed. Plugin tests additionally prove identical-range grouping, per-target URL
+comparisons when an endpoint is removed. Plugin tests additionally prove bounded descriptor-provisioning retries,
+stale-schema refresh handling, identical-range grouping, per-target URL
 round trips, invalid/oversized fixed-range rejection, panel flattening, and group-specific query scoping. CI rebuilds
 the prebuilt plugin and fails if the committed package differs. A native smoke test should run two concurrent
 exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200, detach one target to a

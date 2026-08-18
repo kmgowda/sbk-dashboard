@@ -58,7 +58,14 @@ class ProvisioningTest(unittest.TestCase):
         self.assertTrue((self.directory / "dashboards/sbk-first.json").is_file())
         self.assertTrue((self.directory / "dashboards/sbk-second.json").is_file())
         comparison_uid = self.provisioner.ensure_comparison_dashboard([first, second])
-        self.assertTrue((self.directory / f"dashboards/{comparison_uid}.json").is_file())
+        comparison_path = self.directory / f"dashboards/{comparison_uid}.json"
+        self.assertTrue(comparison_path.is_file())
+        stale = json.loads(comparison_path.read_text(encoding="utf-8"))
+        stale.pop("sbkDashboardComparisonSchemaVersion")
+        comparison_path.write_text(json.dumps(stale), encoding="utf-8")
+        self.provisioner.reconcile([first, second])
+        refreshed = json.loads(comparison_path.read_text(encoding="utf-8"))
+        self.assertEqual(1, refreshed["sbkDashboardComparisonSchemaVersion"])
         self.assertEqual("http://grafana:3000/d/sbk-first/", self.provisioner.dashboard_url("first"))
         self.assertEqual(
             "http://203.0.113.8:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "203.0.113.8")
@@ -80,6 +87,7 @@ class ProvisioningTest(unittest.TestCase):
         comparison_uid = self.provisioner.comparison_dashboard_uid(["first", "second"])
         self.assertEqual(comparison_uid, generated["uid"])
         self.assertEqual("SBK/SBM Live Comparison", generated["title"])
+        self.assertEqual(1, generated["sbkDashboardComparisonSchemaVersion"])
         self.assertTrue(all(
             'sbk_endpoint_id=~"${sbk_endpoints:regex}"' in value
             for value in values if "SBK_" in value
