@@ -121,8 +121,9 @@ Registered endpoints missing from a successful Prometheus target response now tr
 `down`. Earlier versions left this case pending indefinitely, causing the landing-page Down counter to omit stale
 session endpoints. This status correction requires no configuration or data migration.
 
-Landing-page JavaScript and CSS URLs now include a content fingerprint, and all assets require browser revalidation.
-Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
+Landing-page JavaScript and CSS URLs now include a content fingerprint of the final substituted response bytes, and
+all assets require browser revalidation. Source edits and server-owned UI policy changes both invalidate the cache
+key. Operators do not need to ask users to clear their browser cache after upgrading; the next page load fetches a
 compatible control script and stylesheet automatically.
 
 The bundled Grafana comparison plugin now receives a deterministic build suffix in its packaged version. This

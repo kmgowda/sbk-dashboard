@@ -53,6 +53,19 @@ CLIENT_ID_PATTERN = re.compile(
 LOGGER = logging.getLogger(__name__)
 
 
+def _render_javascript(body: bytes) -> bytes:
+    replacements = {
+        b"__MIN_COMPARISON_TARGETS__": MIN_COMPARISON_TARGETS,
+        b"__MAX_COMPARISON_TARGETS__": MAX_COMPARISON_TARGETS,
+        b"__TARGET_REFRESH_MILLISECONDS__": TARGET_REFRESH_MILLISECONDS,
+        b"__LANDING_HEARTBEAT_MILLISECONDS__": LANDING_HEARTBEAT_MILLISECONDS,
+        b"__CLIENT_ID_RANDOM_BYTES__": CLIENT_ID_RANDOM_BYTES,
+    }
+    for placeholder, value in replacements.items():
+        body = body.replace(placeholder, str(value).encode("ascii"))
+    return body.replace(b"__DEFAULT_ENDPOINT_KIND__", DEFAULT_ENDPOINT_KIND.encode("ascii"))
+
+
 @dataclass(frozen=True)
 class ClientActivitySummary:
     """Bounded recent-browser snapshot for the periodic operational status."""
@@ -326,9 +339,10 @@ class DashboardHttpServer:
         try:
             body = resource.read_bytes()
             if name == "index.html":
+                stylesheet = resource_root.joinpath("app.css").read_bytes()
+                javascript = _render_javascript(resource_root.joinpath("app.js").read_bytes())
                 fingerprint = hashlib.sha256(
-                    resource_root.joinpath("app.css").read_bytes()
-                    + resource_root.joinpath("app.js").read_bytes()
+                    stylesheet + javascript
                 ).hexdigest()[:12]
                 body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
                 body = body.replace(
@@ -336,18 +350,7 @@ class DashboardHttpServer:
                     html.escape(self._default_target_host, quote=True).encode("utf-8"),
                 )
             elif name == "app.js":
-                replacements = {
-                    b"__MIN_COMPARISON_TARGETS__": MIN_COMPARISON_TARGETS,
-                    b"__MAX_COMPARISON_TARGETS__": MAX_COMPARISON_TARGETS,
-                    b"__TARGET_REFRESH_MILLISECONDS__": TARGET_REFRESH_MILLISECONDS,
-                    b"__LANDING_HEARTBEAT_MILLISECONDS__": LANDING_HEARTBEAT_MILLISECONDS,
-                    b"__CLIENT_ID_RANDOM_BYTES__": CLIENT_ID_RANDOM_BYTES,
-                }
-                for placeholder, value in replacements.items():
-                    body = body.replace(placeholder, str(value).encode("ascii"))
-                body = body.replace(
-                    b"__DEFAULT_ENDPOINT_KIND__", DEFAULT_ENDPOINT_KIND.encode("ascii")
-                )
+                body = _render_javascript(body)
         except OSError:
             self._json(request, 500, {"error": "Missing application asset"})
             return

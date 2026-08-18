@@ -76,22 +76,38 @@ class FakeMonitoring:
 
 
 class AssetRenderingTest(unittest.TestCase):
+    @staticmethod
+    def render(server, path):
+        request = SimpleNamespace(
+            command="GET",
+            wfile=io.BytesIO(),
+            send_response=lambda _status: None,
+            send_header=lambda _name, _value: None,
+            end_headers=lambda: None,
+        )
+        server._asset(request, path)
+        return request.wfile.getvalue()
+
     def test_index_renders_validated_native_and_container_defaults(self):
         for host in ("127.0.0.1", "host.docker.internal"):
             with self.subTest(host=host):
                 server = object.__new__(DashboardHttpServer)
                 server._default_target_host = host
-                request = SimpleNamespace(
-                    command="GET",
-                    wfile=io.BytesIO(),
-                    send_response=lambda _status: None,
-                    send_header=lambda _name, _value: None,
-                    end_headers=lambda: None,
-                )
-                server._asset(request, "/")
-                page = request.wfile.getvalue()
+                page = self.render(server, "/")
                 self.assertIn(f'value="{host}"'.encode(), page)
                 self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
+
+    def test_asset_fingerprint_uses_the_final_substituted_javascript(self):
+        server = object.__new__(DashboardHttpServer)
+        server._default_target_host = "127.0.0.1"
+        with mock.patch("sbk_dashboard.web.MAX_COMPARISON_TARGETS", 9):
+            page = self.render(server, "/")
+            javascript = self.render(server, "/app.js")
+            stylesheet = self.render(server, "/app.css")
+        expected = hashlib.sha256(stylesheet + javascript).hexdigest()[:12].encode("ascii")
+        versions = re.findall(rb'(?:app\.css|app\.js)\?v=([0-9a-f]{12})', page)
+        self.assertEqual([expected, expected], versions)
+        self.assertIn(b"maxComparisonTargets: 9", javascript)
 
 
 class WebTest(unittest.TestCase):

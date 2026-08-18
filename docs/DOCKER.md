@@ -287,9 +287,10 @@ docker build --build-arg VCS_REF=local \
 python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
 ```
 
-The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Current
-Docker Desktop and Docker Engine installations normally provide it; legacy-builder-only installations must install
-Buildx before building.
+The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Docker
+Desktop and Docker Engine installations normally provide it; legacy-builder-only installations must install Buildx
+before building. Docker build contexts exclude local Grafana-plugin `node_modules` and Jest cache trees; those
+development-only files are never needed because the committed production plugin bundle is the runtime input.
 
 Build both published architectures into a local OCI archive without publishing them:
 

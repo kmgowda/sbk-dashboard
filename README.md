@@ -357,9 +357,10 @@ An endpoint is `pending` only until the next successful Prometheus target refres
 Prometheus reports as unhealthy—or does not report after that refresh—is `down`; it returns to `up` automatically
 after a successful scrape.
 
-The landing page uses a content fingerprint in its JavaScript and stylesheet URLs and also requires browsers to
-revalidate those resources. This prevents an upgrade from combining new HTML with an older cached script and
-displaying stale endpoint counters.
+The landing page uses a content fingerprint of its final browser-served JavaScript and stylesheet bytes in both
+asset URLs and also requires browsers to revalidate those resources. Runtime policy substitutions therefore change
+the fingerprint just like source edits do. This prevents an upgrade from combining new HTML with an older cached
+script and displaying stale endpoint counters.
 
 The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
 opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,

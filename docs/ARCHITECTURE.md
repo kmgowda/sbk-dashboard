@@ -165,10 +165,12 @@ manual refresh. A newly reconciled endpoint is pending until a successful Promet
 does not contain the registered endpoint, the endpoint is down rather than remaining pending indefinitely. Pending
 and unknown endpoints remain included in the total but are not misclassified as down.
 
-The HTML response inserts a bounded SHA-256 content fingerprint into its JavaScript and stylesheet URLs, and every
-HTML, JavaScript, and stylesheet response uses `Cache-Control: no-cache`. The new URL bypasses an earlier unexpired
-cached asset immediately, while revalidation protects subsequent loads. A deployment therefore cannot combine a new
-document with an older control script, which would leave newly introduced UI state at its static initial value.
+The HTML response inserts a bounded SHA-256 content fingerprint of the final substituted JavaScript plus stylesheet
+bytes into both asset URLs, and every HTML, JavaScript, and stylesheet response uses `Cache-Control: no-cache`.
+Changes to server-owned UI policy values therefore invalidate the URL even when the raw `app.js` resource is
+unchanged. The new URL bypasses an earlier unexpired cached asset immediately, while revalidation protects subsequent
+loads. A deployment cannot combine a new document with an older control script, which would leave newly introduced
+UI state at its static initial value.
 
 ## Persistence and retention
 

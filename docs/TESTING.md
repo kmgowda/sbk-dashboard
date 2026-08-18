@@ -216,9 +216,11 @@ that the obsolete response cannot remove the new endpoint's `pending` state or r
 tests assert the configured `--storage.tsdb.retention.time=<days>d` value. When `promtool` is installed beside
 Prometheus, startup runs `promtool check config` before either native service is started.
 
-The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs and
-`Cache-Control: no-cache` on both resources. This protects upgrades from the regression where new counter markup was
-rendered while a cached older script updated only the Total value.
+The HTTP asset test requires one matching 12-hex content fingerprint in the JavaScript and CSS URLs,
+`Cache-Control: no-cache` on both resources, and equality between that fingerprint and the final substituted
+JavaScript plus stylesheet bytes. A focused policy-constant override proves that a substitution changes both the
+served script and its cache key. This protects upgrades from the regression where new counter markup was rendered
+while a cached older script updated only the Total value.
 
 ## Manual Linux end-to-end test
 

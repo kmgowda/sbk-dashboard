@@ -262,7 +262,9 @@ without network waits. Repeated identical refresh failures produce one warning u
 - each accepted socket receives a configurable timeout.
 
 JSON bodies are limited to 64 KiB, including explicit rejection of negative `Content-Length`. Assets use a
-SHA-256-derived query fingerprint and `no-cache` revalidation. API responses use `no-store`.
+SHA-256-derived query fingerprint over the final substituted JavaScript and stylesheet response bytes plus
+`no-cache` revalidation. Policy-constant substitutions therefore participate in cache identity. API responses use
+`no-store`.
 
 The shared `index.html` contains a default-target placeholder. `DashboardHttpServer` replaces it with the validated
 `DashboardConfig.default_target_host` while serving the page. Configuration defaults it to `127.0.0.1`; the Docker
