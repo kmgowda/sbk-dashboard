@@ -377,14 +377,21 @@ secrets in the GitHub repository settings:
 | `DOCKERHUB_USERNAME` | Docker Hub user with write access to `kmgowda/sbk-dashboard` |
 | `DOCKERHUB_TOKEN` | Docker Hub access token with write permission |
 
-Create a Git tag that exactly matches `src/sbk_dashboard/version.py`, then push it:
+Use the guarded release command after the version PR is merged to `main`:
 
 ```bash
-git tag -a "v$SBK_VERSION" -m "SBK Dashboard $SBK_VERSION"
-git push origin "v$SBK_VERSION"
+./release-sbk-dashboard.sh check
+export GITHUB_TOKEN='<token-from-secure-credential-store>'
+./release-sbk-dashboard.sh publish --confirm "v$SBK_VERSION"
 ```
 
-The workflow natively builds and smoke-tests runnable AMD64 and ARM64 images, rejects fixed high/critical
+`GITHUB_TOKEN` must authenticate GitHub user `kmgowda`; the release command rejects another user or repository.
+
+The command requires successful cross-platform CI, creates and pushes the annotated tag, waits for this workflow,
+then creates the generated-notes GitHub Release and waits for every portable/Python asset. See
+[`RELEASING.md`](RELEASING.md) for Windows syntax, the exact asset list, safety checks, and partial-release recovery.
+
+The container workflow natively builds and smoke-tests runnable AMD64 and ARM64 images, rejects fixed high/critical
 vulnerabilities with pinned Trivy, attaches provenance and an SBOM, publishes both the version and `latest` tags, and
 keylessly signs their shared digest with GitHub OIDC. It stops before Docker Hub login when the Git tag and package
 version do not match. No long-lived signing key is stored in repository secrets. Any reviewed scanner exception is

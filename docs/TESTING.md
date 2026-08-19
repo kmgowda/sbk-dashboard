@@ -40,6 +40,7 @@ python -m pip install -e ".[dev]"
 ruff check src tests scripts
 mypy
 python scripts/sync_release_metadata.py
+python -m unittest tests.test_release -v
 python -m pytest
 coverage erase
 COVERAGE_PROCESS_START=pyproject.toml coverage run -m pytest
@@ -51,6 +52,10 @@ sbk-dashboard -h
 sbk-dashboard -v
 git diff --check
 ```
+
+Release tests mock Git, GitHub, and Docker Hub mutation boundaries. They build only temporary artifact fixtures and
+prove that `check` cannot create or push a tag. Never invoke `release publish` during automated or development
+testing.
 
 Documentation-only changes still run the complete fast checks. Mermaid diagrams must also be rendered with the
 procedure in [Documentation validation](#documentation-validation), because a fenced block can be syntactically

@@ -92,6 +92,7 @@ Start at the [documentation center](docs/README.md). The most useful paths are:
 - [Docker deployment](docs/DOCKER.md): container networking, persistence, security, and release images.
 - [Docker Hub build and publishing](docs/DOCKER_HUB.md): copy-and-paste local build, versioned multi-architecture
   publishing, verification, pull, run, and upgrade procedures.
+- [Release publishing](docs/RELEASING.md): one guarded cross-platform command for tags, notes, artifacts, and images.
 - [Testing](docs/TESTING.md): automated validation and real SBK procedures.
 - [Development guide](docs/DEVELOPMENT.md): repository map, safe local workflow, ownership, and completion checks.
 - [AI software agent guide](docs/AI_AGENTS.md): instruction discovery and safe task routing for coding agents.
