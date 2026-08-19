@@ -122,7 +122,9 @@ class ProvisioningTest(unittest.TestCase):
     def test_same_comparison_set_reuses_uid_and_url_regardless_of_selection_order(self):
         first, second = target("first"), target("second", 9719)
         first_uid = self.provisioner.ensure_comparison_dashboard([first, second])
-        second_uid = self.provisioner.ensure_comparison_dashboard([second, first])
+        with patch("sbk_dashboard.provisioning.atomic_write") as repeated_write:
+            second_uid = self.provisioner.ensure_comparison_dashboard([second, first])
+        repeated_write.assert_not_called()
         self.assertEqual(first_uid, second_uid)
         self.assertEqual(
             self.provisioner.comparison_dashboard_url(["first", "second"]),

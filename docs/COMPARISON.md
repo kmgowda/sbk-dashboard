@@ -138,7 +138,9 @@ directory before Grafana starts. Grafana provisions the app for the anonymous Vi
 runtime, npm install, additional process, service, port, or network download is required in source, portable, wheel,
 or container deployments.
 
-The app loads only a validated `sbk-comparison-*` descriptor through Grafana's same-origin API. For one target it
+The app loads only a validated `sbk-comparison-*` descriptor through Grafana's same-origin dashboard API. Grafana
+imports a newly written descriptor asynchronously, so the app uses 11 bounded exponential readiness checks over
+37.5 seconds. This covers the observed Grafana 13 file-provider cycle without rapid polling. For one target it
 creates deterministic `Range N` browser lanes; for multiple targets it retains one lane per endpoint. It converts the
 canonical dashboard to Grafana Scenes, preserving its six named rows, expanded/collapsed state, exact 24-column
 panel positions, and panel heights in every time group. It replaces the descriptor's endpoint-variable token with
@@ -155,7 +157,7 @@ sequenceDiagram
     C->>C: Validate, sort, hash, atomically write descriptor
     C-->>U: App URL + classic fallback URL
     U->>G: Open comparison app
-    G->>G: Load descriptor and validate policy/targets
+    G->>G: Provision descriptor; validate policy/targets
     U->>G: Detach Board B to historical range
     G->>G: Group targets by exact range
     par Global live group

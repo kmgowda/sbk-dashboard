@@ -298,14 +298,15 @@ Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scr
 complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
 comparison UIDs, bounded 1–8-ID API validation, two-or-more single-target time lanes and comparison cache,
 request-host URL behavior, unique UID-derived Grafana titles across multiple cached descriptors, schema-1 refresh,
-and removal of cached comparisons when an endpoint is removed. Plugin tests additionally
-prove bounded descriptor-provisioning retries,
+idempotent repeat writes, and removal of cached comparisons when an endpoint is removed. Plugin tests additionally
+prove bounded 37.5-second exponential descriptor-provisioning retries,
 stale-schema refresh handling, identical-range grouping, per-target URL round trips, invalid/oversized fixed-range
 rejection, preservation of all six canonical rows and their 47 visual panels, exact grid placement, and
 group-specific query scoping. The packaged plugin metadata must also carry the deterministic
 `<application-version>-build.<sha256-prefix>` cache revision. CI rebuilds the prebuilt plugin and fails if the
 committed package differs. A native smoke test should run two concurrent
-exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200, detach one target to a
+exporters, select both on the landing page, confirm the app and classic URLs return HTTP 200 without manual reload,
+detach one target to a
 fixed range, and confirm both named series in representative throughput, latency, connection, and stat panels.
 
 Run the frontend-only checks with Node.js 22:

@@ -212,6 +212,7 @@ provisioned-dashboard fallback URL. Repeating the same set in any order reuses t
 a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
 legends retain the readable name, kind, and immutable endpoint ID. Its title contains the UID digest so every cached
 descriptor is unique in Grafana's folder; Grafana disables file-provider writes when multiple files share a title.
+Repeated requests do not rewrite a byte-identical descriptor, avoiding unnecessary file-provider events.
 
 `grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
 `monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates
@@ -227,13 +228,13 @@ configuration. Grafana keys the loaded browser module by this version. The deter
 when the committed module changes, preventing a same-release source update from serving an older cached comparison
 implementation; identical inputs still reproduce identical metadata and bundles.
 
-Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
-an explicit schema version. Schema 2 introduces unique provisioner titles; reconciliation rewrites schema-1 cached
-files on restart. The comparison app treats HTTP 404 and an older or incomplete schema as transient
-provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
-Other backend errors fail immediately with their HTTP status. If the bounded retries expire, the view offers a
-manual retry instead of retaining an unrecoverable blank state. Reconciliation upgrades a cached descriptor from an
-older schema when all of its endpoint IDs remain registered.
+Grafana discovers descriptor files asynchronously on its provider polling interval. In Grafana 13 this interval can
+take about 30 seconds even when a shorter interval is configured. Each descriptor carries an explicit schema
+version. Schema 2 introduces unique provisioner titles; reconciliation rewrites schema-1 cached files on restart.
+The comparison app treats HTTP 404 and an older or incomplete schema as transient provisioning states. It performs
+11 exponentially spaced checks from 500 ms up to 5 seconds, covering a bounded 37.5-second window without rapid
+request or log amplification, and cancels pending timers when the view closes. Other backend errors fail immediately
+with their HTTP status. If the bounded window expires, the view offers a manual retry.
 
 Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
 selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains

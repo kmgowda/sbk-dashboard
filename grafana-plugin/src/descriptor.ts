@@ -9,8 +9,9 @@
  */
 
 export const COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2;
-export const DESCRIPTOR_LOAD_ATTEMPTS = 12;
+export const DESCRIPTOR_LOAD_ATTEMPTS = 11;
 export const DESCRIPTOR_RETRY_DELAY_MS = 500;
+export const DESCRIPTOR_MAX_RETRY_DELAY_MS = 5000;
 
 export class DescriptorNotReadyError extends Error {
   constructor(message = 'The comparison descriptor has not been refreshed yet') {
@@ -58,10 +59,22 @@ export async function loadComparisonDescriptor<T>(
       if (options.signal?.aborted) throw new DescriptorLoadCancelledError();
       const retryable = error instanceof DescriptorNotReadyError || errorStatus(error) === 404;
       if (!retryable || attempt === attempts) throw error;
-      await wait(retryDelay, options.signal);
+      const boundedDelay = Math.min(retryDelay * (2 ** (attempt - 1)), DESCRIPTOR_MAX_RETRY_DELAY_MS);
+      await wait(boundedDelay, options.signal);
     }
   }
   throw new DescriptorNotReadyError();
+}
+
+export function descriptorRetryWindowMilliseconds(
+  attempts = DESCRIPTOR_LOAD_ATTEMPTS,
+  initialDelay = DESCRIPTOR_RETRY_DELAY_MS
+): number {
+  let total = 0;
+  for (let attempt = 1; attempt < attempts; attempt += 1) {
+    total += Math.min(initialDelay * (2 ** (attempt - 1)), DESCRIPTOR_MAX_RETRY_DELAY_MS);
+  }
+  return total;
 }
 
 function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {

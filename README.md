@@ -625,6 +625,9 @@ with identical ranges share one bounded query group. The sorted endpoint-ID set 
 same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
 Comparison is bounded to eight lanes/targets, four distinct time groups, and a 31-day fixed range; the generated descriptor cache is
 bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
+Grafana imports a newly generated descriptor asynchronously. The app waits automatically through a bounded,
+low-frequency 37.5-second readiness window, so an ordinary provider cycle does not require closing or reopening the
+comparison. The classic single-range fallback uses the same provisioned descriptor.
 The packaged comparison plugin carries a deterministic build revision, so restarting after a source update makes
 Grafana and the browser load the matching descriptor handling and canonical row layout instead of an older cached
 module. Reload any comparison tab that was already open before the restart.
@@ -646,7 +649,7 @@ See the [comparison guide](docs/COMPARISON.md) for examples, controls, limits, a
     │   └── data/                  # persistent Prometheus TSDB
     ├── grafana/
     │   ├── grafana.ini
-    │   ├── data/
+    │   ├── data/                  # Grafana database and installed app
     │   ├── provisioning/
     │   └── dashboards/            # sbk-<endpoint-id>.json
     └── logs/

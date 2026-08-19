@@ -19,7 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-from sbk_dashboard.files import atomic_json
+from sbk_dashboard.files import atomic_json, atomic_write
 from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
@@ -189,7 +189,7 @@ class GrafanaDashboardProvisioner:
         uid = str(dashboard["uid"])
         with self._lock:
             self.dashboard_directory.mkdir(parents=True, exist_ok=True)
-            atomic_json(self.dashboard_directory / f"{uid}.json", dashboard)
+            self._write_json_if_changed(self.dashboard_directory / f"{uid}.json", dashboard)
             self._prune_comparison_dashboards(uid)
         return uid
 
@@ -211,12 +211,22 @@ class GrafanaDashboardProvisioner:
                     continue
                 if not schema_current:
                     selected = [targets_by_id[target_id] for target_id in comparison_ids]
-                    atomic_json(path, self.generated_comparison_dashboard(selected))
+                    self._write_json_if_changed(path, self.generated_comparison_dashboard(selected))
                 expected.add(path)
             for path in self.dashboard_directory.glob("sbk-*.json"):
                 if path not in expected:
                     path.unlink(missing_ok=True)
             self._prune_comparison_dashboards("")
+
+    @staticmethod
+    def _write_json_if_changed(path: Path, value: dict[str, object]) -> None:
+        content = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
+        try:
+            if path.read_bytes() == content:
+                return
+        except OSError:
+            pass
+        atomic_write(path, content)
 
     @staticmethod
     def _comparison_descriptor(path: Path) -> tuple[list[str], bool] | None:

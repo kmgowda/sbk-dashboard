@@ -21,6 +21,10 @@ Comparison descriptor schema 2 also gives every cached descriptor a UID-derived 
 restart, reconciliation rewrites older schema-1 files automatically. This prevents Grafana from disabling its file
 provider when several different comparison files previously shared the `SBK/SBM Live Comparison` title.
 
+The comparison app now waits through a bounded 37.5-second exponential readiness window for Grafana's asynchronous
+file provider. Existing IDs, bookmarks, classic fallback dashboards, and stored comparison files remain compatible.
+Repeated selection of an unchanged comparison no longer rewrites its descriptor.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]

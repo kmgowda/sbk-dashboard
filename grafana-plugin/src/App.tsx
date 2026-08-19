@@ -15,10 +15,9 @@ import {Alert, Button, Spinner} from '@grafana/ui';
 import {SceneTimeRange} from '@grafana/scenes';
 import {
   COMPARISON_DESCRIPTOR_SCHEMA_VERSION,
-  DESCRIPTOR_LOAD_ATTEMPTS,
-  DESCRIPTOR_RETRY_DELAY_MS,
   DescriptorLoadCancelledError,
   DescriptorNotReadyError,
+  descriptorRetryWindowMilliseconds,
   errorStatus,
   loadComparisonDescriptor,
 } from './descriptor';
@@ -108,9 +107,7 @@ function App(_props: AppRootProps) {
         if (loadError instanceof DescriptorLoadCancelledError || controller.signal.aborted) return;
         const status = errorStatus(loadError);
         if (status === 404 || loadError instanceof DescriptorNotReadyError) {
-          const seconds = Math.ceil(
-            (DESCRIPTOR_LOAD_ATTEMPTS - 1) * DESCRIPTOR_RETRY_DELAY_MS / 1000
-          );
+          const seconds = Math.ceil(descriptorRetryWindowMilliseconds() / 1000);
           setError(
             `Grafana did not finish provisioning this comparison within ${seconds} seconds. ` +
             'Retry now, or return to SBK Dashboard and select Compare again.'

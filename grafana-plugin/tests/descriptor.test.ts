@@ -11,14 +11,19 @@
 import {
   DescriptorLoadCancelledError,
   DescriptorNotReadyError,
+  descriptorRetryWindowMilliseconds,
   errorStatus,
   loadComparisonDescriptor,
 } from '../src/descriptor';
 
 describe('comparison descriptor loading', () => {
-  const immediateWait = jest.fn(async () => undefined);
+  const immediateWait = jest.fn(async (_milliseconds: number) => undefined);
 
   beforeEach(() => immediateWait.mockClear());
+
+  it('uses a bounded retry window longer than Grafana file-provider polling', () => {
+    expect(descriptorRetryWindowMilliseconds()).toBe(37500);
+  });
 
   it('retries a missing descriptor until Grafana provisions it', async () => {
     const request = jest.fn()
@@ -28,6 +33,7 @@ describe('comparison descriptor loading', () => {
     await expect(loadComparisonDescriptor(request, {wait: immediateWait})).resolves.toBe('ready');
     expect(request).toHaveBeenCalledTimes(3);
     expect(immediateWait).toHaveBeenCalledTimes(2);
+    expect(immediateWait.mock.calls.map(([delay]) => delay)).toEqual([500, 1000]);
   });
 
   it('retries a stale descriptor that lacks current metadata', async () => {

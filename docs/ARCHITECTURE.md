@@ -139,7 +139,9 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 The comparison API normalizes 1–8 unique registered endpoint IDs by sorting them and derives
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
 descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
-classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`. One
+classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`. Grafana's
+file provider imports new descriptors asynchronously, so the app uses bounded exponential readiness checks long
+enough to cover the provider's observed polling cycle. One
 endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. Lane
 count and range selections live only in validated URL state, so this mode does not duplicate registrations,
 descriptors, discovery entries, or Prometheus series.
