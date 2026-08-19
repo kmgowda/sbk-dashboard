@@ -27,6 +27,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from enum import Enum
+from http import HTTPStatus
 from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 
@@ -38,8 +39,23 @@ from sbk_dashboard.files import atomic_json
 
 STOP_TIMEOUT_SECONDS = 5
 GUARDIAN_START_TIMEOUT_SECONDS = 5
+HEALTH_PROBE_TIMEOUT_SECONDS = 2.0
+RESTART_UNHEALTHY_THRESHOLD = 3
+RESTART_INITIAL_BACKOFF_SECONDS = 1.0
+RESTART_MAXIMUM_BACKOFF_SECONDS = 60.0
+DEFAULT_NATIVE_STARTUP_TIMEOUT_SECONDS = 45
+PORT_CONNECT_TIMEOUT_SECONDS = 0.2
+PORT_RELEASE_POLL_SECONDS = 0.1
 LOG_RETRY_INITIAL_SECONDS = 1.0
 LOG_RETRY_MAXIMUM_SECONDS = 300.0
+LOG_PUMP_READ_BYTES = 64 * 1024
+LOG_PUMP_INITIAL_JOIN_SECONDS = 2.0
+LOG_PUMP_FINAL_JOIN_SECONDS = 1.0
+MAX_RESTART_BACKOFF_EXPONENT = 16
+GUARDIAN_HANDSHAKE_POLL_SECONDS = 0.05
+READINESS_STABILITY_SECONDS = 0.5
+READINESS_POLL_SECONDS = 0.25
+DESCENDANT_FORCE_WAIT_SECONDS = 1.0
 MAX_LOCAL_PROBE_ADDRESSES = 256
 AUTO_PORT_SEARCH_ATTEMPTS = 1000
 LOGGER = logging.getLogger(__name__)
@@ -102,14 +118,14 @@ class HealthProbe(Protocol):
 
 
 class HttpHealthProbe:
-    def __init__(self, url: str, timeout_seconds: float = 2.0) -> None:
+    def __init__(self, url: str, timeout_seconds: float = HEALTH_PROBE_TIMEOUT_SECONDS) -> None:
         self.url = url
         self.timeout_seconds = timeout_seconds
 
     def ready(self) -> bool:
         try:
             with urllib.request.urlopen(self.url, timeout=self.timeout_seconds) as response:
-                return 200 <= response.status < 300
+                return HTTPStatus.OK <= response.status < HTTPStatus.MULTIPLE_CHOICES
         except (OSError, urllib.error.URLError):
             return False
 
@@ -118,9 +134,9 @@ class HttpHealthProbe:
 class RestartPolicy:
     """Bounded exponential-backoff and unhealthy-threshold policy."""
 
-    unhealthy_threshold: int = 3
-    initial_backoff_seconds: float = 1.0
-    maximum_backoff_seconds: float = 60.0
+    unhealthy_threshold: int = RESTART_UNHEALTHY_THRESHOLD
+    initial_backoff_seconds: float = RESTART_INITIAL_BACKOFF_SECONDS
+    maximum_backoff_seconds: float = RESTART_MAXIMUM_BACKOFF_SECONDS
 
 
 @dataclass(frozen=True)
@@ -135,8 +151,8 @@ class NativeServiceSpec:
     log_path: Path
     log_size_bytes: int
     log_backups: int
-    startup_timeout_seconds: int = 45
-    bind_address: str = "0.0.0.0"
+    startup_timeout_seconds: int = DEFAULT_NATIVE_STARTUP_TIMEOUT_SECONDS
+    bind_address: str = DEFAULT_MANAGEMENT_BIND
 
 
 class ManagedProcessRegistry:
@@ -230,7 +246,7 @@ class PortProcessManager:
         for name, port, bind_address, _ in candidates:
             deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
             while time.monotonic() < deadline and not cls.available(port, bind_address):
-                time.sleep(0.1)
+                time.sleep(PORT_RELEASE_POLL_SECONDS)
             if not cls.available(port, bind_address):
                 raise OSError(f"{name} port {port} remains occupied after stopping its existing process")
 
@@ -374,7 +390,7 @@ class PortProcessManager:
             for endpoint in endpoints:
                 for connect_address in PortProcessManager._connect_addresses(endpoint, bind_address):
                     with socket.socket(endpoint.family, socket.SOCK_STREAM) as connection:
-                        connection.settimeout(0.2)
+                        connection.settimeout(PORT_CONNECT_TIMEOUT_SECONDS)
                         if connection.connect_ex(connect_address) == 0:
                             return False
             for endpoint in endpoints:
@@ -436,7 +452,7 @@ class PortProcessManager:
                     f"Bind address {bind_address!r} did not resolve to an IPv4 or IPv6 address"
                 ) from None
             return tuple(endpoints)
-        family = socket.AF_INET6 if address.version == 6 else socket.AF_INET
+        family = socket.AF_INET6 if isinstance(address, ipaddress.IPv6Address) else socket.AF_INET
         literal_endpoint: SocketAddress = (
             (bind_address, port, 0, 0) if family == socket.AF_INET6 else (bind_address, port)
         )
@@ -529,7 +545,7 @@ class RotatingProcessLog:
         self._thread.start()
 
     def close(self) -> None:
-        self._thread.join(timeout=2)
+        self._thread.join(timeout=LOG_PUMP_INITIAL_JOIN_SECONDS)
         close_error: OSError | ValueError | None = None
         if self._process.stdout and not self._process.stdout.closed:
             try:
@@ -537,9 +553,12 @@ class RotatingProcessLog:
             except (OSError, ValueError) as error:
                 close_error = error
         if self._thread.is_alive():
-            self._thread.join(timeout=1)
+            self._thread.join(timeout=LOG_PUMP_FINAL_JOIN_SECONDS)
         if self._thread.is_alive():
-            raise OSError(f"Native process log pump for {self._path} did not stop within 3 seconds") from close_error
+            total_wait = LOG_PUMP_INITIAL_JOIN_SECONDS + LOG_PUMP_FINAL_JOIN_SECONDS
+            raise OSError(
+                f"Native process log pump for {self._path} did not stop within {total_wait:g} seconds"
+            ) from close_error
         if close_error:
             raise OSError(f"Unable to close native process output pipe for {self._path}") from close_error
 
@@ -571,7 +590,7 @@ class RotatingProcessLog:
             LOGGER.warning("Native process logging unavailable for %s; retrying with backoff: %s", self._path, error)
         try:
             while True:
-                chunk = source.read(64 * 1024)
+                chunk = source.read(LOG_PUMP_READ_BYTES)
                 if not chunk:
                     return
                 if output is None:
@@ -793,7 +812,8 @@ class ManagedNativeService:
                 self._restart_failures += 1
                 backoff = min(
                     self.restart_policy.maximum_backoff_seconds,
-                    self.restart_policy.initial_backoff_seconds * (2 ** min(self._restart_failures - 1, 16)),
+                    self.restart_policy.initial_backoff_seconds
+                    * (2 ** min(self._restart_failures - 1, MAX_RESTART_BACKOFF_EXPONENT)),
                 )
                 self._next_restart = time.monotonic() + backoff
                 self.lifecycle.transition(LifecycleState.FAILED)
@@ -903,7 +923,7 @@ class ManagedNativeService:
                     return raw_pid, native.create_time()
                 except (OSError, ValueError, TypeError, psutil.Error) as error:
                     raise OSError(f"{self.spec.name} guardian state is invalid: {error}") from error
-            self.shutdown_event.wait(0.05)
+            self.shutdown_event.wait(GUARDIAN_HANDSHAKE_POLL_SECONDS)
         detail = f"; last state read failed: {last_transient_error}" if last_transient_error else ""
         raise OSError(f"{self.spec.name} guardian did not launch its native process within {timeout} seconds{detail}")
 
@@ -933,7 +953,7 @@ class ManagedNativeService:
                     f"check whether port {self.spec.port} is already in use"
                 )
             if self.spec.health_probe.ready():
-                if self.shutdown_event.wait(0.5):
+                if self.shutdown_event.wait(READINESS_STABILITY_SECONDS):
                     raise OSError(f"{self.spec.name} startup cancelled during shutdown")
                 if process.poll() is not None:
                     raise OSError(f"{self.spec.name} exited during startup with code {process.returncode}")
@@ -941,7 +961,7 @@ class ManagedNativeService:
                     self._last_healthy = True
                 LOGGER.info("%s ready on port %s", self.spec.name, self.spec.port)
                 return
-            self.shutdown_event.wait(0.25)
+            self.shutdown_event.wait(READINESS_POLL_SECONDS)
         raise OSError(
             f"{self.spec.name} did not become ready within {self.spec.startup_timeout_seconds} seconds"
         )
@@ -1074,11 +1094,11 @@ def _unique_processes(processes: list[psutil.Process]) -> list[psutil.Process]:
 def _finish_descendants(descendants: list[psutil.Process]) -> None:
     if not descendants:
         return
-    _, alive = psutil.wait_procs(descendants, timeout=1)
+    _, alive = psutil.wait_procs(descendants, timeout=DESCENDANT_FORCE_WAIT_SECONDS)
     for process in alive:
         with suppress(psutil.Error):
             process.kill()
-    _, alive = psutil.wait_procs(alive, timeout=1)
+    _, alive = psutil.wait_procs(alive, timeout=DESCENDANT_FORCE_WAIT_SECONDS)
     if alive:
         identifiers = ", ".join(str(process.pid) for process in alive)
         raise OSError(f"Unable to stop managed descendant process(es): {identifiers}")

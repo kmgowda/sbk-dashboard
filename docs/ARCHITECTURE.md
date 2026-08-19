@@ -64,8 +64,11 @@ Operational values have explicit owners rather than scattered literals. `contrac
 and bounded environment settings, `endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns
 OS/architecture normalization, and `layout.py` owns persistent path construction. The packaged
 `native-artifacts.json` manifest is the sole built-in Prometheus/Grafana artifact catalog consumed by both direct
-bootstrap and Docker builds. Protocol syntax, schema versions, HTTP status codes, and test fixture values remain
-local constants when they are intrinsic to their owning boundary rather than operator configuration.
+bootstrap and Docker builds. Dependency-free installer transfer/retry/lock bounds live in
+`scripts/portable-bootstrap.properties`. Protocol syntax, schema versions, HTTP status codes, and intrinsic
+lifecycle timings remain named local constants at their owning boundary rather than operator configuration. Ruff's
+`PLR2004` rule rejects newly introduced unnamed comparison literals in production Python while tests may retain
+explicit fixture values.
 
 ## Control-plane lifecycle
 

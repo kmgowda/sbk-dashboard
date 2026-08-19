@@ -386,7 +386,7 @@ def dashboard_links(port: int, bind_address: str = "0.0.0.0") -> list[str]:
                 if address.is_unspecified or address.is_loopback or address.is_link_local or address.is_multicast:
                     continue
                 host = value.address.replace("%", "%25")
-                addresses.add(f"[{host}]" if address.version == 6 else host)
+                addresses.add(f"[{host}]" if isinstance(address, ipaddress.IPv6Address) else host)
     except (OSError, ValueError) as error:
         LOGGER.warning("Unable to discover network dashboard addresses: %s. Loopback links remain available.", error)
     links.extend(f"http://{address}:{port}/" for address in sorted(addresses))

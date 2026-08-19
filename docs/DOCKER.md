@@ -122,6 +122,17 @@ that the installed application version equals the OCI `APPLICATION_VERSION` labe
 packages are exact-version locked in `requirements/container-os.txt`; the base image digest owns the remaining
 transitive OS inventory. Builds fail closed when a reviewed direct package version is no longer available.
 
+The native download behavior has named Docker build arguments for controlled build environments:
+
+| Build argument | Default | Purpose |
+|---|---:|---|
+| `NATIVE_DOWNLOAD_RETRIES` | `3` | Bounded `curl` attempts for a native archive |
+| `NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS` | `15` | Connection timeout per attempt |
+| `NATIVE_DOWNLOAD_TIMEOUT_SECONDS` | `600` | Whole-transfer timeout per attempt |
+
+Normal builds should retain these reviewed defaults. Artifact size remains owned by `maxDownloadBytes` in
+`native-artifacts.json`, alongside the artifact definitions it bounds.
+
 Resolve an immutable digest after pulling or publishing:
 
 ```bash

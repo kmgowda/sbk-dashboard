@@ -47,6 +47,15 @@ from sbk_dashboard.provisioning import (
 
 LOGGER = logging.getLogger(__name__)
 
+SUPERVISOR_JOIN_SECONDS = 3.0
+PROMETHEUS_DISCOVERY_REFRESH_SECONDS = 2
+GRAFANA_DASHBOARD_UPDATE_SECONDS = 2
+GRAFANA_MIN_REFRESH_SECONDS = 1
+GRAFANA_ORGANIZATION_ID = 1
+PROMTOOL_TIMEOUT_SECONDS = 30
+PROMETHEUS_TARGETS_API_PATH = "/api/v1/targets?state=active"
+PROMETHEUS_FALLBACK_SCRAPE_PROTOCOL = "PrometheusText0.0.4"
+
 
 @dataclass(frozen=True)
 class MonitoringStatusSummary:
@@ -249,9 +258,11 @@ class ManagedMonitoringStack:
                 self.lifecycle.transition(LifecycleState.STOPPING)
             supervisor = self._supervisor_thread
             if supervisor and supervisor is not threading.current_thread():
-                supervisor.join(timeout=3)
+                supervisor.join(timeout=SUPERVISOR_JOIN_SECONDS)
                 if supervisor.is_alive():
-                    LOGGER.warning("Native supervisor did not stop within 3 seconds")
+                    LOGGER.warning(
+                        "Native supervisor did not stop within %g seconds", SUPERVISOR_JOIN_SECONDS
+                    )
             shutdown_error: OSError | None = None
             try:
                 self._stop_services(strict=True)
@@ -266,9 +277,12 @@ class ManagedMonitoringStack:
         try:
             with self._data_lock:
                 requested_generation = self._target_generation
-            url = f"http://{self._prometheus_host()}:{self.monitoring.prometheus_port}/api/v1/targets?state=active"
+            url = (
+                f"http://{self._prometheus_host()}:{self.monitoring.prometheus_port}"
+                f"{PROMETHEUS_TARGETS_API_PATH}"
+            )
             with urllib.request.urlopen(url, timeout=self.dashboard.target_health_timeout_seconds) as response:
-                if response.status != 200:
+                if response.status != HTTPStatus.OK:
                     raise OSError(f"Prometheus returned HTTP {response.status}")
                 content_length = int(response.headers.get("Content-Length", "0"))
                 if content_length > self.dashboard.health_response_limit_bytes:
@@ -390,8 +404,10 @@ class ManagedMonitoringStack:
                 f"global:\n  scrape_interval: {self.dashboard.scrape_interval_seconds}s\n"
                 f"  evaluation_interval: {self.dashboard.scrape_interval_seconds}s\n"
                 "scrape_configs:\n  - job_name: sbk-dashboard\n"
-                "    fallback_scrape_protocol: PrometheusText0.0.4\n    file_sd_configs:\n"
-                f"      - files: ['{targets}']\n        refresh_interval: 2s\n"
+                f"    fallback_scrape_protocol: {PROMETHEUS_FALLBACK_SCRAPE_PROTOCOL}\n"
+                "    file_sd_configs:\n"
+                f"      - files: ['{targets}']\n"
+                f"        refresh_interval: {PROMETHEUS_DISCOVERY_REFRESH_SECONDS}s\n"
                 "    relabel_configs:\n      - source_labels: [sbk_metrics_path]\n"
                 "        target_label: __metrics_path__\n      - regex: sbk_metrics_path\n        action: labeldrop\n"
             ).encode(),
@@ -407,7 +423,8 @@ class ManagedMonitoringStack:
                 "[auth]\ndisable_login_form = true\n\n[auth.anonymous]\nenabled = true\n"
                 "org_name = Main Org.\norg_role = Viewer\n\n[users]\ndefault_theme = dark\n\n"
                 f"[plugins]\nallow_loading_unsigned_plugins = {COMPARISON_APP_PLUGIN_ID}\n\n"
-                "[dashboards]\nmin_refresh_interval = 1s\n\n[log]\nmode = console\nlevel = info\n"
+                f"[dashboards]\nmin_refresh_interval = {GRAFANA_MIN_REFRESH_SECONDS}s\n\n"
+                "[log]\nmode = console\nlevel = info\n"
             ).encode(),
         )
         atomic_write(
@@ -424,15 +441,17 @@ class ManagedMonitoringStack:
             (
                 "apiVersion: 1\napps:\n"
                 f"  - type: {COMPARISON_APP_PLUGIN_ID}\n"
-                "    org_id: 1\n    disabled: false\n"
+                f"    org_id: {GRAFANA_ORGANIZATION_ID}\n    disabled: false\n"
             ).encode(),
         )
         dashboards = _portable(grafana / "dashboards").replace("'", "''")
         atomic_write(
             grafana / "provisioning/dashboards/sbk.yml",
             (
-                "apiVersion: 1\nproviders:\n  - name: sbk-dashboard-managed\n    orgId: 1\n"
-                "    type: file\n    disableDeletion: false\n    updateIntervalSeconds: 2\n"
+                "apiVersion: 1\nproviders:\n  - name: sbk-dashboard-managed\n"
+                f"    orgId: {GRAFANA_ORGANIZATION_ID}\n"
+                "    type: file\n    disableDeletion: false\n"
+                f"    updateIntervalSeconds: {GRAFANA_DASHBOARD_UPDATE_SECONDS}\n"
                 f"    allowUiUpdates: false\n    options:\n      path: '{dashboards}'\n"
             ).encode(),
         )
@@ -470,11 +489,14 @@ class ManagedMonitoringStack:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=30,
+                timeout=PROMTOOL_TIMEOUT_SECONDS,
                 check=False,
             )
         except subprocess.TimeoutExpired as error:
-            raise OSError("promtool configuration validation timed out after 30 seconds") from error
+            raise OSError(
+                "promtool configuration validation timed out after "
+                f"{PROMTOOL_TIMEOUT_SECONDS} seconds"
+            ) from error
         except (OSError, subprocess.SubprocessError) as error:
             raise OSError(f"Unable to run promtool configuration validation: {error}") from error
         if result.returncode != 0:

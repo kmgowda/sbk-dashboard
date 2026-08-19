@@ -198,6 +198,20 @@ Compose resolution, and container contract tests.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
 
+### Add or change a runtime-policy value
+
+1. Put operator-selectable application defaults and bounded environment settings in `contracts.py`, then select and
+   validate them in `config.py`.
+2. Put endpoint identity, validation, or port-range policy in `endpoint_policy.py`; put path construction in
+   `layout.py`; put platform aliases in `platforms.py`.
+3. Put dependency-free installer transfer, checksum, retry, buffer, or lock bounds in
+   `scripts/portable-bootstrap.properties` and consume the same key from POSIX, PowerShell, and Python bootstrap
+   paths as applicable.
+4. Keep protocol values, schema versions, OS API flags, and genuinely module-local timings as named constants next
+   to their owning implementation. Do not expose them as public configuration without an operator use case.
+5. Never duplicate a numeric/string literal across implementations. Add a contract test when more than one runtime
+   consumes a policy value. Ruff `PLR2004` enforces named comparison values in production Python.
+
 ### Change endpoint registration or identity
 
 1. Preserve existing JSON compatibility or add an explicit migration/recovery path.

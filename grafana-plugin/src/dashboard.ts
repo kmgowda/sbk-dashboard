@@ -12,13 +12,15 @@ import {DashboardLayoutItem, DashboardPanel, DashboardRowItem} from './types';
 import {SceneDataQuery} from '@grafana/scenes';
 
 const ENDPOINT_VARIABLE = '${sbk_endpoints:regex}';
+const DEFAULT_PANEL_WIDTH = 12;
+const DEFAULT_PANEL_HEIGHT = 8;
 
 export function gridPlacement(panel: DashboardPanel) {
   return {
     x: panel.gridPos?.x || 0,
     y: panel.gridPos?.y || 0,
-    width: panel.gridPos?.w || 12,
-    height: panel.gridPos?.h || 8,
+    width: panel.gridPos?.w || DEFAULT_PANEL_WIDTH,
+    height: panel.gridPos?.h || DEFAULT_PANEL_HEIGHT,
   };
 }
 

@@ -354,9 +354,22 @@ class PortableReleaseTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("SBK_DASHBOARD_PORTABLE_BASE_URL", powershell_installer)
         self.assertIn("portable-bootstrap.properties", powershell_installer)
+        for property_name in (
+            "checksum.hex.characters",
+            "download.timeout.seconds",
+            "download.attempts",
+            "lock.poll.milliseconds",
+        ):
+            with self.subTest(property_name=property_name):
+                self.assertIn(property_name, powershell_installer)
+                self.assertIn(property_name, unix_installer)
+        self.assertIn("download.buffer.bytes", powershell_installer)
         self.assertIn("$HomeValue -eq '~'", powershell_installer)
         self.assertIn("$HomeValue -split '[\\\\/]'", powershell_installer)
-        self.assertIn("$UnixType -notin @(0, 0x4000, 0x8000)", powershell_installer)
+        self.assertIn(
+            "$UnixType -notin @(0, $UnixDirectoryType, $UnixRegularFileType)",
+            powershell_installer,
+        )
         self.assertIn("SBK_DASHBOARD_BOOTSTRAP_RUNTIME_STATE", powershell_installer)
 
 

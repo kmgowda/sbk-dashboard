@@ -52,6 +52,18 @@ CLIENT_ID_PATTERN = re.compile(
     rf"[A-Za-z0-9_-]{{{MIN_CLIENT_ID_CHARACTERS},{MAX_CLIENT_ID_CHARACTERS}}}"
 )
 LOGGER = logging.getLogger(__name__)
+SERVER_THREAD_JOIN_SECONDS = 3.0
+ASSET_FINGERPRINT_HEX_LENGTH = 12
+MIN_SOCKET_BACKLOG = 5
+MAX_SOCKET_BACKLOG = 256
+OVERLOAD_RESPONSE_TIMEOUT_SECONDS = 1.0
+BYTES_PER_KIBIBYTE = 1024
+WEB_ASSETS = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/app.css": "app.css",
+    "/app.js": "app.js",
+}
 
 
 def _dashboard_wait_page(
@@ -118,7 +130,10 @@ class RecentClientActivity:
         if surface not in self._values:
             raise ValueError("Activity surface must be landing or grafana")
         if not CLIENT_ID_PATTERN.fullmatch(client_id):
-            raise ValueError("Client ID must contain 16 to 64 URL-safe characters")
+            raise ValueError(
+                f"Client ID must contain {MIN_CLIENT_ID_CHARACTERS} to "
+                f"{MAX_CLIENT_ID_CHARACTERS} URL-safe characters"
+            )
         observed = time.monotonic() if now is None else now
         with self._lock:
             values = self._values[surface]
@@ -207,7 +222,7 @@ class DashboardHttpServer:
             self._server.shutdown()
             self._server.server_close()
             if self._thread and self._thread is not threading.current_thread():
-                self._thread.join(timeout=3)
+                self._thread.join(timeout=SERVER_THREAD_JOIN_SECONDS)
             self._server.close_pool()
             self.lifecycle.transition(LifecycleState.STOPPED)
 
@@ -220,7 +235,7 @@ class DashboardHttpServer:
             if path == "/api/health":
                 self._require(request, "GET")
                 healthy = self.monitoring.healthy()
-                self._json(request, 200 if healthy else 503,
+                self._json(request, HTTPStatus.OK if healthy else HTTPStatus.SERVICE_UNAVAILABLE,
                            {"status": "ok" if healthy else "degraded", "authentication": False,
                             "targets": len(self.registry.list())})
             elif path.startswith("/api/activity/"):
@@ -238,15 +253,15 @@ class DashboardHttpServer:
             else:
                 self._asset(request, path)
         except MethodNotAllowed as error:
-            self._json(request, 405, {"error": str(error)}, {"Allow": error.expected})
+            self._json(request, HTTPStatus.METHOD_NOT_ALLOWED, {"error": str(error)}, {"Allow": error.expected})
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
-            self._json(request, 400, {"error": str(error) or "Request body is not valid JSON"})
+            self._json(request, HTTPStatus.BAD_REQUEST, {"error": str(error) or "Request body is not valid JSON"})
         except OSError as error:
             LOGGER.error("Request failed: %s", error)
-            self._json(request, 500, {"error": "Unable to update dashboard state"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Unable to update dashboard state"})
         except Exception as error:  # defensive HTTP boundary
             LOGGER.exception("Unexpected request failure: %s", error)
-            self._json(request, 500, {"error": "Unexpected server error"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Unexpected server error"})
 
     def _activity(self, request: BaseHTTPRequestHandler, surface: str) -> None:
         self._require(request, "POST")
@@ -261,7 +276,7 @@ class DashboardHttpServer:
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
         if request.command == "GET":
-            self._json(request, 200, [self._view(request, target) for target in self.registry.list()])
+            self._json(request, HTTPStatus.OK, [self._view(request, target) for target in self.registry.list()])
             return
         self._require(request, "POST")
         body = self._read_json(request)
@@ -284,7 +299,8 @@ class DashboardHttpServer:
                         raise OSError("Unable to roll back failed target registration") from rollback_error
                     self._best_effort_reconcile("registration rollback")
                     raise
-        self._json(request, 201 if registration.created else 200, self._view(request, target))
+        status = HTTPStatus.CREATED if registration.created else HTTPStatus.OK
+        self._json(request, status, self._view(request, target))
 
     def _comparison_dashboard(self, request: BaseHTTPRequestHandler) -> None:
         self._require(request, "POST")
@@ -312,7 +328,7 @@ class DashboardHttpServer:
             dashboard_open_url = self._comparison_open_url(dashboard_id, target_ids)
         self._json(
             request,
-            200,
+            HTTPStatus.OK,
             {
                 "dashboardId": dashboard_id,
                 "dashboardUrl": dashboard_url,
@@ -326,13 +342,13 @@ class DashboardHttpServer:
         target_id = unquote(identifier)
         target = self.registry.find(target_id)
         if "/" in target_id or target is None:
-            self._json(request, 404, {"error": "Target not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
             return
         if separator and action == "dashboard":
             self._require(request, "GET")
             self._json(
                 request,
-                200,
+                HTTPStatus.OK,
                 {
                     "dashboardUrl": self._dashboard_url(request, target_id),
                     "ready": self.monitoring.dashboard_ready(target_id),
@@ -340,13 +356,13 @@ class DashboardHttpServer:
             )
             return
         if separator:
-            self._json(request, 404, {"error": "Not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         self._require(request, "DELETE")
         with self._mutation_lock:
             target = self.registry.find(target_id)
             if target is None or not self.registry.remove(target_id):
-                self._json(request, 404, {"error": "Target not found"})
+                self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
                 return
             try:
                 self.monitoring.reconcile(self.registry.list())
@@ -366,7 +382,7 @@ class DashboardHttpServer:
         target_id = unquote(encoded)
         target = self.registry.find(target_id)
         if "/" in target_id or target is None:
-            self._json(request, 404, {"error": "Target not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
             return
         if self.monitoring.dashboard_ready(target_id):
             request.send_response(HTTPStatus.FOUND)
@@ -413,11 +429,11 @@ class DashboardHttpServer:
             or len(set(target_ids)) != len(target_ids)
             or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
         ):
-            self._json(request, 404, {"error": "Comparison not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
             return
         with self._mutation_lock:
             if any(self.registry.find(target_id) is None for target_id in target_ids):
-                self._json(request, 404, {"error": "Comparison not found"})
+                self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
                 return
             dashboard_url = self.monitoring.comparison_dashboard_url(
                 target_ids, self._request_hostname(request)
@@ -470,10 +486,9 @@ class DashboardHttpServer:
 
     def _asset(self, request: BaseHTTPRequestHandler, path: str) -> None:
         self._require(request, "GET")
-        assets = {"/": "index.html", "/index.html": "index.html", "/app.css": "app.css", "/app.js": "app.js"}
-        name = assets.get(path)
+        name = WEB_ASSETS.get(path)
         if name is None:
-            self._json(request, 404, {"error": "Not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         resource_root = files("sbk_dashboard").joinpath("resources/web")
         resource = resource_root.joinpath(name)
@@ -484,7 +499,7 @@ class DashboardHttpServer:
                 javascript = _render_javascript(resource_root.joinpath("app.js").read_bytes())
                 fingerprint = hashlib.sha256(
                     stylesheet + javascript
-                ).hexdigest()[:12]
+                ).hexdigest()[:ASSET_FINGERPRINT_HEX_LENGTH]
                 body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
                 body = body.replace(
                     b"__DEFAULT_TARGET_HOST__",
@@ -493,12 +508,12 @@ class DashboardHttpServer:
             elif name == "app.js":
                 body = _render_javascript(body)
         except OSError:
-            self._json(request, 500, {"error": "Missing application asset"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Missing application asset"})
             return
         content_type = (
             "text/html" if name.endswith(".html") else "text/css" if name.endswith(".css") else "text/javascript"
         )
-        request.send_response(200)
+        request.send_response(HTTPStatus.OK)
         request.send_header("Content-Type", f"{content_type}; charset=utf-8")
         # Asset URLs are stable across releases. Require revalidation so a newly
         # deployed HTML document can never run with an older cached script/style.
@@ -547,7 +562,7 @@ class DashboardHttpServer:
         if length < 0:
             raise ValueError("Invalid Content-Length")
         if length > MAX_REQUEST_BYTES:
-            raise ValueError(f"Request body exceeds {MAX_REQUEST_BYTES // 1024} KiB")
+            raise ValueError(f"Request body exceeds {MAX_REQUEST_BYTES // BYTES_PER_KIBIBYTE} KiB")
         value = json.loads(request.rfile.read(length))
         if not isinstance(value, dict):
             raise ValueError("Request body must be a JSON object")
@@ -600,7 +615,9 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         queue_capacity: int,
         request_timeout: int,
     ) -> None:
-        self.request_queue_size = min(max(workers + queue_capacity, 5), 256)
+        self.request_queue_size = min(
+            max(workers + queue_capacity, MIN_SOCKET_BACKLOG), MAX_SOCKET_BACKLOG
+        )
         if ":" in server_address[0]:
             self.address_family = socket.AF_INET6
         super().__init__(server_address, handler)
@@ -664,7 +681,7 @@ class BoundedThreadPoolHttpServer(HTTPServer):
             + body
         )
         try:
-            request.settimeout(1)
+            request.settimeout(OVERLOAD_RESPONSE_TIMEOUT_SECONDS)
             request.sendall(response)
         except OSError:
             pass

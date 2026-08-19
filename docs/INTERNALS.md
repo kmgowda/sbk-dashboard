@@ -50,8 +50,9 @@ exact-version portable archive and adjacent checksum, enforces bounded transfer 
 verified staging tree under `<home>/distributions/<version>/<platform>`. A valid cached tree bypasses the network.
 Both paths hand the launcher an environment kind, location, and fresh/reused/repaired state; the launcher combines
 that with OS and interpreter details before acquiring instance state or native processes.
-The repository URL and bootstrap transfer/lock bounds are shared through `scripts/portable-bootstrap.properties`
-so the dependency-free Unix and Windows implementations consume one policy contract.
+The repository URL plus checksum, transfer, retry, buffer, and lock bounds are shared through
+`scripts/portable-bootstrap.properties`, so the Python source bootstrap and dependency-free Unix/Windows installers
+consume one policy contract.
 Foreground mode then calls
 `main.main()` in the console-attached helper process. The PyInstaller entry routes lifecycle verbs through the same
 launcher and uses internal executable modes for its dashboard child and watcher. On Windows, an identity-specific stop-request file is watched

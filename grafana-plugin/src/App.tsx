@@ -24,6 +24,9 @@ import {
 import {buildGroupScene} from './scene';
 import {
   DEFAULT_RELATIVE_FROM,
+  MILLISECONDS_PER_DAY,
+  MILLISECONDS_PER_HOUR,
+  MILLISECONDS_PER_MINUTE,
   RELATIVE_RANGES,
   comparisonLanes,
   exceedsTimeGroupLimit,
@@ -42,6 +45,8 @@ import {
 import './styles.css';
 
 const COMPARISON_UID = /^sbk-comparison-[a-f0-9]{16}$/;
+const DATE_TIME_LOCAL_CHARACTERS = 16;
+const HTTP_NOT_FOUND = 404;
 
 function App(_props: AppRootProps) {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -107,7 +112,7 @@ function App(_props: AppRootProps) {
       .catch((loadError: unknown) => {
         if (loadError instanceof DescriptorLoadCancelledError || controller.signal.aborted) return;
         const status = errorStatus(loadError);
-        if (status === 404 || loadError instanceof DescriptorNotReadyError) {
+        if (status === HTTP_NOT_FOUND || loadError instanceof DescriptorNotReadyError) {
           const seconds = Math.ceil(descriptorRetryWindowMilliseconds() / 1000);
           setError(
             `Grafana did not finish provisioning this comparison within ${seconds} seconds. ` +
@@ -314,11 +319,13 @@ function TargetTimeControl({lane, showLaneLabel, selection, maxAbsoluteRangeDays
   const parsedFrom = inputToEpoch(absoluteFrom);
   const parsedTo = inputToEpoch(absoluteTo);
   const absoluteValid = parsedFrom > 0 && parsedTo > parsedFrom &&
-    parsedTo - parsedFrom <= maxAbsoluteRangeDays * 24 * 60 * 60 * 1000;
+    parsedTo - parsedFrom <= maxAbsoluteRangeDays * MILLISECONDS_PER_DAY;
   const modeChange = (mode: TargetTimeSelection['mode']) => {
     const now = Date.now();
     if (mode === 'relative') onChange({mode, relativeFrom: DEFAULT_RELATIVE_FROM});
-    else if (mode === 'absolute') onChange({mode, absoluteFrom: now - 60 * 60 * 1000, absoluteTo: now});
+    else if (mode === 'absolute') {
+      onChange({mode, absoluteFrom: now - MILLISECONDS_PER_HOUR, absoluteTo: now});
+    }
     else onChange({mode: 'global'});
   };
   return (
@@ -384,8 +391,8 @@ function TargetTimeControl({lane, showLaneLabel, selection, maxAbsoluteRangeDays
 
 function epochToInput(value: number | undefined): string {
   if (!value || !Number.isFinite(value)) return '';
-  const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000);
-  return date.toISOString().slice(0, 16);
+  const date = new Date(value - new Date(value).getTimezoneOffset() * MILLISECONDS_PER_MINUTE);
+  return date.toISOString().slice(0, DATE_TIME_LOCAL_CHARACTERS);
 }
 
 function inputToEpoch(value: string): number {

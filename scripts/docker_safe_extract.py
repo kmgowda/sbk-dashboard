@@ -17,6 +17,8 @@ import sys
 import tarfile
 from pathlib import Path, PurePosixPath
 
+EXPECTED_COMMAND_ARGUMENTS = 3
+
 
 def extract(archive_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
@@ -43,7 +45,7 @@ def extract(archive_path: Path, destination: Path) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
+    if len(sys.argv) != EXPECTED_COMMAND_ARGUMENTS:
         raise SystemExit(f"Usage: {Path(sys.argv[0]).name} ARCHIVE DESTINATION")
     extract(Path(sys.argv[1]), Path(sys.argv[2]))
 

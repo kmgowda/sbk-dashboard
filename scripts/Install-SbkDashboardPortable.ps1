@@ -22,10 +22,23 @@ foreach ($Line in Get-Content -LiteralPath $BootstrapPropertiesPath) {
 $RepositoryUrl = $BootstrapProperties['repository.url']
 $MaximumArchiveBytes = [long]$BootstrapProperties['archive.max.bytes']
 $MaximumChecksumBytes = [long]$BootstrapProperties['checksum.max.bytes']
+$ChecksumHexCharacters = [int]$BootstrapProperties['checksum.hex.characters']
+$DownloadTimeoutSeconds = [int]$BootstrapProperties['download.timeout.seconds']
+$DownloadAttempts = [int]$BootstrapProperties['download.attempts']
+$DownloadBufferBytes = [int]$BootstrapProperties['download.buffer.bytes']
 $LockWaitSeconds = [int]$BootstrapProperties['lock.wait.seconds']
 $LockStaleSeconds = [int]$BootstrapProperties['lock.stale.seconds']
+$LockPollMilliseconds = [int]$BootstrapProperties['lock.poll.milliseconds']
+$MarkerHashCount = 2
+$LockWriterBufferBytes = 1024
+$UnixModeShift = 16
+$UnixFileTypeMask = 0xF000
+$UnixDirectoryType = 0x4000
+$UnixRegularFileType = 0x8000
 if (-not $RepositoryUrl -or $MaximumArchiveBytes -le 0 -or $MaximumChecksumBytes -le 0 -or
-    $LockWaitSeconds -le 0 -or $LockStaleSeconds -le 0) {
+    $ChecksumHexCharacters -le 0 -or $DownloadTimeoutSeconds -le 0 -or $DownloadAttempts -le 0 -or
+    $DownloadBufferBytes -le 0 -or $LockWaitSeconds -le 0 -or $LockStaleSeconds -le 0 -or
+    $LockPollMilliseconds -le 0) {
     throw 'Portable bootstrap properties are invalid.'
 }
 
@@ -96,10 +109,10 @@ function Receive-BoundedFile {
     }
     Add-Type -AssemblyName System.Net.Http
     $LastError = $null
-    for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+    for ($Attempt = 1; $Attempt -le $DownloadAttempts; $Attempt++) {
         $Response = $null
         $Client = [System.Net.Http.HttpClient]::new()
-        $Client.Timeout = [TimeSpan]::FromMinutes(10)
+        $Client.Timeout = [TimeSpan]::FromSeconds($DownloadTimeoutSeconds)
         try {
             $Response = $Client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
             $Response.EnsureSuccessStatusCode() | Out-Null
@@ -110,7 +123,7 @@ function Receive-BoundedFile {
             $OutputStream = [System.IO.File]::Open($Destination, [System.IO.FileMode]::Create,
                 [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
             try {
-                $Buffer = [byte[]]::new(65536)
+                $Buffer = [byte[]]::new($DownloadBufferBytes)
                 $Total = 0L
                 while (($Count = $InputStream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
                     $Total += $Count
@@ -126,7 +139,7 @@ function Receive-BoundedFile {
         } catch {
             $LastError = $_
             Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
-            if ($Attempt -lt 3) { Start-Sleep -Seconds $Attempt }
+            if ($Attempt -lt $DownloadAttempts) { Start-Sleep -Seconds $Attempt }
         } finally {
             if ($Response) { $Response.Dispose() }
             $Client.Dispose()
@@ -139,8 +152,9 @@ function Test-PortableRuntime {
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf) -or
         -not (Test-Path -LiteralPath $Marker -PathType Leaf)) { return $false }
     $MarkerLines = @(Get-Content -LiteralPath $Marker -ErrorAction SilentlyContinue)
-    if ($MarkerLines.Count -ne 2 -or $MarkerLines[0] -notmatch '^[0-9a-fA-F]{64}$' -or
-        $MarkerLines[1] -notmatch '^[0-9a-fA-F]{64}$') { return $false }
+    $ChecksumPattern = "^[0-9a-fA-F]{$ChecksumHexCharacters}$"
+    if ($MarkerLines.Count -ne $MarkerHashCount -or $MarkerLines[0] -notmatch $ChecksumPattern -or
+        $MarkerLines[1] -notmatch $ChecksumPattern) { return $false }
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Executable).Hash -eq $MarkerLines[1]
 }
 
@@ -151,7 +165,9 @@ while (-not $LockStream) {
     try {
         $LockStream = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew,
             [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-        $Writer = [System.IO.StreamWriter]::new($LockStream, [System.Text.UTF8Encoding]::new($false), 1024, $true)
+        $Writer = [System.IO.StreamWriter]::new(
+            $LockStream, [System.Text.UTF8Encoding]::new($false), $LockWriterBufferBytes, $true
+        )
         $Writer.WriteLine($PID)
         $Writer.WriteLine([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())
         $Writer.Flush()
@@ -172,7 +188,7 @@ while (-not $LockStream) {
         if ([DateTime]::UtcNow -ge $Deadline) {
             throw "Timed out waiting for portable runtime installation lock $LockPath."
         }
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds $LockPollMilliseconds
     }
 }
 
@@ -193,7 +209,7 @@ try {
         Write-Host "Preparing standalone SBK Dashboard $Version for $PlatformId."
         Receive-BoundedFile "$BaseUrl/$ArchiveName.sha256" $ChecksumPart $MaximumChecksumBytes
         $Expected = ((Get-Content -LiteralPath $ChecksumPart | Select-Object -First 1) -split '\s+')[0]
-        if ($Expected -notmatch '^[0-9a-fA-F]{64}$') {
+        if ($Expected -notmatch "^[0-9a-fA-F]{$ChecksumHexCharacters}$") {
             throw "The published checksum for $ArchiveName is invalid."
         }
         $UseCached = (Test-Path -LiteralPath $Archive -PathType Leaf) -and
@@ -211,9 +227,9 @@ try {
             $StagingRoot = [System.IO.Path]::GetFullPath($Staging).TrimEnd('\') + '\'
             foreach ($Entry in $ArchiveObject.Entries) {
                 $Target = [System.IO.Path]::GetFullPath((Join-Path $Staging $Entry.FullName))
-                $UnixType = (($Entry.ExternalAttributes -shr 16) -band 0xF000)
+                $UnixType = (($Entry.ExternalAttributes -shr $UnixModeShift) -band $UnixFileTypeMask)
                 if (-not $Target.StartsWith($StagingRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
-                    $UnixType -notin @(0, 0x4000, 0x8000)) {
+                    $UnixType -notin @(0, $UnixDirectoryType, $UnixRegularFileType)) {
                     throw "Unsafe archive entry: $($Entry.FullName)"
                 }
             }

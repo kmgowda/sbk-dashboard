@@ -29,6 +29,15 @@ LAUNCHER = ROOT / "scripts" / "sbk_dashboard_launcher.py"
 
 
 class LauncherScriptTest(unittest.TestCase):
+    def test_source_bootstrap_uses_shared_lock_policy(self):
+        self.assertEqual(
+            180.0, sbk_dashboard_bootstrap.positive_bootstrap_property("lock.wait.seconds")
+        )
+        self.assertEqual(
+            600.0, sbk_dashboard_bootstrap.positive_bootstrap_property("lock.stale.seconds")
+        )
+        self.assertEqual(0.25, sbk_dashboard_bootstrap.LOCK_POLL_SECONDS)
+
     def test_bootstrap_installs_missing_application_dependencies_in_active_environment(self):
         completed = subprocess.CompletedProcess([], 0)
         with (

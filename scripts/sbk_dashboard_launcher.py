@@ -50,6 +50,8 @@ try:
         LAUNCHER_DIRECTORY_ENVIRONMENT,
         PORTABLE_HOME_ENVIRONMENT,
         PROCESS_CREATE_TIME_TOLERANCE_SECONDS,
+        PROCESS_LOG_BACKUPS,
+        PROCESS_LOG_MEBIBYTES,
     )
     from sbk_dashboard.endpoint_policy import MAX_TCP_PORT, MIN_TCP_PORT, valid_port
 except ModuleNotFoundError as error:
@@ -79,6 +81,8 @@ except ModuleNotFoundError as error:
     LAUNCHER_DIRECTORY_ENVIRONMENT = contracts.LAUNCHER_DIRECTORY_ENVIRONMENT
     PORTABLE_HOME_ENVIRONMENT = contracts.PORTABLE_HOME_ENVIRONMENT
     PROCESS_CREATE_TIME_TOLERANCE_SECONDS = contracts.PROCESS_CREATE_TIME_TOLERANCE_SECONDS
+    PROCESS_LOG_BACKUPS = contracts.PROCESS_LOG_BACKUPS
+    PROCESS_LOG_MEBIBYTES = contracts.PROCESS_LOG_MEBIBYTES
     MAX_TCP_PORT = endpoint_policy.MAX_TCP_PORT
     MIN_TCP_PORT = endpoint_policy.MIN_TCP_PORT
     valid_port = endpoint_policy.valid_port
@@ -86,13 +90,23 @@ except ModuleNotFoundError as error:
 STATE_FILE = "sbk-dashboard.json"
 LOG_FILE = "sbk-dashboard.log"
 DEFAULT_STOP_TIMEOUT_SECONDS = 45.0
-LOG_MAX_BYTES = 10 * 1024 * 1024
-LOG_BACKUPS = 3
+MIN_STOP_TIMEOUT_SECONDS = 1.0
+MAX_STOP_TIMEOUT_SECONDS = 300.0
+STOP_TIMEOUT_ENVIRONMENT = "SBK_DASHBOARD_STOP_TIMEOUT"
+LOG_MAX_BYTES = PROCESS_LOG_MEBIBYTES.default * 1024 * 1024
+LOG_BACKUPS = PROCESS_LOG_BACKUPS.default
 READ_CHUNK_BYTES = 64 * 1024
 STARTUP_HANDSHAKE_SECONDS = 10.0
 BACKGROUND_STARTUP_GRACE_SECONDS = 0.5
 WATCH_INTERVAL_SECONDS = 0.25
 FORCE_CLEANUP_SECONDS = 10.0
+HANDSHAKE_POLL_SECONDS = 0.05
+STARTED_MARKER_STABILITY_SECONDS = 0.1
+FOREGROUND_MONITOR_JOIN_SECONDS = 1.0
+MILLISECONDS_PER_SECOND = 1000
+STOP_PORT_ARGUMENT_COUNT = 2
+INTERNAL_RUN_REQUIRED_ARGUMENTS = 4
+INTERNAL_WATCH_ARGUMENTS = 4
 
 
 def launcher_command(mode: str, *arguments: str) -> list[str]:
@@ -136,7 +150,7 @@ def log_path(port: int = DEFAULT_DASHBOARD_PORT) -> Path:
 
 
 def foreground_stop_path(pid: int, create_time: float) -> Path:
-    return state_directory() / f"stop-{pid}-{int(create_time * 1000)}.request"
+    return state_directory() / f"stop-{pid}-{int(create_time * MILLISECONDS_PER_SECOND)}.request"
 
 
 def load_state(port: int = DEFAULT_DASHBOARD_PORT) -> dict[str, Any] | None:
@@ -397,7 +411,7 @@ def foreground(arguments: list[str]) -> int:
     monitor_stopping = threading.Event()
 
     def monitor_stop_request() -> None:
-        while not monitor_stopping.wait(0.05):
+        while not monitor_stopping.wait(HANDSHAKE_POLL_SECONDS):
             if stop_request.exists():
                 with suppress(FileNotFoundError):
                     stop_request.unlink()
@@ -418,7 +432,7 @@ def foreground(arguments: list[str]) -> int:
         with suppress(FileNotFoundError):
             stop_request.unlink()
         if monitor is not None:
-            monitor.join(timeout=1)
+            monitor.join(timeout=FOREGROUND_MONITOR_JOIN_SECONDS)
         remove_owned_state(process.pid, process_created, port)
     return 0
 
@@ -474,7 +488,7 @@ def start_background(arguments: list[str]) -> int:
     try:
         for signum in handled_signals:
             previous_handlers[signum] = signal.signal(signum, interrupt_start)
-        time.sleep(0.5)
+        time.sleep(BACKGROUND_STARTUP_GRACE_SECONDS)
         if child.poll() is not None:
             raise SystemExit(
                 f"SBK Dashboard exited during startup with status {child.returncode}. "
@@ -523,14 +537,14 @@ def wait_for_background_start(
         if started_marker.exists():
             with suppress(FileNotFoundError):
                 started_marker.unlink()
-            time.sleep(0.1)
+            time.sleep(STARTED_MARKER_STABILITY_SECONDS)
             status = supervisor.poll()
             if status is not None:
                 raise SystemExit(
                     f"SBK Dashboard exited during startup with status {status}. See {log_path}."
                 )
             return
-        time.sleep(0.05)
+        time.sleep(HANDSHAKE_POLL_SECONDS)
     raise SystemExit(f"SBK Dashboard startup confirmation timed out. See {log_path}.")
 
 
@@ -654,7 +668,7 @@ def wait_for_startup_handshake(
             return True
         if stopping.is_set() or process_matches(parent_pid, parent_created) is None:
             return False
-        time.sleep(0.05)
+        time.sleep(HANDSHAKE_POLL_SECONDS)
     return False
 
 
@@ -700,7 +714,7 @@ def run_dashboard(
         child_process = psutil.Process(child.pid)
         startup_deadline = time.monotonic() + BACKGROUND_STARTUP_GRACE_SECONDS
         while time.monotonic() < startup_deadline and child.poll() is None and not stopping.is_set():
-            time.sleep(0.05)
+            time.sleep(HANDSHAKE_POLL_SECONDS)
         if child.poll() is None and not stopping.is_set():
             watch_creation_flags = (
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
@@ -738,13 +752,16 @@ def run_dashboard(
 
 
 def stop_timeout() -> float:
-    raw = os.environ.get("SBK_DASHBOARD_STOP_TIMEOUT", str(DEFAULT_STOP_TIMEOUT_SECONDS))
+    raw = os.environ.get(STOP_TIMEOUT_ENVIRONMENT, str(DEFAULT_STOP_TIMEOUT_SECONDS))
     try:
         timeout = float(raw)
     except ValueError as error:
-        raise SystemExit("SBK_DASHBOARD_STOP_TIMEOUT must be a number.") from error
-    if not 1 <= timeout <= 300:
-        raise SystemExit("SBK_DASHBOARD_STOP_TIMEOUT must be between 1 and 300 seconds.")
+        raise SystemExit(f"{STOP_TIMEOUT_ENVIRONMENT} must be a number.") from error
+    if not MIN_STOP_TIMEOUT_SECONDS <= timeout <= MAX_STOP_TIMEOUT_SECONDS:
+        raise SystemExit(
+            f"{STOP_TIMEOUT_ENVIRONMENT} must be between {MIN_STOP_TIMEOUT_SECONDS:g} "
+            f"and {MAX_STOP_TIMEOUT_SECONDS:g} seconds."
+        )
     return timeout
 
 
@@ -780,7 +797,7 @@ def stop_selection(arguments: list[str]) -> int | None:
         arguments[0].startswith("-port=") or arguments[0].startswith("--port=")
     ):
         return management_port(arguments)
-    if len(arguments) == 2 and arguments[0] in {"-port", "--port"}:
+    if len(arguments) == STOP_PORT_ARGUMENT_COUNT and arguments[0] in {"-port", "--port"}:
         return management_port(arguments)
     raise SystemExit("Usage: stop-sbk-dashboard [-port port]")
 
@@ -823,30 +840,38 @@ def stop(arguments: list[str] | None = None) -> int:
 
 
 def main() -> int:
-    if len(sys.argv) >= 2 and sys.argv[1] == "_run":
-        if len(sys.argv) < 6:
-            raise SystemExit("Invalid internal launcher arguments.")
-        return run_dashboard(
-            int(sys.argv[2]),
-            float(sys.argv[3]),
-            Path(sys.argv[4]),
-            Path(sys.argv[5]),
-            sys.argv[6:],
-        )
-    if len(sys.argv) >= 2 and sys.argv[1] == "_watch":
-        if len(sys.argv) != 6:
-            raise SystemExit("Invalid internal watcher arguments.")
-        return watch_launcher(int(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5]))
-    if len(sys.argv) < 2 or sys.argv[1] not in {"foreground", "background", "start", "stop"}:
+    if not sys.argv[1:]:
         raise SystemExit(
             f"Usage: {Path(sys.argv[0]).name} "
             "foreground|background|start [dashboard options...] | stop [-port port]"
         )
-    if sys.argv[1] == "foreground":
-        return foreground(sys.argv[2:])
-    if sys.argv[1] in {"background", "start"}:
-        return start_background(sys.argv[2:])
-    return stop(sys.argv[2:])
+    command, *arguments = sys.argv[1:]
+    if command == "_run":
+        if len(arguments) < INTERNAL_RUN_REQUIRED_ARGUMENTS:
+            raise SystemExit("Invalid internal launcher arguments.")
+        parent_pid, parent_created, marker, started_marker, *dashboard_arguments = arguments
+        return run_dashboard(
+            int(parent_pid),
+            float(parent_created),
+            Path(marker),
+            Path(started_marker),
+            dashboard_arguments,
+        )
+    if command == "_watch":
+        if len(arguments) != INTERNAL_WATCH_ARGUMENTS:
+            raise SystemExit("Invalid internal watcher arguments.")
+        parent_pid, parent_created, child_pid, child_created = arguments
+        return watch_launcher(int(parent_pid), float(parent_created), int(child_pid), float(child_created))
+    if command not in {"foreground", "background", "start", "stop"}:
+        raise SystemExit(
+            f"Usage: {Path(sys.argv[0]).name} "
+            "foreground|background|start [dashboard options...] | stop [-port port]"
+        )
+    if command == "foreground":
+        return foreground(arguments)
+    if command in {"background", "start"}:
+        return start_background(arguments)
+    return stop(arguments)
 
 
 if __name__ == "__main__":

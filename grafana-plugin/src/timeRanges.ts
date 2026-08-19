@@ -11,6 +11,9 @@
 import {ComparisonLane, TargetDescriptor, TargetTimeSelection, TimeGroup} from './types';
 
 export const DEFAULT_RELATIVE_FROM = 'now-1h';
+export const MILLISECONDS_PER_MINUTE = 60 * 1000;
+export const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
+export const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 export const RELATIVE_RANGES = Object.freeze([
   ['now-5m', 'Last 5 minutes'],
   ['now-15m', 'Last 15 minutes'],
@@ -54,7 +57,7 @@ export function selectionKey(selection: TargetTimeSelection, maxAbsoluteRangeDay
   }
   const from = Number(selection.absoluteFrom);
   const to = Number(selection.absoluteTo);
-  const maximumSpan = maxAbsoluteRangeDays * 24 * 60 * 60 * 1000;
+  const maximumSpan = maxAbsoluteRangeDays * MILLISECONDS_PER_DAY;
   if (
     !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from >= to ||
     !Number.isSafeInteger(maximumSpan) || maximumSpan <= 0 || to - from > maximumSpan

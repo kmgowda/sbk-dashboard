@@ -29,11 +29,20 @@ property() {
 REPOSITORY_URL=$(property repository.url)
 MAXIMUM_ARCHIVE_BYTES=$(property archive.max.bytes)
 MAXIMUM_CHECKSUM_BYTES=$(property checksum.max.bytes)
+CHECKSUM_HEX_CHARACTERS=$(property checksum.hex.characters)
+DOWNLOAD_CONNECT_SECONDS=$(property download.connect.seconds)
+DOWNLOAD_TIMEOUT_SECONDS=$(property download.timeout.seconds)
+DOWNLOAD_ATTEMPTS=$(property download.attempts)
 LOCK_WAIT_SECONDS=$(property lock.wait.seconds)
 LOCK_STALE_SECONDS=$(property lock.stale.seconds)
-case "$MAXIMUM_ARCHIVE_BYTES$MAXIMUM_CHECKSUM_BYTES$LOCK_WAIT_SECONDS$LOCK_STALE_SECONDS" in
+LOCK_POLL_MILLISECONDS=$(property lock.poll.milliseconds)
+case "$MAXIMUM_ARCHIVE_BYTES$MAXIMUM_CHECKSUM_BYTES$CHECKSUM_HEX_CHARACTERS$DOWNLOAD_CONNECT_SECONDS\
+$DOWNLOAD_TIMEOUT_SECONDS$DOWNLOAD_ATTEMPTS$LOCK_WAIT_SECONDS$LOCK_STALE_SECONDS$LOCK_POLL_MILLISECONDS" in
     ''|*[!0-9]*) echo "Portable bootstrap properties are invalid." >&2; exit 1 ;;
 esac
+DOWNLOAD_RETRIES=$((DOWNLOAD_ATTEMPTS - 1))
+LOCK_WAIT_MILLISECONDS=$((LOCK_WAIT_SECONDS * 1000))
+FILE_LIMIT_BLOCK_BYTES=512
 
 case $(uname -s) in
     Linux) OS_ID=linux ;;
@@ -102,7 +111,8 @@ runtime_valid() {
     MARKER_ARCHIVE=$(sed -n '1p' "$MARKER" 2>/dev/null || true)
     MARKER_EXECUTABLE=$(sed -n '2p' "$MARKER" 2>/dev/null || true)
     case "$MARKER_ARCHIVE$MARKER_EXECUTABLE" in *[!0-9a-fA-F]*|'') return 1 ;; esac
-    [ "${#MARKER_ARCHIVE}" -eq 64 ] && [ "${#MARKER_EXECUTABLE}" -eq 64 ] || return 1
+    [ "${#MARKER_ARCHIVE}" -eq "$CHECKSUM_HEX_CHARACTERS" ] && \
+        [ "${#MARKER_EXECUTABLE}" -eq "$CHECKSUM_HEX_CHARACTERS" ] || return 1
     [ "$(sha256_file "$EXECUTABLE")" = "$MARKER_EXECUTABLE" ]
 }
 
@@ -118,11 +128,13 @@ download() {
             ;;
     esac
     if command -v curl >/dev/null 2>&1; then
-        curl --fail --location --silent --show-error --connect-timeout 15 --max-time 600 --retry 2 \
+        curl --fail --location --silent --show-error --connect-timeout "$DOWNLOAD_CONNECT_SECONDS" \
+            --max-time "$DOWNLOAD_TIMEOUT_SECONDS" --retry "$DOWNLOAD_RETRIES" \
             --max-filesize "$DOWNLOAD_LIMIT" --output "$2" "$1"
     elif command -v wget >/dev/null 2>&1; then
-        DOWNLOAD_BLOCKS=$(((DOWNLOAD_LIMIT + 511) / 512))
-        (ulimit -f "$DOWNLOAD_BLOCKS"; wget --https-only --timeout=30 --tries=3 --output-document="$2" "$1")
+        DOWNLOAD_BLOCKS=$(((DOWNLOAD_LIMIT + FILE_LIMIT_BLOCK_BYTES - 1) / FILE_LIMIT_BLOCK_BYTES))
+        (ulimit -f "$DOWNLOAD_BLOCKS"; wget --https-only --timeout="$DOWNLOAD_CONNECT_SECONDS" \
+            --tries="$DOWNLOAD_ATTEMPTS" --output-document="$2" "$1")
     else
         echo "The first Python-free start requires curl or wget to download the verified runtime." >&2
         return 1
@@ -146,7 +158,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$CACHE_DIRECTORY" "$INSTALL_PARENT" "$(dirname -- "$LOCK_DIRECTORY")"
-waited=0
+waited_milliseconds=0
 while ! mkdir "$LOCK_DIRECTORY" 2>/dev/null; do
     owner=
     started=
@@ -170,12 +182,12 @@ while ! mkdir "$LOCK_DIRECTORY" 2>/dev/null; do
             fi
             ;;
     esac
-    if [ "$waited" -ge "$LOCK_WAIT_SECONDS" ]; then
+    if [ "$waited_milliseconds" -ge "$LOCK_WAIT_MILLISECONDS" ]; then
         echo "Timed out waiting for portable runtime installation lock $LOCK_DIRECTORY." >&2
         exit 1
     fi
-    sleep 1
-    waited=$((waited + 1))
+    sleep "$(awk "BEGIN {print $LOCK_POLL_MILLISECONDS / 1000}")"
+    waited_milliseconds=$((waited_milliseconds + LOCK_POLL_MILLISECONDS))
 done
 LOCK_OWNED=true
 printf '%s\n%s\n' "$$" "$(date +%s)" >"$LOCK_DIRECTORY/pid"
@@ -209,7 +221,10 @@ if [ "$FORCE" = true ] || [ "$RUNTIME_VALID" = false ]; then
     }
     EXPECTED=$(awk 'NR == 1 {print $1}' "$CHECKSUM_PART")
     case "$EXPECTED" in *[!0-9a-fA-F]*|'') echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1 ;; esac
-    [ "${#EXPECTED}" -eq 64 ] || { echo "The published checksum for $ARCHIVE_NAME is invalid." >&2; exit 1; }
+    [ "${#EXPECTED}" -eq "$CHECKSUM_HEX_CHARACTERS" ] || {
+        echo "The published checksum for $ARCHIVE_NAME is invalid." >&2
+        exit 1
+    }
     EXPECTED=$(printf '%s' "$EXPECTED" | tr '[:upper:]' '[:lower:]')
     if [ ! -f "$ARCHIVE" ] || [ "$(sha256_file "$ARCHIVE")" != "$EXPECTED" ]; then
         download "$BASE_URL/$ARCHIVE_NAME" "$ARCHIVE_PART" "$MAXIMUM_ARCHIVE_BYTES" || {
