@@ -64,7 +64,7 @@ class FakeMonitoring:
         formatted = f"[{host}]" if ":" in host else host
         normalized = sorted(set(target_ids))
         digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
-        return f"http://{formatted}:3000/a/kmg-sbkcomparison-app?comparisonUid=sbk-comparison-{digest}"
+        return f"http://{formatted}:3000/a/sbkcomparison-app?comparisonUid=sbk-comparison-{digest}"
 
     def classic_comparison_dashboard_url(self, target_ids, browser_host=None):
         host = browser_host or "grafana"
@@ -285,7 +285,7 @@ class WebTest(unittest.TestCase):
         self.assertTrue(body["dashboardId"].startswith("sbk-comparison-"))
         self.assertTrue(
             body["dashboardUrl"].startswith(
-                "http://dashboard.example:3000/a/kmg-sbkcomparison-app?comparisonUid="
+                "http://dashboard.example:3000/a/sbkcomparison-app?comparisonUid="
             )
         )
         self.assertTrue(body["dashboardOpenUrl"].startswith(f"/comparisons/{body['dashboardId']}?targetId="))
@@ -582,11 +582,11 @@ class MonitoringContinueTest(unittest.TestCase):
             ManagedMonitoringStack(dashboard, explicit).dashboard_url("target", "198.51.100.7"),
         )
         self.assertEqual(
-            f"http://198.51.100.7:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
+            f"http://198.51.100.7:3000/a/sbkcomparison-app?comparisonUid={comparison_uid}",
             default_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
         self.assertEqual(
-            f"https://grafana.example/base/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
+            f"https://grafana.example/base/a/sbkcomparison-app?comparisonUid={comparison_uid}",
             explicit_stack.comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
         self.assertEqual(

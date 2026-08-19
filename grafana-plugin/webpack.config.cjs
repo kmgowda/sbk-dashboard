@@ -89,9 +89,9 @@ module.exports = {
     clean: true,
     filename: '[name].js',
     library: {type: 'amd'},
-    path: path.resolve(__dirname, '../src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app'),
-    publicPath: 'public/plugins/kmg-sbkcomparison-app/',
-    uniqueName: 'kmg-sbkcomparison-app',
+    path: path.resolve(__dirname, '../src/sbk_dashboard/resources/grafana/plugins/sbkcomparison-app'),
+    publicPath: 'public/plugins/sbkcomparison-app/',
+    uniqueName: 'sbkcomparison-app',
   },
   plugins: [
     new webpack.BannerPlugin({banner: licenseBanner}),

@@ -111,7 +111,7 @@ class ProvisioningTest(unittest.TestCase):
         self.assertTrue(all("{{sbk_endpoint_id}}" in legend for legend in legends))
         self.assertEqual(53, sum(1 for _ in _panels(generated)))
         self.assertEqual(
-            f"http://grafana:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
+            f"http://grafana:3000/a/sbkcomparison-app?comparisonUid={comparison_uid}",
             self.provisioner.comparison_dashboard_url(["first", "second"]),
         )
         self.assertEqual(

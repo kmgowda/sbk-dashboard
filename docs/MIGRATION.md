@@ -80,12 +80,14 @@ generated shared file is removed by reconciliation; bookmarks using that old UID
 landing page or comparison API. The new generated-file cache is bounded to 128 entries and does not change endpoint
 IDs, samples, or registration persistence.
 
-The comparison URL now opens the bundled `kmg-sbkcomparison-app`. Existing deterministic comparison descriptors and
+The comparison URL now opens the bundled `sbkcomparison-app`. Existing deterministic comparison descriptors and
 UIDs remain valid, and the API also returns `classicDashboardUrl` for the earlier single-range provisioned view.
 Every target initially follows one global live range; per-target relative-live or fixed historical selections are
 URL state and require no data migration. The app is installed automatically into the managed Grafana data directory
-on startup in direct, portable, wheel, and container deployments. Fixed ranges are capped at 31 days and each view
-at four distinct time groups.
+on startup in direct, portable, wheel, and container deployments. Upgrades remove the former
+`kmg-sbkcomparison-app` installation after the project-named plugin is promoted successfully; old direct app
+bookmarks must be reopened from the landing page. Fixed ranges are capped at 31 days and each view at four distinct
+time groups.
 
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.

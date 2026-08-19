@@ -50,7 +50,7 @@ sbk_dashboard = [
   "resources/banner.txt",
   "resources/native-artifacts.json",
   "resources/grafana/dashboards/sbk-dashboard.json",
-  "resources/grafana/plugins/kmg-sbkcomparison-app/*",
+  "resources/grafana/plugins/sbkcomparison-app/*",
   "resources/web/*.html",
   "resources/web/*.css",
   "resources/web/*.js",

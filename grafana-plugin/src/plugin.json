@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "app",
   "name": "SBK/SBM Time Comparison",
-  "id": "kmg-sbkcomparison-app",
+  "id": "sbkcomparison-app",
   "info": {
     "keywords": ["sbk", "sbm", "benchmark", "comparison"],
     "description": "Compare SBK/SBM targets with shared or independent live and historical time ranges.",
@@ -15,7 +15,7 @@
   "includes": [{
     "type": "page",
     "name": "SBK/SBM comparison",
-    "path": "/a/kmg-sbkcomparison-app",
+    "path": "/a/sbkcomparison-app",
     "addToNav": false,
     "defaultNav": true
   }],

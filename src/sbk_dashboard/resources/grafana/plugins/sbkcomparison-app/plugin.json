@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
   "type": "app",
   "name": "SBK/SBM Time Comparison",
-  "id": "kmg-sbkcomparison-app",
+  "id": "sbkcomparison-app",
   "info": {
     "keywords": [
       "sbk",
@@ -16,14 +16,14 @@
     },
     "logos": {},
     "screenshots": [],
-    "version": "1.26.8.3-build.d29a818ce0fd",
+    "version": "1.26.8.3-build.bc15b16e5edf",
     "updated": "2026-08-18"
   },
   "includes": [
     {
       "type": "page",
       "name": "SBK/SBM comparison",
-      "path": "/a/kmg-sbkcomparison-app",
+      "path": "/a/sbkcomparison-app",
       "addToNav": false,
       "defaultNav": true
     }

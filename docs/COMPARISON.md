@@ -121,7 +121,7 @@ The response contains:
 ```json
 {
   "dashboardId": "sbk-comparison-0123456789abcdef",
-  "dashboardUrl": "http://127.0.0.1:3000/a/kmg-sbkcomparison-app?comparisonUid=sbk-comparison-0123456789abcdef",
+  "dashboardUrl": "http://127.0.0.1:3000/a/sbkcomparison-app?comparisonUid=sbk-comparison-0123456789abcdef",
   "dashboardOpenUrl": "/comparisons/sbk-comparison-0123456789abcdef?targetId=1111111111111111&targetId=2222222222222222",
   "classicDashboardUrl": "http://127.0.0.1:3000/d/sbk-comparison-0123456789abcdef/?var-sbk_endpoints=..."
 }
@@ -189,12 +189,12 @@ sequenceDiagram
   is changed.
 - Removing a registered endpoint invalidates cached comparisons containing it during reconciliation.
 - The app is bundled but intentionally unsigned. The generated Grafana configuration permits only the exact
-  `kmg-sbkcomparison-app` ID; do not broaden the unsigned-plugin allowlist.
+  `sbkcomparison-app` ID; do not broaden the unsigned-plugin allowlist.
 
 ## Developer validation
 
 The plugin source is in `grafana-plugin/`; the committed production bundle is under
-`src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app/`. Node.js is a build/test dependency only.
+`src/sbk_dashboard/resources/grafana/plugins/sbkcomparison-app/`. Node.js is a build/test dependency only.
 The source descriptor retains the application release version. The production build adds a deterministic
 `-build.<sha256-prefix>` suffix to the packaged plugin version from all frontend sources and build inputs. Grafana
 uses that version in the browser module URL, so rebuilding this feature within the same application release cannot

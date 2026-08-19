@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sbk_dashboard.grafana_plugin import Traversable, install_comparison_plugin
+from sbk_dashboard.provisioning import COMPARISON_APP_PLUGIN_ID
 from sbk_dashboard.version import VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +29,12 @@ class GrafanaPluginInstallationTest(unittest.TestCase):
     def test_installs_and_replaces_the_bundled_plugin(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            legacy = root / "kmg-sbkcomparison-app"
+            legacy.mkdir()
+            (legacy / "stale.txt").write_text("old", encoding="utf-8")
             installed = install_comparison_plugin(root)
+            self.assertEqual("sbkcomparison-app", installed.name)
+            self.assertFalse(legacy.exists())
             self.assertTrue((installed / "module.js").is_file())
             self.assertTrue((installed / "plugin.json").is_file())
             descriptor = json.loads((installed / "plugin.json").read_text(encoding="utf-8"))
@@ -56,9 +62,12 @@ class GrafanaPluginInstallationTest(unittest.TestCase):
         packaged = json.loads(
             (
                 ROOT
-                / "src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app/plugin.json"
+                / "src/sbk_dashboard/resources/grafana/plugins/sbkcomparison-app/plugin.json"
             ).read_text(encoding="utf-8")
         )
         self.assertEqual(VERSION, source["info"]["version"])
+        self.assertEqual(COMPARISON_APP_PLUGIN_ID, source["id"])
+        self.assertEqual(COMPARISON_APP_PLUGIN_ID, packaged["id"])
+        self.assertEqual(f"/a/{COMPARISON_APP_PLUGIN_ID}", packaged["includes"][0]["path"])
         self.assertRegex(packaged["info"]["version"], rf"^{VERSION}-build\.[0-9a-f]{{12}}$")
         self.assertNotEqual(source["info"]["version"], packaged["info"]["version"])

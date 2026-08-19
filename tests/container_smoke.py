@@ -259,7 +259,7 @@ class ContainerSmoke:
         self, comparison: dict[str, Any], target_ids: list[str]
     ) -> None:
         dashboard_id = comparison.get("dashboardId")
-        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/a/kmg-sbkcomparison-app?comparisonUid={dashboard_id}"
+        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/a/sbkcomparison-app?comparisonUid={dashboard_id}"
         if not isinstance(dashboard_id, str) or not dashboard_id.startswith("sbk-comparison-"):
             raise AssertionError(f"Invalid comparison dashboard ID: {comparison}")
         if not str(comparison.get("dashboardUrl", "")).startswith(expected_prefix):
@@ -310,7 +310,7 @@ class ContainerSmoke:
         command(
             "docker", "exec", self.name, "test", "-f",
             "/var/lib/sbk-dashboard/monitoring/grafana/data/plugins/"
-            "kmg-sbkcomparison-app/module.js",
+            "sbkcomparison-app/module.js",
         )
 
     def _start(self) -> None:
