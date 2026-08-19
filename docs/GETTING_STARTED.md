@@ -135,7 +135,8 @@ benchmark. When SBK exits, the target becomes `down`; already-scraped history re
 
 ## Compare endpoints
 
-Register at least two endpoints, copy their IDs from `GET /api/targets`, and request a deterministic comparison:
+Register one or more endpoints, copy their IDs from `GET /api/targets`, and request a deterministic comparison. One
+ID opens two time lanes for that dashboard; 2–8 IDs compare different dashboards:
 
 ```bash
 curl --fail --request POST http://127.0.0.1:9721/api/comparison-dashboard \

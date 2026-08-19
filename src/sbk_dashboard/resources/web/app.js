@@ -114,7 +114,9 @@ function renderTarget(target) {
 
 function updateComparisonButton() {
     const count = selectedTargetIds.size;
-    compareButton.textContent = `Compare selected (${count}) ↗`;
+    compareButton.textContent = count === 1
+        ? 'Compare time ranges (1) ↗'
+        : `Compare selected (${count}) ↗`;
     compareButton.disabled = (
         count < UI_POLICY.minComparisonTargets || count > UI_POLICY.maxComparisonTargets
     );

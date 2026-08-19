@@ -205,7 +205,7 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
-`POST /api/comparison-dashboard` validates 2–8 unique registered IDs, sorts the set, and derives a stable
+`POST /api/comparison-dashboard` validates 1–8 unique registered IDs, sorts the set, and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
 provisioned-dashboard fallback URL. Repeating the same set in any order reuses the UID and file. The descriptor adds
@@ -214,10 +214,11 @@ legends retain the readable name, kind, and immutable endpoint ID.
 
 `grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
 `monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates
-the descriptor, groups identical target time selections, converts the canonical visual panels to Grafana Scenes,
+the descriptor, creates two bounded deterministic time lanes when it contains one target (or one lane per target for
+an existing multi-target comparison), groups identical lane selections, converts the canonical visual panels to Grafana Scenes,
 and scopes each scene's queries to its group. Global and relative scenes refresh; fixed historical scenes do not.
-Time state is URL-only and never enters `targets.json` or dashboard mappings. Four groups and a 31-day absolute span
-bound each view. The classic URL retains one Grafana-wide time range for compatibility.
+Time state and the 2–8 single-target lane count are URL-only and never enter `targets.json` or dashboard mappings.
+Four groups and a 31-day absolute span bound each view. The classic URL retains one Grafana-wide time range for compatibility.
 
 The source plugin descriptor uses the application version, while webpack derives the packaged plugin version as
 `<application-version>-build.<sha256-prefix>` from the frontend source tree, package metadata/lock, and build

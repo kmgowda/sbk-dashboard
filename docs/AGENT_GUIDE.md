@@ -128,7 +128,7 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 2–8 endpoints and return deterministic app and classic-fallback URLs |
+| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic app and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 

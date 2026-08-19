@@ -28,7 +28,7 @@ The current release is `1.26.8.3`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
-- A deterministic comparison view for any 2–8 selected SBK or SBM endpoints, with shared or per-target live and
+- A deterministic comparison view for one endpoint across multiple ranges or any 2–8 SBK/SBM endpoints, with shared or per-target live and
   historical ranges, a reusable ID, and a shareable URL.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
@@ -615,13 +615,15 @@ the existing endpoint and dashboard ID; the initial creation returns HTTP 201. N
 Conflicting metadata for an already registered `host:port` is rejected instead of silently replacing its scrape
 configuration.
 
-The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
-selected** to open the comparison app. Every target initially follows one global live range; after it opens, a
+The landing page also provides a checkbox beside every endpoint. Select one endpoint and choose **Compare time
+ranges** to open two independently configurable lanes for the same dashboard, with controls to add up to eight
+lanes. Or select 2–8 endpoints and choose **Compare selected** to retain the multi-target behavior. Every lane
+initially follows one global live range; after it opens, a
 target can be detached to an independent relative-live range or a fixed historical range and later rejoined. Targets
 with identical ranges share one bounded query group. The sorted endpoint-ID set produces a deterministic
 `sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
 same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
-Comparison is bounded to four distinct time groups and a 31-day fixed range; the generated descriptor cache is
+Comparison is bounded to eight lanes/targets, four distinct time groups, and a 31-day fixed range; the generated descriptor cache is
 bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
 The packaged comparison plugin carries a deterministic build revision, so restarting after a source update makes
 Grafana and the browser load the matching descriptor handling and canonical row layout instead of an older cached

@@ -263,7 +263,7 @@ class DashboardHttpServer:
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError("Target IDs must be an array of strings")
         if len(values) < MIN_COMPARISON_TARGETS:
-            raise ValueError("Select at least two endpoints to compare")
+            raise ValueError("Select at least one endpoint to compare")
         if len(values) > MAX_COMPARISON_TARGETS:
             raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
         target_ids = list(dict.fromkeys(values))

@@ -210,6 +210,8 @@ class ContainerSmoke:
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
             self._wait_for_dashboard(target["dashboardUrl"])
+        single_range_comparison = self._comparison_dashboard(target_ids[:1])
+        self._assert_comparison_dashboard(single_range_comparison, target_ids[:1])
         comparison = self._comparison_dashboard(target_ids) if len(target_ids) >= 2 else None
         if comparison is not None:
             self._assert_comparison_dashboard(comparison, target_ids)
@@ -278,12 +280,21 @@ class ContainerSmoke:
             "print(json.dumps({'panels': panels(root), "
             "'ids': root.get('sbkDashboardComparisonEndpointIds'), "
             "'timeGroups': root.get('sbkDashboardComparisonPolicy', {}).get('maxTimeGroups'), "
+            "'minLanes': root.get('sbkDashboardComparisonPolicy', {}).get('minSingleTargetTimeLanes'), "
+            "'maxLanes': root.get('sbkDashboardComparisonPolicy', {}).get('maxTimeLanes'), "
             "'absoluteDays': root.get('sbkDashboardComparisonPolicy', {}).get('maxAbsoluteRangeDays')}))\n"
         )
         details = json.loads(
             command("docker", "exec", self.name, "python", "-c", verification_script).stdout
         )
-        if details != {"panels": 53, "ids": sorted(target_ids), "timeGroups": 4, "absoluteDays": 31}:
+        if details != {
+            "panels": 53,
+            "ids": sorted(target_ids),
+            "timeGroups": 4,
+            "minLanes": 2,
+            "maxLanes": 8,
+            "absoluteDays": 31,
+        }:
             raise AssertionError(f"Invalid generated comparison dashboard: {details}")
         command(
             "docker", "exec", self.name, "test", "-f",

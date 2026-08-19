@@ -100,6 +100,8 @@ class ProvisioningTest(unittest.TestCase):
         self.assertIn("SBM two (SBM)", variable["options"][1]["text"])
         self.assertEqual(["first", "second"], [value["id"] for value in generated["sbkDashboardComparisonTargets"]])
         self.assertEqual(4, generated["sbkDashboardComparisonPolicy"]["maxTimeGroups"])
+        self.assertEqual(2, generated["sbkDashboardComparisonPolicy"]["minSingleTargetTimeLanes"])
+        self.assertEqual(8, generated["sbkDashboardComparisonPolicy"]["maxTimeLanes"])
         self.assertEqual(31, generated["sbkDashboardComparisonPolicy"]["maxAbsoluteRangeDays"])
         legends = _values_for_key(generated, "legendFormat")
         self.assertTrue(all("{{sbk_dashboard_name}}" in legend for legend in legends))
@@ -127,13 +129,14 @@ class ProvisioningTest(unittest.TestCase):
         files = list((self.directory / "dashboards").glob("sbk-comparison-*.json"))
         self.assertEqual([f"{first_uid}.json"], [path.name for path in files])
 
-    def test_generated_comparison_requires_two_to_eight_unique_targets(self):
+    def test_generated_comparison_supports_one_target_and_requires_unique_targets(self):
         first = target("first")
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
-            self.provisioner.generated_comparison_dashboard([first])
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
+        generated = self.provisioner.generated_comparison_dashboard([first])
+        self.assertEqual(["first"], generated["sbkDashboardComparisonEndpointIds"])
+        self.assertEqual(1, generated["sbkDashboardComparisonPolicy"]["minTargets"])
+        with self.assertRaisesRegex(ValueError, "1–8 unique endpoints"):
             self.provisioner.generated_comparison_dashboard([first, first])
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
+        with self.assertRaisesRegex(ValueError, "1–8 unique endpoints"):
             self.provisioner.generated_comparison_dashboard(
                 [target(f"target-{index}", 9718 + index) for index in range(9)]
             )

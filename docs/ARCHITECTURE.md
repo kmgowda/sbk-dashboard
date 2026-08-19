@@ -136,10 +136,13 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 8. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
 9. `dashboard-mappings.json` records the deterministic relationship.
 
-The comparison API normalizes 2–8 unique registered endpoint IDs by sorting them and derives
+The comparison API normalizes 1–8 unique registered endpoint IDs by sorting them and derives
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
 descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
-classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`.
+classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`. One
+endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. Lane
+count and range selections live only in validated URL state, so this mode does not duplicate registrations,
+descriptors, discovery entries, or Prometheus series.
 
 The frontend-only Grafana app uses Grafana Scenes to build one query scene per distinct time range after the view
 opens. Every target starts in one global live scene. Detaching a target creates or joins an independent relative-live

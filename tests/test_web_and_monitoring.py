@@ -259,9 +259,18 @@ class WebTest(unittest.TestCase):
 
     def test_rejects_invalid_comparison_selections(self):
         first = self.registry.register("One", "host", 9718, "/metrics")
+        single = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": [first.id]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(single) as response:
+            single_body = json.load(response)
+        self.assertTrue(single_body["dashboardId"].startswith("sbk-comparison-"))
         payloads = (
             {},
-            {"targetIds": [first.id]},
+            {"targetIds": []},
             {"targetIds": [first.id, first.id]},
             {"targetIds": [first.id, "missing"]},
             {"targetIds": [str(index) for index in range(9)]},

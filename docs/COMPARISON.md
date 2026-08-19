@@ -10,21 +10,28 @@ You may obtain a copy of the License at
 
 # Compare SBK and SBM results
 
-SBK Dashboard can compare 2–8 registered SBK or SBM targets in one Grafana view. All targets initially follow one
-global live time range. After the comparison opens, detach only the target whose time window must differ. This lets
-an operator begin with a normal live comparison, inspect the results, and then compare one current run with an older
-run without recreating the comparison.
+SBK Dashboard supports two additive comparison modes in one Grafana app:
+
+- select one registered target to compare that dashboard across two or more time ranges; or
+- select 2–8 registered SBK or SBM targets to compare different dashboards as before.
+
+Every lane initially follows one global live time range. After the comparison opens, detach only the lane whose time
+window must differ. Existing multi-target comparison URLs and behavior remain compatible.
 
 ## Use the comparison view
 
 1. Register every exporter on the SBK Dashboard landing page.
-2. Select 2–8 target checkboxes and choose **Compare selected**.
+2. Select one target and choose **Compare time ranges**, or select 2–8 targets and choose **Compare selected**.
 3. Use the Grafana time picker in **Global live range** to inspect all targets together.
 4. In a target card, select one of these modes:
    - **Follow global live range** — stays synchronized with the global picker and refreshes with incoming samples.
    - **Independent live range** — uses its own relative window, such as the last 15 minutes, and continues refreshing.
    - **Fixed historical range** — uses explicit local date/time values and does not move with wall-clock time.
 5. Choose **Follow global** to attach that target to the global range again.
+
+For a single target, the app creates **Range 1** and **Range 2** controls. Use **Add time range** to create another
+lane, up to eight, or **Remove last range** to return toward the two-lane minimum. The lanes all query the same
+endpoint-scoped dashboard; they do not duplicate registrations, Prometheus targets, or descriptor files.
 
 For example, keep `Board A` on **Follow global live range**, set the global picker to `Last 5 minutes`, and change
 `Board B` to a fixed range covering yesterday's benchmark. Board A continues to show incoming values while Board B
@@ -60,7 +67,7 @@ to a different range creates a second group. Moving a third target to that same 
 
 The comparison is deliberately bounded:
 
-- at most eight targets;
+- one endpoint with 2–8 time lanes, or 2–8 distinct endpoints;
 - at most four distinct time groups;
 - at most 31 days in one fixed historical range; and
 - at most 128 cached comparison descriptors.
@@ -92,9 +99,12 @@ flowchart TB
 
 ## Bookmark and API behavior
 
-The selected endpoint set determines the stable `sbk-comparison-<16-hex>` ID. Selection order does not matter, and
+The selected endpoint set determines the stable `sbk-comparison-<16-hex>` ID, including a one-endpoint set.
+Selection order does not matter, and
 requesting the same set again returns the same ID and URL. Time choices are browser state encoded in the Grafana app
-URL; changing time ranges does not create another dashboard file or mutate endpoint registrations.
+URL; changing time ranges does not create another dashboard file or mutate endpoint registrations. For one target,
+the URL also stores the bounded lane count. Existing multi-target bookmarks retain their original endpoint-keyed
+time state.
 
 ```bash
 curl --fail --request POST http://127.0.0.1:9721/api/comparison-dashboard \
@@ -114,6 +124,7 @@ The response contains:
 
 Use `dashboardUrl` for independent ranges. `classicDashboardUrl` is a compatibility fallback: it renders the exact
 provisioned canonical dashboard with one Grafana-wide range and cannot assign different ranges to individual targets.
+For a one-target request, that fallback is the ordinary single-range rendering, not a multi-range view.
 
 ## Implementation
 
@@ -123,7 +134,8 @@ directory before Grafana starts. Grafana provisions the app for the anonymous Vi
 runtime, npm install, additional process, service, port, or network download is required in source, portable, wheel,
 or container deployments.
 
-The app loads only a validated `sbk-comparison-*` descriptor through Grafana's same-origin API. It converts the
+The app loads only a validated `sbk-comparison-*` descriptor through Grafana's same-origin API. For one target it
+creates deterministic `Range N` browser lanes; for multiple targets it retains one lane per endpoint. It converts the
 canonical dashboard to Grafana Scenes, preserving its six named rows, expanded/collapsed state, exact 24-column
 panel positions, and panel heights in every time group. It replaces the descriptor's endpoint-variable token with
 the IDs assigned to each time group and uses the already provisioned Prometheus datasource. Endpoint IDs are fixed
@@ -157,6 +169,8 @@ sequenceDiagram
   elapsed-time origin.
 - `datetime-local` values use the browser's local time zone; Grafana and Prometheus exchange absolute timestamps.
 - A live exporter can be compared with retained history. A stopped exporter can still show retained samples.
+- Two lanes may intentionally use the same range. Identical selections share one bounded query group until one lane
+  is changed.
 - Removing a registered endpoint invalidates cached comparisons containing it during reconciliation.
 - The app is bundled but intentionally unsigned. The generated Grafana configuration permits only the exact
   `kmg-sbkcomparison-app` ID; do not broaden the unsigned-plugin allowlist.

@@ -13,6 +13,7 @@ import type {DataTransformerConfig} from '@grafana/data';
 export type TimeMode = 'global' | 'relative' | 'absolute';
 
 export interface TargetDescriptor {id: string; name: string; kind: string; address: string;}
+export interface ComparisonLane {id: string; label: string; target: TargetDescriptor;}
 export interface TargetTimeSelection {
   mode: TimeMode;
   relativeFrom?: string;
@@ -26,6 +27,7 @@ export interface TimeGroup {
   from: string;
   to: string;
   targetIds: string[];
+  laneIds: string[];
 }
 export interface DashboardPanel {
   type?: string;
@@ -62,6 +64,8 @@ export interface ComparisonDashboard {
 export interface ComparisonPolicy {
   minTargets: number;
   maxTargets: number;
+  minSingleTargetTimeLanes?: number;
+  maxTimeLanes?: number;
   maxTimeGroups: number;
   maxAbsoluteRangeDays: number;
 }

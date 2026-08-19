@@ -10,6 +10,13 @@ You may obtain a copy of the License at
 
 # Migration from the Java implementation
 
+## Single-dashboard multi-range comparison
+
+The comparison API now accepts one registered endpoint as well as the existing 2–8 endpoint sets. Selecting one
+endpoint opens two time lanes for the same canonical dashboard and permits adding up to eight lanes. Lane count and
+range selections are URL-only browser state. No registration, discovery, persistence, or native-process format
+changes are required. Existing multi-target comparison IDs, URLs, and behavior remain compatible.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]

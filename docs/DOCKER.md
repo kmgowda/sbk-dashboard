@@ -108,7 +108,8 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 Use a pinned release in production instead of `latest`; use its immutable manifest digest where change control
 requires byte-identical deployment. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
-The per-target-time comparison app is already present in the Python package and is atomically installed into the
+The comparison app, including one-target multi-range lanes and the existing per-target range controls, is already
+present in the Python package and is atomically installed into the
 persistent managed Grafana directory on startup. The runtime image does not include Node.js/npm and does not fetch a
 plugin from the network. The exact app ID is the only unsigned plugin allowed by generated Grafana configuration.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
