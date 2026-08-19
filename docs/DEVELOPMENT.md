@@ -194,4 +194,5 @@ python scripts/sync_release_metadata.py
 ```
 
 Follow [Docker Hub publishing](DOCKER_HUB.md) for image release gates and [Portable installation](PORTABLE.md) for
-standalone artifacts. Do not create a tag until version, packages, documentation, and both architecture gates agree.
+standalone artifacts. Use [Release publishing](RELEASING.md) for the guarded cross-platform command. Do not create a
+tag until version, packages, documentation, and both architecture gates agree.

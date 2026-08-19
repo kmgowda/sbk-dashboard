@@ -29,6 +29,10 @@ case "$COMMAND" in
         shift
         exec "$ROOT/scripts/sbk-dashboard-launch.sh" repair "$@"
         ;;
+    release)
+        shift
+        exec "$ROOT/scripts/release-sbk-dashboard.sh" "$@"
+        ;;
     *)
         exec "$ROOT/scripts/start-sbk-dashboard.sh" "$@"
         ;;

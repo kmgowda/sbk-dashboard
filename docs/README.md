@@ -74,6 +74,7 @@ flowchart LR
 | [Implementation internals](INTERNALS.md) | Which module owns each call path, lock, process, and persistent file? |
 | [Development](DEVELOPMENT.md) | How do I set up, navigate, change, and validate the repository? |
 | [Testing](TESTING.md) | Which automated and live checks prove a change? |
+| [Release publishing](RELEASING.md) | How does one guarded command create the tag, notes, artifacts, and signed image? |
 | [Migration](MIGRATION.md) | What compatibility and upgrade behavior must operators know? |
 | [Docker Hub publishing](DOCKER_HUB.md) | How are multi-architecture images built, verified, signed, and published? |
 | [AI agent guide](AI_AGENTS.md) | How should Codex, Devin, Cursor, Windsurf, and other agents work here? |
