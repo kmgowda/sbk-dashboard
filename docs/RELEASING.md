@@ -10,8 +10,10 @@ You may obtain a copy of the License at
 
 # Publish a complete release
 
-Use the source-checkout `sbk-dashboard release` command to publish one version consistently from Linux, macOS, or
-Windows. The command creates no local platform substitutes: GitHub-hosted Linux, Apple-silicon macOS, Windows, and
+Use the dedicated source-checkout release command to publish one version consistently from Linux, macOS, or Windows.
+The runtime `sbk-dashboard`, `sbk-dashboard.ps1`, and `sbk-dashboard.cmd` launchers are not involved and retain only
+their portable application behavior. The release command creates no local platform substitutes: GitHub-hosted Linux,
+Apple-silicon macOS, Windows, and
 native ARM64 runners build and validate their own artifacts. Docker publishing remains in the existing gated
 container workflow.
 
@@ -116,14 +118,14 @@ git status --short --branch
 Linux or macOS:
 
 ```bash
-./sbk-dashboard release check
+./release-sbk-dashboard.sh check
 ```
 
 Windows PowerShell or Command Prompt:
 
 ```powershell
-.\sbk-dashboard.ps1 release check
-.\sbk-dashboard.cmd release check
+.\Release-SbkDashboard.ps1 check
+.\release-sbk-dashboard.cmd check
 ```
 
 The command prints the repository, commit, version, planned tag, Docker tags, GitHub Release URL, and every required
@@ -135,7 +137,7 @@ For local development of the command itself, the offline option uses the fetched
 network APIs. A clean feature branch can validate local metadata and command wiring without releasing anything:
 
 ```bash
-./sbk-dashboard release check --allow-branch --offline
+./release-sbk-dashboard.sh check --allow-branch --offline
 ```
 
 Offline validation cannot prove current CI, GitHub tag/release, or Docker registry state. `publish` deliberately has
@@ -147,12 +149,12 @@ Export the GitHub token without placing it on the command line, then repeat the 
 
 ```bash
 export GITHUB_TOKEN='<token-from-secure-credential-store>'
-./sbk-dashboard release publish --confirm v1.26.8.4
+./release-sbk-dashboard.sh publish --confirm v1.26.8.4
 ```
 
 ```powershell
 $env:GITHUB_TOKEN = '<token-from-secure-credential-store>'
-.\sbk-dashboard.ps1 release publish --confirm v1.26.8.4
+.\Release-SbkDashboard.ps1 publish --confirm v1.26.8.4
 ```
 
 Publication is intentionally bounded but may run for up to two hours while native container and portable jobs

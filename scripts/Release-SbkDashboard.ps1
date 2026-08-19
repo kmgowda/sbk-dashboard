@@ -21,7 +21,7 @@ if ($env:VIRTUAL_ENV -and (Test-Path -LiteralPath (Join-Path $env:VIRTUAL_ENV 'S
     if (-not $PythonCommand) { $PythonCommand = Get-Command python -ErrorAction SilentlyContinue }
     if ($PythonCommand) {
         $Python = $PythonCommand.Source
-        if ($PythonCommand.Name -like 'py*') { $PythonArguments = @('-3') }
+        if ($PythonCommand.Name -in @('py', 'py.exe')) { $PythonArguments = @('-3') }
     }
 }
 

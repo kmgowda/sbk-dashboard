@@ -380,9 +380,9 @@ secrets in the GitHub repository settings:
 Use the guarded release command after the version PR is merged to `main`:
 
 ```bash
-./sbk-dashboard release check
+./release-sbk-dashboard.sh check
 export GITHUB_TOKEN='<token-from-secure-credential-store>'
-./sbk-dashboard release publish --confirm "v$SBK_VERSION"
+./release-sbk-dashboard.sh publish --confirm "v$SBK_VERSION"
 ```
 
 `GITHUB_TOKEN` must authenticate GitHub user `kmgowda`; the release command rejects another user or repository.

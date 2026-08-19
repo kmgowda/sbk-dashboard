@@ -35,6 +35,9 @@ include scripts/stop-sbk-dashboard.sh
 include sbk-dashboard
 include sbk-dashboard.ps1
 include sbk-dashboard.cmd
+include release-sbk-dashboard.sh
+include Release-SbkDashboard.ps1
+include release-sbk-dashboard.cmd
 recursive-include docs *.md
 include grafana-plugin/LICENSE
 include grafana-plugin/package.json

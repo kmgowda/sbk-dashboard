@@ -21,6 +21,5 @@ switch ($Command) {
         & (Join-Path $Root 'scripts\Invoke-SbkDashboard.ps1') repair @Remaining
         exit $LASTEXITCODE
     }
-    'release' { & (Join-Path $Root 'scripts\Release-SbkDashboard.ps1') @Remaining; exit $LASTEXITCODE }
     default { & (Join-Path $Root 'scripts\Start-SbkDashboard.ps1') @Selected; exit $LASTEXITCODE }
 }

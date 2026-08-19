@@ -291,11 +291,19 @@ class ReleaseContractTest(unittest.TestCase):
             order,
         )
 
-    def test_root_commands_dispatch_release_without_starting_dashboard(self):
+    def test_release_has_dedicated_root_commands(self):
         shell = (ROOT / "sbk-dashboard").read_text(encoding="utf-8")
         powershell = (ROOT / "sbk-dashboard.ps1").read_text(encoding="utf-8")
-        self.assertIn("release-sbk-dashboard.sh", shell)
-        self.assertIn("Release-SbkDashboard.ps1", powershell)
+        self.assertNotIn("release-sbk-dashboard", shell.lower())
+        self.assertNotIn("release-sbk-dashboard", powershell.lower())
+        dedicated_shell = (ROOT / "release-sbk-dashboard.sh").read_text(encoding="utf-8")
+        dedicated_powershell = (ROOT / "Release-SbkDashboard.ps1").read_text(encoding="utf-8")
+        dedicated_command = (ROOT / "release-sbk-dashboard.cmd").read_text(encoding="utf-8")
+        self.assertIn("scripts/release-sbk-dashboard.sh", dedicated_shell)
+        self.assertIn("scripts\\Release-SbkDashboard.ps1", dedicated_powershell)
+        self.assertIn("Release-SbkDashboard.ps1", dedicated_command)
+        implementation = (ROOT / "scripts/Release-SbkDashboard.ps1").read_text(encoding="utf-8")
+        self.assertIn("@('py', 'py.exe')", implementation)
 
     def test_portable_workflow_publishes_only_after_all_builds(self):
         workflow = (ROOT / ".github/workflows/portable.yml").read_text(encoding="utf-8")
