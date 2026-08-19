@@ -8,6 +8,7 @@
 ##
 
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -108,6 +109,37 @@ class ReleaseContractTest(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "supported GitHub"):
             release.repository_from_remote("https://example.test/project.git")
 
+    def test_release_repository_is_always_owned_by_kmgowda(self):
+        git = Mock()
+        git.clean.return_value = True
+        git.branch.return_value = "main"
+        git.commit.return_value = COMMIT
+        git.tracked_commit.return_value = COMMIT
+        git.remote_url.return_value = "https://github.com/another/sbk-dashboard.git"
+        with (
+            patch.object(release, "package_version", return_value=VERSION),
+            patch.object(release, "synchronize", return_value=[]),
+            self.assertRaisesRegex(release.ReleaseError, "kmgowda/sbk-dashboard"),
+        ):
+            release.resolve_plan(
+                git,
+                remote="origin",
+                branch="main",
+                repository=None,
+                image="kmgowda/sbk-dashboard",
+                allow_branch=False,
+                online=False,
+            )
+
+    def test_release_token_must_authenticate_kmgowda(self):
+        github = release.GitHubClient("kmgowda/sbk-dashboard", "token")
+        github.api = Mock()
+        github.api.request.return_value = (200, {"login": "another"})
+        with self.assertRaisesRegex(release.ReleaseError, "kmgowda"):
+            github.require_release_user()
+        github.api.request.return_value = (200, {"login": "kmgowda"})
+        github.require_release_user()
+
     def test_matching_workflow_is_exact_commit_and_branch(self):
         runs = [
             {"head_sha": "b" * 40, "head_branch": "main"},
@@ -182,6 +214,18 @@ class ReleaseContractTest(unittest.TestCase):
             self.assertRaisesRegex(SystemExit, "--confirm"),
         ):
             release.main(["publish", "--confirm", "v9.9.9.9"])
+        publish.assert_not_called()
+
+    def test_noncanonical_token_variable_is_not_accepted(self):
+        selected = plan()
+        noncanonical_name = "".join(("GH", "_TOKEN"))
+        with (
+            patch.object(release, "resolve_plan", return_value=selected),
+            patch.dict(os.environ, {noncanonical_name: "legacy-token"}, clear=True),
+            patch.object(release, "publish") as publish,
+            self.assertRaisesRegex(SystemExit, "GITHUB_TOKEN is required"),
+        ):
+            release.main(["publish", "--confirm", selected.tag])
         publish.assert_not_called()
 
     def test_wait_arguments_are_finite_and_bounded(self):

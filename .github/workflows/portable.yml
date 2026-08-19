@@ -97,6 +97,6 @@ jobs:
           --tag "$RELEASE_TAG" --commit "$GITHUB_SHA"
       - name: Attach complete artifact set to the GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$RELEASE_TAG" dist/release/*

@@ -83,12 +83,13 @@ Run from a source checkout after the version change has been reviewed and merged
 - `src/sbk_dashboard/version.py` and every synchronized release reference contain the intended version.
 - The exact `main` commit has a successful `ci.yml` push run.
 - Git can push to `origin` using the normal credential manager, SSH agent, or other secure Git configuration.
-- `GH_TOKEN` or `GITHUB_TOKEN` is a GitHub token authorized to read Actions and create releases in this repository.
+- `GITHUB_TOKEN` belongs to GitHub user `kmgowda` and is authorized to read Actions and create releases in
+  `kmgowda/sbk-dashboard`. The command rejects another authenticated login or repository owner.
 - Repository Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are configured as described in
   [`DOCKER_HUB.md`](DOCKER_HUB.md).
 
 Do not put GitHub or Docker tokens in command arguments, tracked files, shell history, or committed environment
-files. The release command reads only `GH_TOKEN` or `GITHUB_TOKEN` from its environment; Docker credentials remain
+files. The release command reads only `GITHUB_TOKEN` from its environment; Docker credentials remain
 inside GitHub Actions.
 
 ## Prepare the version
@@ -145,12 +146,12 @@ no branch or offline override and still requires the checked-out commit to equal
 Export the GitHub token without placing it on the command line, then repeat the exact tag printed by `check`:
 
 ```bash
-export GH_TOKEN='<token-from-secure-credential-store>'
+export GITHUB_TOKEN='<token-from-secure-credential-store>'
 ./sbk-dashboard release publish --confirm v1.26.8.4
 ```
 
 ```powershell
-$env:GH_TOKEN = '<token-from-secure-credential-store>'
+$env:GITHUB_TOKEN = '<token-from-secure-credential-store>'
 .\sbk-dashboard.ps1 release publish --confirm v1.26.8.4
 ```
 

@@ -39,6 +39,8 @@ from sync_release_metadata import package_version, synchronize  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REMOTE = "origin"
 DEFAULT_BRANCH = "main"
+EXPECTED_GITHUB_USER = "kmgowda"
+DEFAULT_REPOSITORY = f"{EXPECTED_GITHUB_USER}/sbk-dashboard"
 DEFAULT_IMAGE = "kmgowda/sbk-dashboard"
 CI_WORKFLOW = "ci.yml"
 CONTAINER_WORKFLOW = "container.yml"
@@ -188,6 +190,15 @@ class GitHubClient:
     def _path(self, suffix: str) -> str:
         return f"/repos/{self.repository}{suffix}"
 
+    def require_release_user(self) -> None:
+        """Require the personal release token to belong to the project owner."""
+        _, response = self.api.request("GET", "/user")
+        login = response.get("login")
+        if login != EXPECTED_GITHUB_USER:
+            raise ReleaseError(
+                f"GITHUB_TOKEN must authenticate as {EXPECTED_GITHUB_USER!r}, not {login!r}"
+            )
+
     def release(self, tag: str) -> dict[str, Any] | None:
         status, response = self.api.request(
             "GET", self._path(f"/releases/tags/{urllib.parse.quote(tag, safe='')}")
@@ -278,6 +289,10 @@ def resolve_plan(
     selected_repository = repository or repository_from_remote(git.remote_url(remote))
     if REPOSITORY_PATTERN.fullmatch(selected_repository) is None:
         raise ReleaseError(f"Invalid GitHub repository: {selected_repository!r}")
+    if selected_repository != DEFAULT_REPOSITORY:
+        raise ReleaseError(
+            f"GitHub repository must be {DEFAULT_REPOSITORY!r}, not {selected_repository!r}"
+        )
     if "/" not in image:
         raise ReleaseError(f"Docker image must include its namespace: {image!r}")
     return ReleasePlan(
@@ -493,7 +508,9 @@ def parser() -> argparse.ArgumentParser:
     command = argparse.ArgumentParser(description=__doc__)
     command.add_argument("--remote", default=DEFAULT_REMOTE)
     command.add_argument("--branch", default=DEFAULT_BRANCH)
-    command.add_argument("--repository", help="GitHub owner/name; defaults to the selected remote")
+    command.add_argument(
+        "--repository", help=f"GitHub owner/name; must be {DEFAULT_REPOSITORY}"
+    )
     command.add_argument("--image", default=DEFAULT_IMAGE)
     subcommands = command.add_subparsers(dest="action", required=True)
     check = subcommands.add_parser("check", help="validate and print the release plan without publishing")
@@ -530,8 +547,10 @@ def main(arguments: list[str] | None = None) -> int:
         print_plan(plan)
         if selected.action == "check":
             if not selected.offline:
-                token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+                token = os.environ.get("GITHUB_TOKEN")
                 github = GitHubClient(plan.repository, token)
+                if token:
+                    github.require_release_user()
                 release = github.release(plan.tag)
                 if release is not None:
                     raise ReleaseError(f"GitHub Release {plan.tag} already exists: {release.get('html_url', '')}")
@@ -543,12 +562,14 @@ def main(arguments: list[str] | None = None) -> int:
             return 0
         if selected.confirm != plan.tag:
             raise ReleaseError(f"--confirm must exactly equal {plan.tag!r}")
-        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        token = os.environ.get("GITHUB_TOKEN")
         if not token:
-            raise ReleaseError("GH_TOKEN or GITHUB_TOKEN is required for release publication")
+            raise ReleaseError("GITHUB_TOKEN is required for release publication")
+        github = GitHubClient(plan.repository, token)
+        github.require_release_user()
         publish(
             git,
-            GitHubClient(plan.repository, token),
+            github,
             DockerHubClient(plan.image),
             plan,
             resume=selected.resume,
