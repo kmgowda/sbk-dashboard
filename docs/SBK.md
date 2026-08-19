@@ -153,7 +153,9 @@ scrape.
 ### 5. Open and interpret the dashboard
 
 After the target changes from `pending` to `up`, select **Open dashboard**. Each registered `host:port` receives a
-stable, isolated dashboard. Choose a Grafana time range that includes the benchmark run.
+stable, isolated dashboard. A new dashboard may briefly show the SBK preparation page while Grafana imports its file;
+the page redirects automatically only after the UID is ready, so Grafana's transient `Dashboard not found` state is
+not exposed. Choose a Grafana time range that includes the benchmark run.
 
 Target states have these meanings:
 
@@ -166,7 +168,8 @@ The dashboard is based on SBK's `SBK_*` series. SBK identifies direct measuremen
 includes storage class and read/write action labels. Prometheus adds `sbk_endpoint_id`, which keeps dashboards for
 different registered endpoints isolated.
 
-To compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
+To compare one result across multiple time windows, select its endpoint and choose **Compare time ranges**. To
+compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
 checkboxes, and choose **Compare selected**. The selector displays name, type, and exporter address; chart legends
 show the registered dashboard name and type plus the immutable endpoint ID. All targets begin on one global live
 range. A target can then use an independent relative-live or fixed historical range and later rejoin global time.

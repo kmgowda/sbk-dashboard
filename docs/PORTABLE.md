@@ -145,6 +145,25 @@ marker. The executable hash is rechecked before every cached launch. Installatio
 uses a per-version/platform lock, bounded download, safe archive inspection, sibling staging, and atomic directory
 promotion. A failed checksum, unsafe entry, interruption, or failed promotion cannot select the partial runtime.
 
+### Bootstrap policy ownership
+
+Dependency-free bootstrap bounds are defined once in `scripts/portable-bootstrap.properties`. The POSIX installer,
+PowerShell installer, and Python source-runtime bootstrap consume that file instead of carrying separate timeout or
+retry literals:
+
+| Property | Purpose |
+|---|---|
+| `archive.max.bytes` / `checksum.max.bytes` | Maximum release archive and checksum response sizes |
+| `checksum.hex.characters` | Required SHA-256 hexadecimal length |
+| `download.connect.seconds` / `download.timeout.seconds` | Connection and whole-transfer time bounds |
+| `download.attempts` / `download.buffer.bytes` | Bounded retries and streaming buffer size |
+| `lock.wait.seconds` / `lock.stale.seconds` | Maximum lock wait and stale-lock age |
+| `lock.poll.milliseconds` | Cross-platform lock polling interval |
+
+These are release-engineering policy values, not public application options. Change them only with installer tests
+on Linux, macOS, and Windows. Application runtime defaults and bounded environment overrides remain owned by
+`src/sbk_dashboard/contracts.py` and are documented in [`CONFIGURATION.md`](CONFIGURATION.md).
+
 ## Offline use, repair, and upgrades
 
 The first Python source bootstrap requires access to the configured package index unless dependencies are cached.

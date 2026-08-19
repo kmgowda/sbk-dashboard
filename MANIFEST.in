@@ -41,4 +41,4 @@ recursive-include grafana-plugin/src *.json *.md *.ts *.tsx *.css
 recursive-include grafana-plugin/tests *.ts
 prune grafana-plugin/node_modules
 prune grafana-plugin/.jest-cache
-recursive-include src/sbk_dashboard/resources/grafana/plugins/kmg-sbkcomparison-app *
+recursive-include src/sbk_dashboard/resources/grafana/plugins/sbkcomparison-app *

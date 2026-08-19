@@ -28,7 +28,7 @@ The current release is `1.26.8.3`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
-- A deterministic comparison view for any 2–8 selected SBK or SBM endpoints, with shared or per-target live and
+- A deterministic comparison view for one endpoint across multiple ranges or any 2–8 SBK/SBM endpoints, with shared or per-target live and
   historical ranges, a reusable ID, and a shareable URL.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
@@ -362,6 +362,13 @@ asset URLs and also requires browsers to revalidate those resources. Runtime pol
 the fingerprint just like source edits do. This prevents an upgrade from combining new HTML with an older cached
 script and displaying stale endpoint counters.
 
+**Open dashboard** and comparison actions use read-only readiness gateways rather than navigating directly to a
+newly written Grafana UID. Grafana's health endpoint can become ready before its asynchronous file provider imports
+that UID, so direct navigation previously produced a random short-lived `Dashboard not found` page. The gateway
+performs one bounded loopback readiness probe per browser refresh and redirects to the normal host-aware Grafana URL
+only after HTTP 200. REST responses retain direct `dashboardUrl` values and also provide relative `dashboardOpenUrl`
+values; the per-target dashboard endpoint reports `ready` for API clients.
+
 The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
 opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,
 and clicking **Open dashboard** records that browser in a five-minute Grafana-open window. IDs and timestamps are
@@ -615,14 +622,21 @@ the existing endpoint and dashboard ID; the initial creation returns HTTP 201. N
 Conflicting metadata for an already registered `host:port` is rejected instead of silently replacing its scrape
 configuration.
 
-The landing page also provides a checkbox beside every endpoint. Select 2–8 endpoints and choose **Compare
-selected** to open the comparison app. Every target initially follows one global live range; after it opens, a
+The landing page also provides a checkbox beside every endpoint. Select one endpoint and choose **Compare time
+ranges** to open two independently configurable lanes for the same dashboard, with controls to add up to eight
+lanes. Or select 2–8 endpoints and choose **Compare selected** to retain the multi-target behavior. Every lane
+initially follows one global live range; after it opens, a
 target can be detached to an independent relative-live range or a fixed historical range and later rejoined. Targets
 with identical ranges share one bounded query group. The sorted endpoint-ID set produces a deterministic
 `sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
 same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
-Comparison is bounded to four distinct time groups and a 31-day fixed range; the generated descriptor cache is
+Comparison is bounded to eight lanes/targets, four distinct time groups, and a 31-day fixed range; the generated descriptor cache is
 bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
+Grafana imports a newly generated descriptor asynchronously. The landing page first opens the response's
+`dashboardOpenUrl`, which probes that exact UID through the control plane and redirects into the app only after
+Grafana has imported it. The app retains its bounded, low-frequency 37.5-second readiness window as defense in depth,
+so an ordinary provider cycle does not require closing or reopening the comparison. The classic single-range
+fallback uses the same provisioned descriptor.
 The packaged comparison plugin carries a deterministic build revision, so restarting after a source update makes
 Grafana and the browser load the matching descriptor handling and canonical row layout instead of an older cached
 module. Reload any comparison tab that was already open before the restart.
@@ -644,7 +658,7 @@ See the [comparison guide](docs/COMPARISON.md) for examples, controls, limits, a
     │   └── data/                  # persistent Prometheus TSDB
     ├── grafana/
     │   ├── grafana.ini
-    │   ├── data/
+    │   ├── data/                  # Grafana database and installed app
     │   ├── provisioning/
     │   └── dashboards/            # sbk-<endpoint-id>.json
     └── logs/

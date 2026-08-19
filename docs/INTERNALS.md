@@ -50,8 +50,9 @@ exact-version portable archive and adjacent checksum, enforces bounded transfer 
 verified staging tree under `<home>/distributions/<version>/<platform>`. A valid cached tree bypasses the network.
 Both paths hand the launcher an environment kind, location, and fresh/reused/repaired state; the launcher combines
 that with OS and interpreter details before acquiring instance state or native processes.
-The repository URL and bootstrap transfer/lock bounds are shared through `scripts/portable-bootstrap.properties`
-so the dependency-free Unix and Windows implementations consume one policy contract.
+The repository URL plus checksum, transfer, retry, buffer, and lock bounds are shared through
+`scripts/portable-bootstrap.properties`, so the Python source bootstrap and dependency-free Unix/Windows installers
+consume one policy contract.
 Foreground mode then calls
 `main.main()` in the console-attached helper process. The PyInstaller entry routes lifecycle verbs through the same
 launcher and uses internal executable modes for its dashboard child and watcher. On Windows, an identity-specific stop-request file is watched
@@ -205,19 +206,24 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
-`POST /api/comparison-dashboard` validates 2–8 unique registered IDs, sorts the set, and derives a stable
+`POST /api/comparison-dashboard` validates 1–8 unique registered IDs, sorts the set, and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
-provisioned-dashboard fallback URL. Repeating the same set in any order reuses the UID and file. The descriptor adds
+provisioned-dashboard fallback URL. It also returns a relative readiness URL; the landing page uses this gateway
+instead of entering the Grafana app before the descriptor UID exists. Repeating the same set in any order reuses the
+UID, file, and canonical gateway URL. The descriptor adds
 a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
-legends retain the readable name, kind, and immutable endpoint ID.
+legends retain the readable name, kind, and immutable endpoint ID. Its title contains the UID digest so every cached
+descriptor is unique in Grafana's folder; Grafana disables file-provider writes when multiple files share a title.
+Repeated requests do not rewrite a byte-identical descriptor, avoiding unnecessary file-provider events.
 
 `grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
 `monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates
-the descriptor, groups identical target time selections, converts the canonical visual panels to Grafana Scenes,
+the descriptor, creates two bounded deterministic time lanes when it contains one target (or one lane per target for
+an existing multi-target comparison), groups identical lane selections, converts the canonical visual panels to Grafana Scenes,
 and scopes each scene's queries to its group. Global and relative scenes refresh; fixed historical scenes do not.
-Time state is URL-only and never enters `targets.json` or dashboard mappings. Four groups and a 31-day absolute span
-bound each view. The classic URL retains one Grafana-wide time range for compatibility.
+Time state and the 2–8 single-target lane count are URL-only and never enter `targets.json` or dashboard mappings.
+Four groups and a 31-day absolute span bound each view. The classic URL retains one Grafana-wide time range for compatibility.
 
 The source plugin descriptor uses the application version, while webpack derives the packaged plugin version as
 `<application-version>-build.<sha256-prefix>` from the frontend source tree, package metadata/lock, and build
@@ -225,12 +231,13 @@ configuration. Grafana keys the loaded browser module by this version. The deter
 when the committed module changes, preventing a same-release source update from serving an older cached comparison
 implementation; identical inputs still reproduce identical metadata and bundles.
 
-Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
-an explicit schema version. The comparison app treats HTTP 404 and an older or incomplete schema as transient
-provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
-Other backend errors fail immediately with their HTTP status. If the bounded retries expire, the view offers a
-manual retry instead of retaining an unrecoverable blank state. Reconciliation upgrades a cached descriptor from an
-older schema when all of its endpoint IDs remain registered.
+Grafana discovers descriptor files asynchronously on its provider polling interval. In Grafana 13 this interval can
+take about 30 seconds even when a shorter interval is configured. Each descriptor carries an explicit schema
+version. Schema 2 introduces unique provisioner titles; reconciliation rewrites schema-1 cached files on restart.
+The comparison app treats HTTP 404 and an older or incomplete schema as transient provisioning states. It performs
+11 exponentially spaced checks from 500 ms up to 5 seconds, covering a bounded 37.5-second window without rapid
+request or log amplification, and cancels pending timers when the view closes. Other backend errors fail immediately
+with their HTTP status. If the bounded window expires, the view offers a manual retry.
 
 Comparison files are a 128-entry modification-time cache guarded by the provisioner's existing lock. The current
 selection is never evicted during its write. Reconciliation bounded-reads managed comparison metadata, retains
@@ -250,6 +257,28 @@ it reacquires `_data_lock` and discards the response if reconciliation advanced 
 For a current response, the stack builds a complete replacement status dictionary. A registered endpoint omitted
 by Prometheus becomes `down`; it does not remain `pending` indefinitely. Readers receive already-published snapshots
 without network waits. Repeated identical refresh failures produce one warning until the error changes or recovers.
+
+## Dashboard readiness
+
+Writing `monitoring/grafana/dashboards/sbk-<id>.json` and Grafana serving that UID are separate events. Grafana's
+health endpoint may already be green while its asynchronous file provider is between scans. `dashboardUrl` remains
+the stable direct Grafana URL for API compatibility, while each target view also exposes `dashboardOpenUrl`, the
+relative `GET /dashboards/<id>` readiness gateway used by the landing page.
+
+The gateway calls `ManagedMonitoringStack.dashboard_ready()` once per request. That method queries only the managed
+Grafana loopback UID API with a one-second timeout and never reads an unbounded body. HTTP 404, timeout, or temporary
+connection failure means “not imported yet.” The gateway returns a `no-store` HTTP 202 preparation page and advances
+one browser-owned exponential refresh step. It never sleeps in a server worker. After the centrally bounded
+37.5-second sequence it returns a friendly HTTP 503 page with manual retry; on readiness it redirects to the direct
+URL using the validated management request hostname. `GET /api/targets/<id>/dashboard` also includes a `ready`
+boolean for non-browser clients that need to avoid the same provisioning race.
+
+Comparison opens use the same readiness contract. `POST /api/comparison-dashboard` retains `dashboardUrl` as the
+stable direct app URL and returns `dashboardOpenUrl=/comparisons/<uid>?targetId=...` for browsers. Each gateway
+request revalidates the registered, order-independent endpoint set, idempotently ensures its descriptor, and probes
+that exact comparison UID. It redirects into the app only after Grafana returns HTTP 200. This prevents Grafana's
+own generic `Dashboard not found` page from handling the expected first file-provider 404. The app's internal
+bounded descriptor retries remain defense in depth for a later provider refresh or replacement.
 
 ## HTTP concurrency and browser activity
 

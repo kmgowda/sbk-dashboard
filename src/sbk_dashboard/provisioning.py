@@ -19,15 +19,17 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
-from sbk_dashboard.files import atomic_json
+from sbk_dashboard.files import atomic_json, atomic_write
 from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
 COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
-COMPARISON_APP_PLUGIN_ID = "kmg-sbkcomparison-app"
-COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 1
-MIN_COMPARISON_TARGETS = 2
+COMPARISON_APP_PLUGIN_ID = "sbkcomparison-app"
+COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2
+MIN_COMPARISON_TARGETS = 1
 MAX_COMPARISON_TARGETS = 8
+MIN_SINGLE_TARGET_TIME_LANES = 2
+MAX_COMPARISON_TIME_LANES = 8
 MAX_COMPARISON_TIME_GROUPS = 4
 MAX_COMPARISON_ABSOLUTE_RANGE_DAYS = 31
 MAX_COMPARISON_DASHBOARDS = 128
@@ -129,7 +131,7 @@ class GrafanaDashboardProvisioner:
         dashboard = copy.deepcopy(self._canonical)
         dashboard["id"] = None
         dashboard["uid"] = self.comparison_dashboard_uid(target_ids)
-        dashboard["title"] = "SBK/SBM Live Comparison"
+        dashboard["title"] = f"SBK/SBM Comparison — {str(dashboard['uid']).removeprefix(COMPARISON_DASHBOARD_PREFIX)}"
         dashboard["version"] = 1
         dashboard["sbkDashboardComparisonSchemaVersion"] = COMPARISON_DESCRIPTOR_SCHEMA_VERSION
         dashboard["sbkDashboardComparisonEndpointIds"] = target_ids
@@ -145,6 +147,8 @@ class GrafanaDashboardProvisioner:
         dashboard["sbkDashboardComparisonPolicy"] = {
             "minTargets": MIN_COMPARISON_TARGETS,
             "maxTargets": MAX_COMPARISON_TARGETS,
+            "minSingleTargetTimeLanes": MIN_SINGLE_TARGET_TIME_LANES,
+            "maxTimeLanes": MAX_COMPARISON_TIME_LANES,
             "maxTimeGroups": MAX_COMPARISON_TIME_GROUPS,
             "maxAbsoluteRangeDays": MAX_COMPARISON_ABSOLUTE_RANGE_DAYS,
         }
@@ -185,7 +189,7 @@ class GrafanaDashboardProvisioner:
         uid = str(dashboard["uid"])
         with self._lock:
             self.dashboard_directory.mkdir(parents=True, exist_ok=True)
-            atomic_json(self.dashboard_directory / f"{uid}.json", dashboard)
+            self._write_json_if_changed(self.dashboard_directory / f"{uid}.json", dashboard)
             self._prune_comparison_dashboards(uid)
         return uid
 
@@ -207,12 +211,22 @@ class GrafanaDashboardProvisioner:
                     continue
                 if not schema_current:
                     selected = [targets_by_id[target_id] for target_id in comparison_ids]
-                    atomic_json(path, self.generated_comparison_dashboard(selected))
+                    self._write_json_if_changed(path, self.generated_comparison_dashboard(selected))
                 expected.add(path)
             for path in self.dashboard_directory.glob("sbk-*.json"):
                 if path not in expected:
                     path.unlink(missing_ok=True)
             self._prune_comparison_dashboards("")
+
+    @staticmethod
+    def _write_json_if_changed(path: Path, value: dict[str, object]) -> None:
+        content = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode()
+        try:
+            if path.read_bytes() == content:
+                return
+        except OSError:
+            pass
+        atomic_write(path, content)
 
     @staticmethod
     def _comparison_descriptor(path: Path) -> tuple[list[str], bool] | None:

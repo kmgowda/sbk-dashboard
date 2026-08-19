@@ -100,7 +100,7 @@ function renderTarget(target) {
 
     const actions = element('div', 'target-actions');
     const dashboard = element('a', 'dashboard-link', 'Open dashboard ↗');
-    dashboard.href = target.dashboardUrl;
+    dashboard.href = target.dashboardOpenUrl;
     dashboard.target = '_blank';
     dashboard.rel = 'noopener';
     dashboard.addEventListener('click', () => reportActivity('grafana'));
@@ -114,7 +114,9 @@ function renderTarget(target) {
 
 function updateComparisonButton() {
     const count = selectedTargetIds.size;
-    compareButton.textContent = `Compare selected (${count}) ↗`;
+    compareButton.textContent = count === 1
+        ? 'Compare time ranges (1) ↗'
+        : `Compare selected (${count}) ↗`;
     compareButton.disabled = (
         count < UI_POLICY.minComparisonTargets || count > UI_POLICY.maxComparisonTargets
     );
@@ -210,8 +212,8 @@ compareButton.addEventListener('click', async () => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Unable to create comparison dashboard');
         reportActivity('grafana');
-        if (comparisonWindow) comparisonWindow.location.replace(body.dashboardUrl);
-        else window.location.assign(body.dashboardUrl);
+        if (comparisonWindow) comparisonWindow.location.replace(body.dashboardOpenUrl);
+        else window.location.assign(body.dashboardOpenUrl);
     } catch (error) {
         if (comparisonWindow) comparisonWindow.close();
         message.textContent = error.message;

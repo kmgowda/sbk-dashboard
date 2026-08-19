@@ -108,7 +108,8 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 Use a pinned release in production instead of `latest`; use its immutable manifest digest where change control
 requires byte-identical deployment. The image runs as UID/GID 10001, uses `tini` as PID 1,
 includes a control-plane health check, exposes only ports 9721 and 3000, and keeps Prometheus on container loopback.
-The per-target-time comparison app is already present in the Python package and is atomically installed into the
+The comparison app, including one-target multi-range lanes and the existing per-target range controls, is already
+present in the Python package and is atomically installed into the
 persistent managed Grafana directory on startup. The runtime image does not include Node.js/npm and does not fetch a
 plugin from the network. The exact app ID is the only unsigned plugin allowed by generated Grafana configuration.
 Its official Python 3.12/Debian stable base is pinned by complete patch version and immutable multi-architecture
@@ -120,6 +121,17 @@ Python build tools and the Linux AMD64/ARM64 `psutil` wheels are exact-version a
 that the installed application version equals the OCI `APPLICATION_VERSION` label input. Direct final-image Debian
 packages are exact-version locked in `requirements/container-os.txt`; the base image digest owns the remaining
 transitive OS inventory. Builds fail closed when a reviewed direct package version is no longer available.
+
+The native download behavior has named Docker build arguments for controlled build environments:
+
+| Build argument | Default | Purpose |
+|---|---:|---|
+| `NATIVE_DOWNLOAD_RETRIES` | `3` | Bounded `curl` attempts for a native archive |
+| `NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS` | `15` | Connection timeout per attempt |
+| `NATIVE_DOWNLOAD_TIMEOUT_SECONDS` | `600` | Whole-transfer timeout per attempt |
+
+Normal builds should retain these reviewed defaults. Artifact size remains owned by `maxDownloadBytes` in
+`native-artifacts.json`, alongside the artifact definitions it bounds.
 
 Resolve an immutable digest after pulling or publishing:
 

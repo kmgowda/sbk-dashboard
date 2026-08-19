@@ -29,6 +29,12 @@ from sbk_dashboard.windows_job import (
 )
 
 PARENT_POLL_SECONDS = 0.25
+FAILED_CHILD_WAIT_SECONDS = 5
+MIN_PROCESS_EXIT_CODE = 0
+MAX_PROCESS_EXIT_CODE = 255
+EXIT_FAILURE = 1
+EXIT_USAGE = 2
+EXIT_COMMAND_NOT_FOUND = 127
 LOGGER = logging.getLogger(__name__)
 
 
@@ -60,7 +66,7 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
     if not command:
         raise ValueError("Guardian native command must not be empty")
     if not _parent_alive(parent_pid, parent_started):
-        return 1
+        return EXIT_FAILURE
     job: WindowsKillOnCloseJob | None = None
     process: subprocess.Popen[bytes] | None = None
     try:
@@ -75,7 +81,7 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
                 job.assign_and_resume(process.pid)
             except BaseException:
                 process.kill()
-                process.wait(timeout=5)
+                process.wait(timeout=FAILED_CHILD_WAIT_SECONDS)
                 raise
         else:
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL)
@@ -83,14 +89,14 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
         if job is not None:
             job.close()
         LOGGER.error("Unable to launch guarded %s: %s", name, error)
-        return 127
+        return EXIT_COMMAND_NOT_FOUND
     assert process is not None
     try:
         atomic_json(state_path, {"pid": process.pid})
         while True:
             try:
                 code = process.wait(timeout=PARENT_POLL_SECONDS)
-                return code if 0 <= code <= 255 else 1
+                return code if MIN_PROCESS_EXIT_CODE <= code <= MAX_PROCESS_EXIT_CODE else EXIT_FAILURE
             except subprocess.TimeoutExpired:
                 if _parent_alive(parent_pid, parent_started):
                     continue
@@ -98,8 +104,8 @@ def guard(parent_pid: int, parent_started: float, state_path: Path, name: str, c
                     _terminate_psutil_tree(psutil.Process(process.pid), name)
                 except (OSError, psutil.Error) as error:
                     LOGGER.error("Unable to clean orphaned %s: %s", name, error)
-                    return 1
-                return 0
+                    return EXIT_FAILURE
+                return MIN_PROCESS_EXIT_CODE
     finally:
         state_path.unlink(missing_ok=True)
         if job is not None:
@@ -137,7 +143,7 @@ def main(arguments: list[str] | None = None) -> int:
         )
     except ValueError as error:
         LOGGER.error("%s", error)
-        return 2
+        return EXIT_USAGE
 
 
 if __name__ == "__main__":

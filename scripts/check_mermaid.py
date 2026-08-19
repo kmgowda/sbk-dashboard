@@ -41,6 +41,7 @@ SUPPORTED_DIAGRAM_PREFIXES = (
     "timeline",
     "xychart-beta",
 )
+RENDER_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,7 @@ def render(blocks: list[MermaidBlock], renderer: str) -> None:
                 capture_output=True,
                 check=False,
                 text=True,
-                timeout=60,
+                timeout=RENDER_TIMEOUT_SECONDS,
             )
             if completed.returncode != 0 or not output.is_file():
                 detail = completed.stderr.strip() or completed.stdout.strip() or "renderer produced no SVG"

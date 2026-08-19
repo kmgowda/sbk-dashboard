@@ -65,7 +65,7 @@ class ProvisioningTest(unittest.TestCase):
         comparison_path.write_text(json.dumps(stale), encoding="utf-8")
         self.provisioner.reconcile([first, second])
         refreshed = json.loads(comparison_path.read_text(encoding="utf-8"))
-        self.assertEqual(1, refreshed["sbkDashboardComparisonSchemaVersion"])
+        self.assertEqual(2, refreshed["sbkDashboardComparisonSchemaVersion"])
         self.assertEqual("http://grafana:3000/d/sbk-first/", self.provisioner.dashboard_url("first"))
         self.assertEqual(
             "http://203.0.113.8:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "203.0.113.8")
@@ -86,8 +86,10 @@ class ProvisioningTest(unittest.TestCase):
         values = expressions(generated)
         comparison_uid = self.provisioner.comparison_dashboard_uid(["first", "second"])
         self.assertEqual(comparison_uid, generated["uid"])
-        self.assertEqual("SBK/SBM Live Comparison", generated["title"])
-        self.assertEqual(1, generated["sbkDashboardComparisonSchemaVersion"])
+        self.assertEqual(
+            f"SBK/SBM Comparison — {comparison_uid.removeprefix('sbk-comparison-')}", generated["title"]
+        )
+        self.assertEqual(2, generated["sbkDashboardComparisonSchemaVersion"])
         self.assertTrue(all(
             'sbk_endpoint_id=~"${sbk_endpoints:regex}"' in value
             for value in values if "SBK_" in value
@@ -100,6 +102,8 @@ class ProvisioningTest(unittest.TestCase):
         self.assertIn("SBM two (SBM)", variable["options"][1]["text"])
         self.assertEqual(["first", "second"], [value["id"] for value in generated["sbkDashboardComparisonTargets"]])
         self.assertEqual(4, generated["sbkDashboardComparisonPolicy"]["maxTimeGroups"])
+        self.assertEqual(2, generated["sbkDashboardComparisonPolicy"]["minSingleTargetTimeLanes"])
+        self.assertEqual(8, generated["sbkDashboardComparisonPolicy"]["maxTimeLanes"])
         self.assertEqual(31, generated["sbkDashboardComparisonPolicy"]["maxAbsoluteRangeDays"])
         legends = _values_for_key(generated, "legendFormat")
         self.assertTrue(all("{{sbk_dashboard_name}}" in legend for legend in legends))
@@ -107,7 +111,7 @@ class ProvisioningTest(unittest.TestCase):
         self.assertTrue(all("{{sbk_endpoint_id}}" in legend for legend in legends))
         self.assertEqual(53, sum(1 for _ in _panels(generated)))
         self.assertEqual(
-            f"http://grafana:3000/a/kmg-sbkcomparison-app?comparisonUid={comparison_uid}",
+            f"http://grafana:3000/a/sbkcomparison-app?comparisonUid={comparison_uid}",
             self.provisioner.comparison_dashboard_url(["first", "second"]),
         )
         self.assertEqual(
@@ -118,7 +122,9 @@ class ProvisioningTest(unittest.TestCase):
     def test_same_comparison_set_reuses_uid_and_url_regardless_of_selection_order(self):
         first, second = target("first"), target("second", 9719)
         first_uid = self.provisioner.ensure_comparison_dashboard([first, second])
-        second_uid = self.provisioner.ensure_comparison_dashboard([second, first])
+        with patch("sbk_dashboard.provisioning.atomic_write") as repeated_write:
+            second_uid = self.provisioner.ensure_comparison_dashboard([second, first])
+        repeated_write.assert_not_called()
         self.assertEqual(first_uid, second_uid)
         self.assertEqual(
             self.provisioner.comparison_dashboard_url(["first", "second"]),
@@ -127,13 +133,21 @@ class ProvisioningTest(unittest.TestCase):
         files = list((self.directory / "dashboards").glob("sbk-comparison-*.json"))
         self.assertEqual([f"{first_uid}.json"], [path.name for path in files])
 
-    def test_generated_comparison_requires_two_to_eight_unique_targets(self):
+    def test_distinct_comparisons_have_unique_grafana_titles(self):
+        first, second, third = target("first"), target("second", 9719), target("third", 9720)
+        first_dashboard = self.provisioner.generated_comparison_dashboard([first, second])
+        second_dashboard = self.provisioner.generated_comparison_dashboard([first, third])
+        self.assertNotEqual(first_dashboard["uid"], second_dashboard["uid"])
+        self.assertNotEqual(first_dashboard["title"], second_dashboard["title"])
+
+    def test_generated_comparison_supports_one_target_and_requires_unique_targets(self):
         first = target("first")
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
-            self.provisioner.generated_comparison_dashboard([first])
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
+        generated = self.provisioner.generated_comparison_dashboard([first])
+        self.assertEqual(["first"], generated["sbkDashboardComparisonEndpointIds"])
+        self.assertEqual(1, generated["sbkDashboardComparisonPolicy"]["minTargets"])
+        with self.assertRaisesRegex(ValueError, "1–8 unique endpoints"):
             self.provisioner.generated_comparison_dashboard([first, first])
-        with self.assertRaisesRegex(ValueError, "2–8 unique endpoints"):
+        with self.assertRaisesRegex(ValueError, "1–8 unique endpoints"):
             self.provisioner.generated_comparison_dashboard(
                 [target(f"target-{index}", 9718 + index) for index in range(9)]
             )

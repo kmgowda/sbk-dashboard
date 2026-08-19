@@ -36,6 +36,19 @@ from sbk_dashboard.config import (
 
 LOGGER = logging.getLogger(__name__)
 
+DOWNLOAD_TIMEOUT_SECONDS = 60
+DOWNLOAD_CHUNK_BYTES = 128 * 1024
+DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
+CHECKSUM_CHUNK_BYTES = 1024 * 1024
+ARCHIVE_DRIVE_PREFIX_CHARACTERS = 2
+ZIP_UNIX_MODE_SHIFT = 16
+ZIP_UNIX_FILE_TYPE_MASK = 0o170000
+ZIP_UNIX_SYMLINK_TYPE = 0o120000
+BYTE_UNIT_BASE = 1024
+BYTE_UNITS = ("B", "KiB", "MiB", "GiB", "TiB")
+PERCENT_SCALE = 100.0
+SAFE_TAR_FILTER_PYTHON = (3, 12)
+
 
 class NativeToolBootstrap:
     """Resolve installed tools or download pinned official archives."""
@@ -109,7 +122,9 @@ class NativeToolBootstrap:
         temporary = destination.with_name(destination.name + ".part")
         request = urllib.request.Request(url, headers={"User-Agent": "sbk-dashboard/1.0"})
         try:
-            with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response, temporary.open(
+                "wb"
+            ) as output:
                 raw_total = response.headers.get("Content-Length", "0")
                 try:
                     total = int(raw_total)
@@ -122,7 +137,7 @@ class NativeToolBootstrap:
                 downloaded = 0
                 last_update = 0.0
                 while True:
-                    chunk = response.read(128 * 1024)
+                    chunk = response.read(DOWNLOAD_CHUNK_BYTES)
                     if not chunk:
                         break
                     output.write(chunk)
@@ -130,7 +145,9 @@ class NativeToolBootstrap:
                     if downloaded > max_download_bytes:
                         raise OSError(f"{name} download exceeds the configured maximum size")
                     now = time.monotonic()
-                    if now - last_update >= 0.25 or (total and downloaded >= total):
+                    if now - last_update >= DOWNLOAD_PROGRESS_INTERVAL_SECONDS or (
+                        total and downloaded >= total
+                    ):
                         NativeToolBootstrap._progress(name, downloaded, total)
                         last_update = now
                 output.flush()
@@ -144,7 +161,8 @@ class NativeToolBootstrap:
     @staticmethod
     def _progress(name: str, downloaded: int, total: int, complete: bool = False) -> None:
         if total:
-            message = f"{min(100.0, downloaded * 100 / total):.1f}% ({_bytes(downloaded)} / {_bytes(total)})"
+            percentage = min(PERCENT_SCALE, downloaded * PERCENT_SCALE / total)
+            message = f"{percentage:.1f}% ({_bytes(downloaded)} / {_bytes(total)})"
         else:
             message = f"{_bytes(downloaded)} downloaded"
         LOGGER.info("%s download progress: %s%s", name, message, " (complete)" if complete else "")
@@ -157,7 +175,7 @@ class NativeToolBootstrap:
                     if member.issym() or member.islnk() or member.isdev() or member.isfifo():
                         raise OSError(f"Unsupported archive entry: {member.name}")
                     _safe_member(member.name)
-                if sys.version_info >= (3, 12):
+                if sys.version_info >= SAFE_TAR_FILTER_PYTHON:
                     source.extractall(destination, filter="data")
                 else:
                     source.extractall(destination)
@@ -165,7 +183,8 @@ class NativeToolBootstrap:
             with zipfile.ZipFile(archive) as source:
                 for zip_member in source.infolist():
                     _safe_member(zip_member.filename)
-                    if (zip_member.external_attr >> 16) & 0o170000 == 0o120000:
+                    unix_file_type = (zip_member.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_FILE_TYPE_MASK
+                    if unix_file_type == ZIP_UNIX_SYMLINK_TYPE:
                         raise OSError(f"Archive links are not allowed: {zip_member.filename}")
                 source.extractall(destination)
         else:
@@ -175,7 +194,7 @@ class NativeToolBootstrap:
     def _checksum(path: Path) -> str:
         digest = hashlib.sha256()
         with path.open("rb") as source:
-            for block in iter(lambda: source.read(1024 * 1024), b""):
+            for block in iter(lambda: source.read(CHECKSUM_CHUNK_BYTES), b""):
                 digest.update(block)
         return digest.hexdigest()
 
@@ -199,15 +218,20 @@ def _safe_member(name: str) -> None:
     if (
         path.is_absolute()
         or ".." in path.parts
-        or any(len(part) >= 2 and part[1] == ":" and part[0].isalpha() for part in path.parts)
+        or any(
+            len(part) >= ARCHIVE_DRIVE_PREFIX_CHARACTERS
+            and part[1] == ":"
+            and part[0].isalpha()
+            for part in path.parts
+        )
     ):
         raise OSError(f"Archive entry escapes extraction directory: {name}")
 
 
 def _bytes(value: int) -> str:
     amount = float(value)
-    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
-        if amount < 1024 or unit == "TiB":
-            return f"{int(amount)} {unit}" if unit == "B" else f"{amount:.1f} {unit}"
-        amount /= 1024
-    return f"{amount:.1f} TiB"
+    for unit in BYTE_UNITS:
+        if amount < BYTE_UNIT_BASE or unit == BYTE_UNITS[-1]:
+            return f"{int(amount)} {unit}" if unit == BYTE_UNITS[0] else f"{amount:.1f} {unit}"
+        amount /= BYTE_UNIT_BASE
+    return f"{amount:.1f} {BYTE_UNITS[-1]}"

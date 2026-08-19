@@ -64,8 +64,11 @@ Operational values have explicit owners rather than scattered literals. `contrac
 and bounded environment settings, `endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns
 OS/architecture normalization, and `layout.py` owns persistent path construction. The packaged
 `native-artifacts.json` manifest is the sole built-in Prometheus/Grafana artifact catalog consumed by both direct
-bootstrap and Docker builds. Protocol syntax, schema versions, HTTP status codes, and test fixture values remain
-local constants when they are intrinsic to their owning boundary rather than operator configuration.
+bootstrap and Docker builds. Dependency-free installer transfer/retry/lock bounds live in
+`scripts/portable-bootstrap.properties`. Protocol syntax, schema versions, HTTP status codes, and intrinsic
+lifecycle timings remain named local constants at their owning boundary rather than operator configuration. Ruff's
+`PLR2004` rule rejects newly introduced unnamed comparison literals in production Python while tests may retain
+explicit fixture values.
 
 ## Control-plane lifecycle
 
@@ -103,14 +106,20 @@ flowchart TD
     Result -->|Yes| Created[Return new dashboard, HTTP 201]
     Result -->|No| Rollback[Restore registry and best-effort reconcile]
     Rollback --> Failure[Return HTTP 500]
+    Created --> Open[Browser opens readiness gateway]
+    Open --> Imported{Grafana UID API returns 200?}
+    Imported -->|No| Wait[Show preparing page and bounded refresh]
+    Wait --> Imported
+    Imported -->|Yes| Redirect[Redirect to request-host-aware Grafana URL]
 
     classDef request fill:#dbeafe,stroke:#2563eb,color:#172554;
     classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d;
     classDef failure fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
     class Request,Persist,Reconcile request;
-    class Existing,Result decision;
-    class Reuse,Created success;
+    class Existing,Result,Imported decision;
+    class Reuse,Created,Redirect success;
+    class Open,Wait request;
     class Rollback,Failure failure;
 ```
 
@@ -136,10 +145,23 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 8. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
 9. `dashboard-mappings.json` records the deterministic relationship.
 
-The comparison API normalizes 2–8 unique registered endpoint IDs by sorting them and derives
+Grafana health and dashboard readiness are different states: `/api/health` can be ready while the file provider has
+not imported a newly written UID. The landing page therefore links through `GET /dashboards/<id>`. Each request makes
+one one-second-bounded loopback UID probe. A missing UID returns a small `no-store` preparing page whose browser
+refresh follows the centrally bounded 37.5-second backoff; a ready UID produces an immediate HTTP 302 to the normal
+request-host-aware Grafana URL. No HTTP worker sleeps between attempts, direct `dashboardUrl` API compatibility is
+preserved, and an exhausted sequence offers explicit retry instead of exposing Grafana's transient 404 page.
+
+The comparison API normalizes 1–8 unique registered endpoint IDs by sorting them and derives
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
 descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
-classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`.
+classic single-range fallback and is also the server-owned input to the bundled `sbkcomparison-app`. Grafana's
+file provider imports new descriptors asynchronously. The landing page therefore opens the comparison-specific
+readiness gateway, which validates the endpoint set and redirects to the app only after that UID returns HTTP 200.
+The app retains bounded exponential readiness checks as defense in depth. One
+endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. Lane
+count and range selections live only in validated URL state, so this mode does not duplicate registrations,
+descriptors, discovery entries, or Prometheus series.
 
 The frontend-only Grafana app uses Grafana Scenes to build one query scene per distinct time range after the view
 opens. Every target starts in one global live scene. Detaching a target creates or joins an independent relative-live

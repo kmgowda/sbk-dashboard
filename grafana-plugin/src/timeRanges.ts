@@ -8,9 +8,12 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-import {TargetDescriptor, TargetTimeSelection, TimeGroup} from './types';
+import {ComparisonLane, TargetDescriptor, TargetTimeSelection, TimeGroup} from './types';
 
 export const DEFAULT_RELATIVE_FROM = 'now-1h';
+export const MILLISECONDS_PER_MINUTE = 60 * 1000;
+export const MILLISECONDS_PER_HOUR = 60 * MILLISECONDS_PER_MINUTE;
+export const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 export const RELATIVE_RANGES = Object.freeze([
   ['now-5m', 'Last 5 minutes'],
   ['now-15m', 'Last 15 minutes'],
@@ -21,6 +24,24 @@ export const RELATIVE_RANGES = Object.freeze([
 ] as const);
 const RELATIVE_VALUES: ReadonlySet<string> = new Set(RELATIVE_RANGES.map(([value]) => value));
 const TARGET_ID = /^[a-f0-9]{16}$/;
+const DEFAULT_SINGLE_TARGET_LANES = 2;
+
+export function comparisonLanes(
+  targets: TargetDescriptor[], search: string, minimum = DEFAULT_SINGLE_TARGET_LANES, maximum = 8
+): ComparisonLane[] {
+  if (targets.length !== 1) {
+    return targets.map((target) => ({id: target.id, label: target.name, target}));
+  }
+  const requested = Number(new URLSearchParams(search).get('lanes'));
+  const count = Number.isSafeInteger(requested) && requested >= minimum && requested <= maximum
+    ? requested
+    : minimum;
+  return Array.from({length: count}, (_, index) => ({
+    id: `${targets[0].id}-range-${index + 1}`,
+    label: `Range ${index + 1}`,
+    target: targets[0],
+  }));
+}
 
 export function defaultSelection(): TargetTimeSelection {
   return {mode: 'global'};
@@ -36,7 +57,7 @@ export function selectionKey(selection: TargetTimeSelection, maxAbsoluteRangeDay
   }
   const from = Number(selection.absoluteFrom);
   const to = Number(selection.absoluteTo);
-  const maximumSpan = maxAbsoluteRangeDays * 24 * 60 * 60 * 1000;
+  const maximumSpan = maxAbsoluteRangeDays * MILLISECONDS_PER_DAY;
   if (
     !Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from >= to ||
     !Number.isSafeInteger(maximumSpan) || maximumSpan <= 0 || to - from > maximumSpan
@@ -45,15 +66,15 @@ export function selectionKey(selection: TargetTimeSelection, maxAbsoluteRangeDay
 }
 
 export function groupSelections(
-  targets: TargetDescriptor[],
+  lanes: ComparisonLane[],
   selections: Record<string, TargetTimeSelection>,
   maxAbsoluteRangeDays: number,
   globalFrom = 'now-5m',
   globalTo = 'now'
 ): TimeGroup[] {
   const groups = new Map<string, TimeGroup>();
-  for (const target of targets) {
-    const key = selectionKey(selections[target.id] || defaultSelection(), maxAbsoluteRangeDays);
+  for (const lane of lanes) {
+    const key = selectionKey(selections[lane.id] || defaultSelection(), maxAbsoluteRangeDays);
     const [mode, fromValue, toValue] = key.split('|');
     let group = groups.get(key);
     if (!group) {
@@ -73,16 +94,35 @@ export function groupSelections(
           ? globalTo
           : absolute ? new Date(Number(toValue)).toISOString() : toValue,
         targetIds: [],
+        laneIds: [],
       };
       groups.set(key, group);
     }
-    group.targetIds.push(target.id);
+    if (!group.targetIds.includes(lane.target.id)) group.targetIds.push(lane.target.id);
+    group.laneIds.push(lane.id);
   }
   return [...groups.values()].sort((left, right) => {
     if (left.mode === 'global') return -1;
     if (right.mode === 'global') return 1;
     return left.key.localeCompare(right.key);
   });
+}
+
+export function exceedsTimeGroupLimit(
+  lanes: ComparisonLane[],
+  selections: Record<string, TargetTimeSelection>,
+  maxAbsoluteRangeDays: number,
+  maxTimeGroups: number,
+  globalFrom = 'now-5m',
+  globalTo = 'now'
+): boolean {
+  return groupSelections(
+    lanes,
+    selections,
+    maxAbsoluteRangeDays,
+    globalFrom,
+    globalTo
+  ).length > maxTimeGroups;
 }
 
 export function encodeSelection(selection: TargetTimeSelection, maxAbsoluteRangeDays: number): string | null {
@@ -108,31 +148,34 @@ export function decodeSelection(value: string | null, maxAbsoluteRangeDays: numb
 }
 
 export function selectionsFromUrl(
-  targets: TargetDescriptor[], search: string, maxAbsoluteRangeDays: number, maxTimeGroups: number
+  lanes: ComparisonLane[], search: string, maxAbsoluteRangeDays: number, maxTimeGroups: number
 ): Record<string, TargetTimeSelection> {
   const params = new URLSearchParams(search);
-  const selections = Object.fromEntries(targets.map((target) => [
-    target.id,
-    decodeSelection(params.get(`tr-${target.id}`), maxAbsoluteRangeDays),
+  const selections = Object.fromEntries(lanes.map((lane) => [
+    lane.id,
+    decodeSelection(params.get(`tr-${lane.id}`), maxAbsoluteRangeDays),
   ]));
-  if (groupSelections(targets, selections, maxAbsoluteRangeDays).length > maxTimeGroups) {
-    return Object.fromEntries(targets.map((target) => [target.id, defaultSelection()]));
+  if (exceedsTimeGroupLimit(lanes, selections, maxAbsoluteRangeDays, maxTimeGroups)) {
+    return Object.fromEntries(lanes.map((lane) => [lane.id, defaultSelection()]));
   }
   return selections;
 }
 
 export function selectionsToUrl(
   comparisonUid: string,
-  targets: TargetDescriptor[],
+  lanes: ComparisonLane[],
   selections: Record<string, TargetTimeSelection>,
   maxAbsoluteRangeDays: number,
   globalFrom = 'now-5m',
   globalTo = 'now'
 ): string {
   const params = new URLSearchParams({comparisonUid, from: globalFrom, to: globalTo});
-  for (const target of targets) {
-    const encoded = encodeSelection(selections[target.id] || defaultSelection(), maxAbsoluteRangeDays);
-    if (encoded) params.set(`tr-${target.id}`, encoded);
+  if (lanes.length >= DEFAULT_SINGLE_TARGET_LANES && new Set(lanes.map((lane) => lane.target.id)).size === 1) {
+    params.set('lanes', String(lanes.length));
+  }
+  for (const lane of lanes) {
+    const encoded = encodeSelection(selections[lane.id] || defaultSelection(), maxAbsoluteRangeDays);
+    if (encoded) params.set(`tr-${lane.id}`, encoded);
   }
   return `?${params.toString()}`;
 }

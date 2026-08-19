@@ -45,6 +45,10 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn(f"ARG PYTHON_BASE_NAME={PYTHON_BASE_NAME}", self.dockerfile)
         self.assertIn(f"ARG PYTHON_BASE_DIGEST={PYTHON_BASE_DIGEST}", self.dockerfile)
         self.assertIn("ARG PYTHON_BASE=${PYTHON_BASE_NAME}@${PYTHON_BASE_DIGEST}", self.dockerfile)
+        self.assertIn("ARG NATIVE_DOWNLOAD_RETRIES=3", self.dockerfile)
+        self.assertIn("ARG NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS=15", self.dockerfile)
+        self.assertIn("ARG NATIVE_DOWNLOAD_TIMEOUT_SECONDS=600", self.dockerfile)
+        self.assertIn('--retry "${NATIVE_DOWNLOAD_RETRIES}"', self.dockerfile)
         self.assertEqual(3, self.dockerfile.count("FROM ${PYTHON_BASE}"))
         self.assertNotIn("slim-bookworm", self.dockerfile)
         self.assertIn(f"ARG APPLICATION_VERSION={VERSION}", self.dockerfile)
@@ -60,6 +64,7 @@ class ContainerContractTest(unittest.TestCase):
         self.assertIn("STOPSIGNAL SIGTERM", self.dockerfile)
         self.assertIn("HEALTHCHECK", self.dockerfile)
         self.assertIn("http://127.0.0.1:9721/api/health", self.dockerfile)
+        self.assertIn("SBK_DASHBOARD_CONTAINER_HEALTH_TIMEOUT_SECONDS=3", self.dockerfile)
         self.assertIn("SBK_DASHBOARD_DEFAULT_TARGET_HOST=host.docker.internal", self.dockerfile)
 
     def test_compose_publishes_dashboard_ports_and_persists_state(self):

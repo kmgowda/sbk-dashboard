@@ -15,26 +15,38 @@ import {Alert, Button, Spinner} from '@grafana/ui';
 import {SceneTimeRange} from '@grafana/scenes';
 import {
   COMPARISON_DESCRIPTOR_SCHEMA_VERSION,
-  DESCRIPTOR_LOAD_ATTEMPTS,
-  DESCRIPTOR_RETRY_DELAY_MS,
   DescriptorLoadCancelledError,
   DescriptorNotReadyError,
+  descriptorRetryWindowMilliseconds,
   errorStatus,
   loadComparisonDescriptor,
 } from './descriptor';
 import {buildGroupScene} from './scene';
 import {
   DEFAULT_RELATIVE_FROM,
+  MILLISECONDS_PER_DAY,
+  MILLISECONDS_PER_HOUR,
+  MILLISECONDS_PER_MINUTE,
   RELATIVE_RANGES,
+  comparisonLanes,
+  exceedsTimeGroupLimit,
   groupSelections,
   selectionsFromUrl,
   selectionsToUrl,
   validateTargets,
 } from './timeRanges';
-import {ComparisonDashboard, GrafanaDashboardResponse, TargetDescriptor, TargetTimeSelection} from './types';
+import {
+  ComparisonDashboard,
+  ComparisonLane,
+  GrafanaDashboardResponse,
+  TargetDescriptor,
+  TargetTimeSelection,
+} from './types';
 import './styles.css';
 
 const COMPARISON_UID = /^sbk-comparison-[a-f0-9]{16}$/;
+const DATE_TIME_LOCAL_CHARACTERS = 16;
+const HTTP_NOT_FOUND = 404;
 
 function App(_props: AppRootProps) {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -45,6 +57,7 @@ function App(_props: AppRootProps) {
   });
   const [dashboard, setDashboard] = useState<ComparisonDashboard | null>(null);
   const [targets, setTargets] = useState<TargetDescriptor[]>([]);
+  const [lanes, setLanes] = useState<ComparisonLane[]>([]);
   const [selections, setSelections] = useState<Record<string, TargetTimeSelection>>({});
   const [error, setError] = useState('');
   const [loadGeneration, setLoadGeneration] = useState(0);
@@ -79,10 +92,18 @@ function App(_props: AppRootProps) {
       {signal: controller.signal}
     )
       .then(({response, selected}) => {
+        const policy = response.dashboard.sbkDashboardComparisonPolicy;
+        const selectedLanes = comparisonLanes(
+          selected,
+          window.location.search,
+          policy.minSingleTargetTimeLanes || 2,
+          policy.maxTimeLanes || policy.maxTargets
+        );
         setDashboard(response.dashboard);
         setTargets(selected);
+        setLanes(selectedLanes);
         setSelections(selectionsFromUrl(
-          selected,
+          selectedLanes,
           window.location.search,
           response.dashboard.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays,
           response.dashboard.sbkDashboardComparisonPolicy.maxTimeGroups
@@ -91,10 +112,8 @@ function App(_props: AppRootProps) {
       .catch((loadError: unknown) => {
         if (loadError instanceof DescriptorLoadCancelledError || controller.signal.aborted) return;
         const status = errorStatus(loadError);
-        if (status === 404 || loadError instanceof DescriptorNotReadyError) {
-          const seconds = Math.ceil(
-            (DESCRIPTOR_LOAD_ATTEMPTS - 1) * DESCRIPTOR_RETRY_DELAY_MS / 1000
-          );
+        if (status === HTTP_NOT_FOUND || loadError instanceof DescriptorNotReadyError) {
+          const seconds = Math.ceil(descriptorRetryWindowMilliseconds() / 1000);
           setError(
             `Grafana did not finish provisioning this comparison within ${seconds} seconds. ` +
             'Retry now, or return to SBK Dashboard and select Compare again.'
@@ -108,13 +127,13 @@ function App(_props: AppRootProps) {
 
   const groups = useMemo(
     () => groupSelections(
-      targets,
+      lanes,
       selections,
       dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
       globalWindow.current.from,
       globalWindow.current.to
     ),
-    [dashboard, targets, selections]
+    [dashboard, lanes, selections]
   );
   const scenes = useMemo(
     () => dashboard ? groups.map((group) => ({group, scene: buildGroupScene(dashboard.panels, group)})) : [],
@@ -131,7 +150,7 @@ function App(_props: AppRootProps) {
         '',
         selectionsToUrl(
           comparisonUid,
-          targets,
+          lanes,
           selections,
           dashboard.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays,
           state.from,
@@ -140,7 +159,7 @@ function App(_props: AppRootProps) {
       );
     });
     return () => subscription.unsubscribe();
-  }, [comparisonUid, dashboard, scenes, selections, targets]);
+  }, [comparisonUid, dashboard, lanes, scenes, selections]);
 
   const updateSelection = (targetId: string, selection: TargetTimeSelection) => {
     const currentGlobal = scenes.find(({group}) => group.mode === 'global')?.scene.state.$timeRange;
@@ -149,15 +168,14 @@ function App(_props: AppRootProps) {
     }
     const candidate = {...selections, [targetId]: selection};
     const maxTimeGroups = dashboard?.sbkDashboardComparisonPolicy.maxTimeGroups || 1;
-    if (
-      groupSelections(
-        targets,
-        candidate,
-        dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
-        globalWindow.current.from,
-        globalWindow.current.to
-      ).length > maxTimeGroups
-    ) {
+    if (exceedsTimeGroupLimit(
+      lanes,
+      candidate,
+      dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
+      maxTimeGroups,
+      globalWindow.current.from,
+      globalWindow.current.to
+    )) {
       setError(`A comparison can use at most ${maxTimeGroups} distinct time ranges.`);
       return;
     }
@@ -168,9 +186,48 @@ function App(_props: AppRootProps) {
       '',
       selectionsToUrl(
         comparisonUid,
-        targets,
+        lanes,
         candidate,
         dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
+        globalWindow.current.from,
+        globalWindow.current.to
+      )
+    );
+  };
+
+  const setLaneCount = (count: number) => {
+    if (!dashboard || targets.length !== 1) return;
+    const policy = dashboard.sbkDashboardComparisonPolicy;
+    const minimum = policy.minSingleTargetTimeLanes || 2;
+    const maximum = policy.maxTimeLanes || policy.maxTargets;
+    if (count < minimum || count > maximum) return;
+    const candidateLanes = comparisonLanes(targets, `?lanes=${count}`, minimum, maximum);
+    const candidateSelections = Object.fromEntries(candidateLanes.map((lane) => [
+      lane.id,
+      selections[lane.id] || {mode: 'global'},
+    ]));
+    if (exceedsTimeGroupLimit(
+      candidateLanes,
+      candidateSelections,
+      policy.maxAbsoluteRangeDays,
+      policy.maxTimeGroups,
+      globalWindow.current.from,
+      globalWindow.current.to
+    )) {
+      setError(`A comparison can use at most ${policy.maxTimeGroups} distinct time ranges.`);
+      return;
+    }
+    setError('');
+    setLanes(candidateLanes);
+    setSelections(candidateSelections);
+    window.history.replaceState(
+      null,
+      '',
+      selectionsToUrl(
+        comparisonUid,
+        candidateLanes,
+        candidateSelections,
+        policy.maxAbsoluteRangeDays,
         globalWindow.current.from,
         globalWindow.current.to
       )
@@ -190,32 +247,51 @@ function App(_props: AppRootProps) {
   return (
     <main className="sbk-comparison">
       <header>
-        <h1>SBK/SBM live comparison</h1>
+        <h1>{targets.length === 1 ? 'SBK/SBM time-range comparison' : 'SBK/SBM live comparison'}</h1>
         <p>
-          All targets initially follow the global live range. Detach only targets that need an independent live or
-          historical range. Targets with identical ranges continue to share one query group.
+          {targets.length === 1
+            ? 'The same dashboard is shown in two or more time lanes. Change any lane to an independent live or historical range.'
+            : 'All targets initially follow the global live range. Detach only targets that need an independent live or historical range. Targets with identical ranges continue to share one query group.'}
         </p>
       </header>
       {error && <Alert title="Time range not changed">{error}</Alert>}
       <section className="target-time-controls" aria-label="Target time ranges">
-        {targets.map((target) => (
+        {lanes.map((lane) => (
           <TargetTimeControl
-            key={target.id}
-            target={target}
-            selection={selections[target.id] || {mode: 'global'}}
+            key={lane.id}
+            lane={lane}
+            showLaneLabel={targets.length === 1}
+            selection={selections[lane.id] || {mode: 'global'}}
             maxAbsoluteRangeDays={dashboard.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays}
-            onChange={(selection) => updateSelection(target.id, selection)}
+            onChange={(selection) => updateSelection(lane.id, selection)}
           />
         ))}
       </section>
+      {targets.length === 1 && (
+        <div className="lane-actions">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={lanes.length >= (dashboard.sbkDashboardComparisonPolicy.maxTimeLanes || dashboard.sbkDashboardComparisonPolicy.maxTargets)}
+            onClick={() => setLaneCount(lanes.length + 1)}
+          >Add time range</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={lanes.length <= (dashboard.sbkDashboardComparisonPolicy.minSingleTargetTimeLanes || 2)}
+            onClick={() => setLaneCount(lanes.length - 1)}
+          >Remove last range</Button>
+        </div>
+      )}
       <div className="comparison-summary">
-        {groups.length} active time {groups.length === 1 ? 'range' : 'ranges'} · {targets.length} targets
+        {groups.length} active time {groups.length === 1 ? 'range' : 'ranges'} · {lanes.length}{' '}
+        {targets.length === 1 ? 'time lanes' : 'targets'}
       </div>
       {scenes.map(({group, scene}) => (
         <section className="time-group" key={group.key}>
           <div className="time-group-heading">
             <h2>{group.label}</h2>
-            <span>{group.targetIds.map((id) => targets.find((target) => target.id === id)?.name || id).join(', ')}</span>
+            <span>{group.laneIds.map((id) => lanes.find((lane) => lane.id === id)?.label || id).join(', ')}</span>
           </div>
           <scene.Component model={scene} />
         </section>
@@ -225,13 +301,15 @@ function App(_props: AppRootProps) {
 }
 
 interface TargetTimeControlProps {
-  target: TargetDescriptor;
+  lane: ComparisonLane;
+  showLaneLabel: boolean;
   selection: TargetTimeSelection;
   maxAbsoluteRangeDays: number;
   onChange: (selection: TargetTimeSelection) => void;
 }
 
-function TargetTimeControl({target, selection, maxAbsoluteRangeDays, onChange}: TargetTimeControlProps) {
+function TargetTimeControl({lane, showLaneLabel, selection, maxAbsoluteRangeDays, onChange}: TargetTimeControlProps) {
+  const target = lane.target;
   const [absoluteFrom, setAbsoluteFrom] = useState(epochToInput(selection.absoluteFrom));
   const [absoluteTo, setAbsoluteTo] = useState(epochToInput(selection.absoluteTo));
   useEffect(() => {
@@ -241,17 +319,19 @@ function TargetTimeControl({target, selection, maxAbsoluteRangeDays, onChange}: 
   const parsedFrom = inputToEpoch(absoluteFrom);
   const parsedTo = inputToEpoch(absoluteTo);
   const absoluteValid = parsedFrom > 0 && parsedTo > parsedFrom &&
-    parsedTo - parsedFrom <= maxAbsoluteRangeDays * 24 * 60 * 60 * 1000;
+    parsedTo - parsedFrom <= maxAbsoluteRangeDays * MILLISECONDS_PER_DAY;
   const modeChange = (mode: TargetTimeSelection['mode']) => {
     const now = Date.now();
     if (mode === 'relative') onChange({mode, relativeFrom: DEFAULT_RELATIVE_FROM});
-    else if (mode === 'absolute') onChange({mode, absoluteFrom: now - 60 * 60 * 1000, absoluteTo: now});
+    else if (mode === 'absolute') {
+      onChange({mode, absoluteFrom: now - MILLISECONDS_PER_HOUR, absoluteTo: now});
+    }
     else onChange({mode: 'global'});
   };
   return (
     <article className="target-time-card">
       <div>
-        <strong>{target.name}</strong>
+        <strong>{showLaneLabel ? `${target.name} — ${lane.label}` : target.name}</strong>
         <small>{target.kind} · {target.address} · {target.id}</small>
       </div>
       <label>
@@ -311,8 +391,8 @@ function TargetTimeControl({target, selection, maxAbsoluteRangeDays, onChange}: 
 
 function epochToInput(value: number | undefined): string {
   if (!value || !Number.isFinite(value)) return '';
-  const date = new Date(value - new Date(value).getTimezoneOffset() * 60_000);
-  return date.toISOString().slice(0, 16);
+  const date = new Date(value - new Date(value).getTimezoneOffset() * MILLISECONDS_PER_MINUTE);
+  return date.toISOString().slice(0, DATE_TIME_LOCAL_CHARACTERS);
 }
 
 function inputToEpoch(value: string): number {

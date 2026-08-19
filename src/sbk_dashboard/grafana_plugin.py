@@ -21,6 +21,8 @@ from pathlib import Path
 
 from sbk_dashboard.provisioning import COMPARISON_APP_PLUGIN_ID
 
+LEGACY_COMPARISON_APP_PLUGIN_IDS = ("kmg-sbkcomparison-app",)
+
 if sys.version_info >= (3, 11):
     from importlib.resources.abc import Traversable
 else:
@@ -50,6 +52,13 @@ def install_comparison_plugin(plugin_root: Path) -> Path:
                 os.replace(previous, destination)
             raise
         shutil.rmtree(previous, ignore_errors=True)
+        for legacy_plugin_id in LEGACY_COMPARISON_APP_PLUGIN_IDS:
+            legacy = plugin_root / legacy_plugin_id
+            with suppress(OSError):
+                if legacy.is_symlink() or legacy.is_file():
+                    legacy.unlink()
+                elif legacy.is_dir():
+                    shutil.rmtree(legacy)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         with suppress(OSError):

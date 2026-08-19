@@ -10,6 +10,33 @@ You may obtain a copy of the License at
 
 # Migration from the Java implementation
 
+## Single-dashboard multi-range comparison
+
+The comparison API now accepts one registered endpoint as well as the existing 2–8 endpoint sets. Selecting one
+endpoint opens two time lanes for the same canonical dashboard and permits adding up to eight lanes. Lane count and
+range selections are URL-only browser state. No registration, discovery, persistence, or native-process format
+changes are required. Existing multi-target comparison IDs, URLs, and behavior remain compatible.
+
+Comparison descriptor schema 2 also gives every cached descriptor a UID-derived unique Grafana title. On the first
+restart, reconciliation rewrites older schema-1 files automatically. This prevents Grafana from disabling its file
+provider when several different comparison files previously shared the `SBK/SBM Live Comparison` title.
+
+The comparison app now waits through a bounded 37.5-second exponential readiness window for Grafana's asynchronous
+file provider. Existing IDs, bookmarks, classic fallback dashboards, and stored comparison files remain compatible.
+Repeated selection of an unchanged comparison no longer rewrites its descriptor.
+
+Dedicated endpoint links now pass through a read-only readiness gateway before entering Grafana. Grafana reports
+native health before its asynchronous file provider necessarily imports a newly written dashboard, which previously
+made a new link randomly show `Dashboard not found` for the first polling interval. The gateway performs bounded
+loopback UID probes across browser refreshes and redirects only after Grafana returns HTTP 200. Existing endpoint
+IDs, direct `dashboardUrl` values, bookmarks, persisted files, and Grafana URLs remain unchanged. API clients can use
+the new `dashboardOpenUrl` field or the `ready` field from `GET /api/targets/<id>/dashboard`.
+
+Comparison links now use the same readiness boundary. `POST /api/comparison-dashboard` adds a relative
+`dashboardOpenUrl` while retaining the existing direct `dashboardUrl` and `classicDashboardUrl`. The landing page
+uses the new URL, so a first open waits outside Grafana until the comparison UID is imported instead of briefly
+showing Grafana's misleading `Dashboard not found` page. Existing direct URLs and bookmarks remain compatible.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]
@@ -53,12 +80,14 @@ generated shared file is removed by reconciliation; bookmarks using that old UID
 landing page or comparison API. The new generated-file cache is bounded to 128 entries and does not change endpoint
 IDs, samples, or registration persistence.
 
-The comparison URL now opens the bundled `kmg-sbkcomparison-app`. Existing deterministic comparison descriptors and
+The comparison URL now opens the bundled `sbkcomparison-app`. Existing deterministic comparison descriptors and
 UIDs remain valid, and the API also returns `classicDashboardUrl` for the earlier single-range provisioned view.
 Every target initially follows one global live range; per-target relative-live or fixed historical selections are
 URL state and require no data migration. The app is installed automatically into the managed Grafana data directory
-on startup in direct, portable, wheel, and container deployments. Fixed ranges are capped at 31 days and each view
-at four distinct time groups.
+on startup in direct, portable, wheel, and container deployments. Upgrades remove the former
+`kmg-sbkcomparison-app` installation after the project-named plugin is promoted successfully; old direct app
+bookmarks must be reopened from the landing page. Fixed ranges are capped at 31 days and each view at four distinct
+time groups.
 
 Build and runtime requirements changed from JDK 25 plus Gradle to Python 3.10+ plus `pip` or Conda. Remove Java launch
 scripts from service definitions and point them at the environment's generated `sbk-dashboard` command.

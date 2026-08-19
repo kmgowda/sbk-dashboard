@@ -77,6 +77,8 @@ creates the guardian's kill-on-close Job Object before the native process is res
 4. Prometheus file discovery notices the target without a process restart.
 5. The supervisor maps Prometheus target health back to the endpoint ID.
 6. API rendering constructs a client-reachable Grafana URL. The URL is not part of endpoint identity.
+7. Landing-page links use the bounded readiness gateway so Grafana never receives a new UID before its asynchronous
+   file provider has imported that dashboard.
 
 ### Restart and recovery
 
@@ -128,8 +130,10 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 2–8 endpoints and return deterministic app and classic-fallback URLs |
+| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
+| `GET /dashboards/<id>` | Probe Grafana's UID API and redirect a browser only after provisioning |
+| `GET /comparisons/<uid>?targetId=<id>...` | Validate a comparison and enter its app only after Grafana provisions the UID |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 
 Request bodies are JSON and capped at 64 KiB. Authentication is absent, so new mutating endpoints must not imply
@@ -193,6 +197,20 @@ must prove those literals equal `version.py`; CI runs the same script in check m
 Compose resolution, and container contract tests.
 Use `network.normalize_host()` for new host or bind boundaries; do not introduce a second DNS/IP parser. Keep API
 registration and deletion serialized through reconciliation and preserve compensating rollback on every exception.
+
+### Add or change a runtime-policy value
+
+1. Put operator-selectable application defaults and bounded environment settings in `contracts.py`, then select and
+   validate them in `config.py`.
+2. Put endpoint identity, validation, or port-range policy in `endpoint_policy.py`; put path construction in
+   `layout.py`; put platform aliases in `platforms.py`.
+3. Put dependency-free installer transfer, checksum, retry, buffer, or lock bounds in
+   `scripts/portable-bootstrap.properties` and consume the same key from POSIX, PowerShell, and Python bootstrap
+   paths as applicable.
+4. Keep protocol values, schema versions, OS API flags, and genuinely module-local timings as named constants next
+   to their owning implementation. Do not expose them as public configuration without an operator use case.
+5. Never duplicate a numeric/string literal across implementations. Add a contract test when more than one runtime
+   consumes a policy value. Ruff `PLR2004` enforces named comparison values in production Python.
 
 ### Change endpoint registration or identity
 

@@ -26,10 +26,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from typing import Any
-from urllib.parse import unquote, urlparse, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 
 from sbk_dashboard.contracts import (
     CLIENT_ID_RANDOM_BYTES,
+    DASHBOARD_READINESS_RETRY_DELAYS_SECONDS,
     GRAFANA_ACTIVITY_SECONDS,
     LANDING_ACTIVITY_SECONDS,
     LANDING_HEARTBEAT_MILLISECONDS,
@@ -51,6 +52,43 @@ CLIENT_ID_PATTERN = re.compile(
     rf"[A-Za-z0-9_-]{{{MIN_CLIENT_ID_CHARACTERS},{MAX_CLIENT_ID_CHARACTERS}}}"
 )
 LOGGER = logging.getLogger(__name__)
+SERVER_THREAD_JOIN_SECONDS = 3.0
+ASSET_FINGERPRINT_HEX_LENGTH = 12
+MIN_SOCKET_BACKLOG = 5
+MAX_SOCKET_BACKLOG = 256
+OVERLOAD_RESPONSE_TIMEOUT_SECONDS = 1.0
+BYTES_PER_KIBIBYTE = 1024
+WEB_ASSETS = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/app.css": "app.css",
+    "/app.js": "app.js",
+}
+
+
+def _dashboard_wait_page(
+    name: str,
+    detail: str,
+    retry_path: str,
+    refresh: tuple[float, str] | None,
+) -> bytes:
+    refresh_tag = ""
+    if refresh is not None:
+        delay, next_path = refresh
+        refresh_tag = (
+            f'<meta http-equiv="refresh" content="{delay:g};url={html.escape(next_path, quote=True)}">'
+        )
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"{refresh_tag}<title>Preparing SBK Dashboard</title>"
+        "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07131d;color:#e7f8ff;"
+        "font:16px system-ui,sans-serif}.card{max-width:36rem;padding:2rem;border:1px solid #246477;border-radius:1rem;"
+        "background:#0d2230}h1{margin-top:0;color:#55e6cf}p{line-height:1.5}a{color:#68b8ff}</style></head>"
+        f"<body><main class=\"card\"><h1>Preparing {html.escape(name)}</h1><p>{html.escape(detail)}</p>"
+        f"<p><a href=\"{html.escape(retry_path, quote=True)}\">Retry now</a> · "
+        "<a href=\"/\">Return to SBK Dashboard</a></p></main></body></html>"
+    ).encode()
 
 
 def _render_javascript(body: bytes) -> bytes:
@@ -92,7 +130,10 @@ class RecentClientActivity:
         if surface not in self._values:
             raise ValueError("Activity surface must be landing or grafana")
         if not CLIENT_ID_PATTERN.fullmatch(client_id):
-            raise ValueError("Client ID must contain 16 to 64 URL-safe characters")
+            raise ValueError(
+                f"Client ID must contain {MIN_CLIENT_ID_CHARACTERS} to "
+                f"{MAX_CLIENT_ID_CHARACTERS} URL-safe characters"
+            )
         observed = time.monotonic() if now is None else now
         with self._lock:
             values = self._values[surface]
@@ -181,7 +222,7 @@ class DashboardHttpServer:
             self._server.shutdown()
             self._server.server_close()
             if self._thread and self._thread is not threading.current_thread():
-                self._thread.join(timeout=3)
+                self._thread.join(timeout=SERVER_THREAD_JOIN_SECONDS)
             self._server.close_pool()
             self.lifecycle.transition(LifecycleState.STOPPED)
 
@@ -194,7 +235,7 @@ class DashboardHttpServer:
             if path == "/api/health":
                 self._require(request, "GET")
                 healthy = self.monitoring.healthy()
-                self._json(request, 200 if healthy else 503,
+                self._json(request, HTTPStatus.OK if healthy else HTTPStatus.SERVICE_UNAVAILABLE,
                            {"status": "ok" if healthy else "degraded", "authentication": False,
                             "targets": len(self.registry.list())})
             elif path.startswith("/api/activity/"):
@@ -203,20 +244,24 @@ class DashboardHttpServer:
                 self._targets(request)
             elif path == "/api/comparison-dashboard":
                 self._comparison_dashboard(request)
+            elif path.startswith("/dashboards/"):
+                self._dashboard_open(request, path[len("/dashboards/"):])
+            elif path.startswith("/comparisons/"):
+                self._comparison_open(request, path[len("/comparisons/"):])
             elif path.startswith("/api/targets/"):
                 self._target(request, path[len("/api/targets/"):])
             else:
                 self._asset(request, path)
         except MethodNotAllowed as error:
-            self._json(request, 405, {"error": str(error)}, {"Allow": error.expected})
+            self._json(request, HTTPStatus.METHOD_NOT_ALLOWED, {"error": str(error)}, {"Allow": error.expected})
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
-            self._json(request, 400, {"error": str(error) or "Request body is not valid JSON"})
+            self._json(request, HTTPStatus.BAD_REQUEST, {"error": str(error) or "Request body is not valid JSON"})
         except OSError as error:
             LOGGER.error("Request failed: %s", error)
-            self._json(request, 500, {"error": "Unable to update dashboard state"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Unable to update dashboard state"})
         except Exception as error:  # defensive HTTP boundary
             LOGGER.exception("Unexpected request failure: %s", error)
-            self._json(request, 500, {"error": "Unexpected server error"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Unexpected server error"})
 
     def _activity(self, request: BaseHTTPRequestHandler, surface: str) -> None:
         self._require(request, "POST")
@@ -231,7 +276,7 @@ class DashboardHttpServer:
 
     def _targets(self, request: BaseHTTPRequestHandler) -> None:
         if request.command == "GET":
-            self._json(request, 200, [self._view(request, target) for target in self.registry.list()])
+            self._json(request, HTTPStatus.OK, [self._view(request, target) for target in self.registry.list()])
             return
         self._require(request, "POST")
         body = self._read_json(request)
@@ -254,7 +299,8 @@ class DashboardHttpServer:
                         raise OSError("Unable to roll back failed target registration") from rollback_error
                     self._best_effort_reconcile("registration rollback")
                     raise
-        self._json(request, 201 if registration.created else 200, self._view(request, target))
+        status = HTTPStatus.CREATED if registration.created else HTTPStatus.OK
+        self._json(request, status, self._view(request, target))
 
     def _comparison_dashboard(self, request: BaseHTTPRequestHandler) -> None:
         self._require(request, "POST")
@@ -263,10 +309,10 @@ class DashboardHttpServer:
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError("Target IDs must be an array of strings")
         if len(values) < MIN_COMPARISON_TARGETS:
-            raise ValueError("Select at least two endpoints to compare")
+            raise ValueError("Select at least one endpoint to compare")
         if len(values) > MAX_COMPARISON_TARGETS:
             raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
-        target_ids = list(dict.fromkeys(values))
+        target_ids = sorted(dict.fromkeys(values))
         if len(target_ids) != len(values):
             raise ValueError("Comparison endpoints must be unique")
         with self._mutation_lock:
@@ -279,12 +325,14 @@ class DashboardHttpServer:
                 target_ids, self._request_hostname(request)
             )
             dashboard_id = self.monitoring.comparison_dashboard_id(target_ids)
+            dashboard_open_url = self._comparison_open_url(dashboard_id, target_ids)
         self._json(
             request,
-            200,
+            HTTPStatus.OK,
             {
                 "dashboardId": dashboard_id,
                 "dashboardUrl": dashboard_url,
+                "dashboardOpenUrl": dashboard_open_url,
                 "classicDashboardUrl": classic_dashboard_url,
             },
         )
@@ -294,20 +342,27 @@ class DashboardHttpServer:
         target_id = unquote(identifier)
         target = self.registry.find(target_id)
         if "/" in target_id or target is None:
-            self._json(request, 404, {"error": "Target not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
             return
         if separator and action == "dashboard":
             self._require(request, "GET")
-            self._json(request, 200, {"dashboardUrl": self._dashboard_url(request, target_id)})
+            self._json(
+                request,
+                HTTPStatus.OK,
+                {
+                    "dashboardUrl": self._dashboard_url(request, target_id),
+                    "ready": self.monitoring.dashboard_ready(target_id),
+                },
+            )
             return
         if separator:
-            self._json(request, 404, {"error": "Not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         self._require(request, "DELETE")
         with self._mutation_lock:
             target = self.registry.find(target_id)
             if target is None or not self.registry.remove(target_id):
-                self._json(request, 404, {"error": "Target not found"})
+                self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
                 return
             try:
                 self.monitoring.reconcile(self.registry.list())
@@ -321,6 +376,108 @@ class DashboardHttpServer:
         request.send_response(HTTPStatus.NO_CONTENT)
         request.end_headers()
 
+    def _dashboard_open(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
+        """Wait across bounded browser refreshes until Grafana has imported one dashboard UID."""
+        self._require(request, "GET")
+        target_id = unquote(encoded)
+        target = self.registry.find(target_id)
+        if "/" in target_id or target is None:
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Target not found"})
+            return
+        if self.monitoring.dashboard_ready(target_id):
+            request.send_response(HTTPStatus.FOUND)
+            request.send_header("Location", self._dashboard_url(request, target_id))
+            request.send_header("Cache-Control", "no-store")
+            request.end_headers()
+            return
+        query = parse_qs(urlparse(request.path).query)
+        try:
+            attempt = int(query.get("attempt", ["0"])[0])
+        except (TypeError, ValueError):
+            attempt = 0
+        attempt = max(0, attempt)
+        retry_path = f"/dashboards/{quote(target_id, safe='')}"
+        if attempt >= len(DASHBOARD_READINESS_RETRY_DELAYS_SECONDS):
+            body = _dashboard_wait_page(
+                target.name,
+                "Grafana is still provisioning this dashboard.",
+                retry_path,
+                None,
+            )
+            self._html(request, HTTPStatus.SERVICE_UNAVAILABLE, body)
+            return
+        delay = DASHBOARD_READINESS_RETRY_DELAYS_SECONDS[attempt]
+        next_path = f"{retry_path}?attempt={attempt + 1}"
+        body = _dashboard_wait_page(
+            target.name,
+            "Grafana is importing the new dashboard. This page will open it automatically.",
+            retry_path,
+            (delay, next_path),
+        )
+        self._html(request, HTTPStatus.ACCEPTED, body)
+
+    def _comparison_open(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
+        """Redirect into the comparison app only after Grafana imports its descriptor UID."""
+        self._require(request, "GET")
+        comparison_uid = unquote(encoded)
+        query = parse_qs(urlparse(request.path).query)
+        target_ids = sorted(query.get("targetId", []))
+        if (
+            "/" in comparison_uid
+            or len(target_ids) < MIN_COMPARISON_TARGETS
+            or len(target_ids) > MAX_COMPARISON_TARGETS
+            or len(set(target_ids)) != len(target_ids)
+            or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
+        ):
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
+            return
+        with self._mutation_lock:
+            if any(self.registry.find(target_id) is None for target_id in target_ids):
+                self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
+                return
+            dashboard_url = self.monitoring.comparison_dashboard_url(
+                target_ids, self._request_hostname(request)
+            )
+        if self.monitoring.comparison_dashboard_ready(comparison_uid):
+            request.send_response(HTTPStatus.FOUND)
+            request.send_header("Location", dashboard_url)
+            request.send_header("Cache-Control", "no-store")
+            request.end_headers()
+            return
+        try:
+            attempt = int(query.get("attempt", ["0"])[0])
+        except (TypeError, ValueError):
+            attempt = 0
+        attempt = max(0, attempt)
+        retry_path = self._comparison_open_url(comparison_uid, target_ids)
+        if attempt >= len(DASHBOARD_READINESS_RETRY_DELAYS_SECONDS):
+            body = _dashboard_wait_page(
+                "SBK/SBM comparison",
+                "Grafana is still provisioning this comparison.",
+                retry_path,
+                None,
+            )
+            self._html(request, HTTPStatus.SERVICE_UNAVAILABLE, body)
+            return
+        delay = DASHBOARD_READINESS_RETRY_DELAYS_SECONDS[attempt]
+        next_path = self._comparison_open_url(comparison_uid, target_ids, attempt + 1)
+        body = _dashboard_wait_page(
+            "SBK/SBM comparison",
+            "Grafana is importing the comparison descriptor. This page will open it automatically.",
+            retry_path,
+            (delay, next_path),
+        )
+        self._html(request, HTTPStatus.ACCEPTED, body)
+
+    @staticmethod
+    def _comparison_open_url(
+        comparison_uid: str, target_ids: list[str], attempt: int | None = None
+    ) -> str:
+        values = [("targetId", target_id) for target_id in target_ids]
+        if attempt is not None:
+            values.append(("attempt", str(attempt)))
+        return f"/comparisons/{quote(comparison_uid, safe='')}?{urlencode(values)}"
+
     def _best_effort_reconcile(self, operation: str) -> None:
         try:
             self.monitoring.reconcile(self.registry.list())
@@ -329,10 +486,9 @@ class DashboardHttpServer:
 
     def _asset(self, request: BaseHTTPRequestHandler, path: str) -> None:
         self._require(request, "GET")
-        assets = {"/": "index.html", "/index.html": "index.html", "/app.css": "app.css", "/app.js": "app.js"}
-        name = assets.get(path)
+        name = WEB_ASSETS.get(path)
         if name is None:
-            self._json(request, 404, {"error": "Not found"})
+            self._json(request, HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
         resource_root = files("sbk_dashboard").joinpath("resources/web")
         resource = resource_root.joinpath(name)
@@ -343,7 +499,7 @@ class DashboardHttpServer:
                 javascript = _render_javascript(resource_root.joinpath("app.js").read_bytes())
                 fingerprint = hashlib.sha256(
                     stylesheet + javascript
-                ).hexdigest()[:12]
+                ).hexdigest()[:ASSET_FINGERPRINT_HEX_LENGTH]
                 body = body.replace(b"__ASSET_VERSION__", fingerprint.encode("ascii"))
                 body = body.replace(
                     b"__DEFAULT_TARGET_HOST__",
@@ -352,12 +508,12 @@ class DashboardHttpServer:
             elif name == "app.js":
                 body = _render_javascript(body)
         except OSError:
-            self._json(request, 500, {"error": "Missing application asset"})
+            self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Missing application asset"})
             return
         content_type = (
             "text/html" if name.endswith(".html") else "text/css" if name.endswith(".css") else "text/javascript"
         )
-        request.send_response(200)
+        request.send_response(HTTPStatus.OK)
         request.send_header("Content-Type", f"{content_type}; charset=utf-8")
         # Asset URLs are stable across releases. Require revalidation so a newly
         # deployed HTML document can never run with an older cached script/style.
@@ -372,6 +528,7 @@ class DashboardHttpServer:
             "metricsPath": target.metrics_path, "kind": target.kind, "createdAt": target.created_at,
             "status": self.monitoring.status(target.id).api(),
             "dashboardUrl": self._dashboard_url(request, target.id),
+            "dashboardOpenUrl": f"/dashboards/{quote(target.id, safe='')}",
         }
 
     def _dashboard_url(self, request: BaseHTTPRequestHandler, target_id: str) -> str:
@@ -405,7 +562,7 @@ class DashboardHttpServer:
         if length < 0:
             raise ValueError("Invalid Content-Length")
         if length > MAX_REQUEST_BYTES:
-            raise ValueError(f"Request body exceeds {MAX_REQUEST_BYTES // 1024} KiB")
+            raise ValueError(f"Request body exceeds {MAX_REQUEST_BYTES // BYTES_PER_KIBIBYTE} KiB")
         value = json.loads(request.rfile.read(length))
         if not isinstance(value, dict):
             raise ValueError("Request body must be a JSON object")
@@ -429,6 +586,15 @@ class DashboardHttpServer:
         request.end_headers()
         request.wfile.write(body)
 
+    @staticmethod
+    def _html(request: BaseHTTPRequestHandler, status: int, body: bytes) -> None:
+        request.send_response(status)
+        request.send_header("Content-Type", "text/html; charset=utf-8")
+        request.send_header("Cache-Control", "no-store")
+        request.send_header("Content-Length", str(len(body)))
+        request.end_headers()
+        request.wfile.write(body)
+
 
 class MethodNotAllowed(RuntimeError):
     def __init__(self, expected: str) -> None:
@@ -449,7 +615,9 @@ class BoundedThreadPoolHttpServer(HTTPServer):
         queue_capacity: int,
         request_timeout: int,
     ) -> None:
-        self.request_queue_size = min(max(workers + queue_capacity, 5), 256)
+        self.request_queue_size = min(
+            max(workers + queue_capacity, MIN_SOCKET_BACKLOG), MAX_SOCKET_BACKLOG
+        )
         if ":" in server_address[0]:
             self.address_family = socket.AF_INET6
         super().__init__(server_address, handler)
@@ -513,7 +681,7 @@ class BoundedThreadPoolHttpServer(HTTPServer):
             + body
         )
         try:
-            request.settimeout(1)
+            request.settimeout(OVERLOAD_RESPONSE_TIMEOUT_SECONDS)
             request.sendall(response)
         except OSError:
             pass

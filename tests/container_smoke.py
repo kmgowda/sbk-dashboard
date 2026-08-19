@@ -159,6 +159,7 @@ class ContainerSmoke:
         for target in targets:
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard_ready(target)
             self._wait_for_dashboard(target["dashboardUrl"])
         if comparison is not None:
             repeated_comparison = self._comparison_dashboard(list(reversed(target_ids)))
@@ -209,7 +210,10 @@ class ContainerSmoke:
             target_ids.append(target["id"])
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard_ready(target)
             self._wait_for_dashboard(target["dashboardUrl"])
+        single_range_comparison = self._comparison_dashboard(target_ids[:1])
+        self._assert_comparison_dashboard(single_range_comparison, target_ids[:1])
         comparison = self._comparison_dashboard(target_ids) if len(target_ids) >= 2 else None
         if comparison is not None:
             self._assert_comparison_dashboard(comparison, target_ids)
@@ -255,11 +259,20 @@ class ContainerSmoke:
         self, comparison: dict[str, Any], target_ids: list[str]
     ) -> None:
         dashboard_id = comparison.get("dashboardId")
-        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/a/kmg-sbkcomparison-app?comparisonUid={dashboard_id}"
+        expected_prefix = f"http://127.0.0.1:{self.grafana_port}/a/sbkcomparison-app?comparisonUid={dashboard_id}"
         if not isinstance(dashboard_id, str) or not dashboard_id.startswith("sbk-comparison-"):
             raise AssertionError(f"Invalid comparison dashboard ID: {comparison}")
         if not str(comparison.get("dashboardUrl", "")).startswith(expected_prefix):
             raise AssertionError(f"Comparison URL is not host-accessible: {comparison}")
+        expected_query = urllib.parse.urlencode([
+            ("targetId", target_id) for target_id in sorted(target_ids)
+        ])
+        expected_open_url = f"/comparisons/{dashboard_id}?{expected_query}"
+        if comparison.get("dashboardOpenUrl") != expected_open_url:
+            raise AssertionError(f"Comparison readiness URL is invalid: {comparison}")
+        self._wait_for_dashboard(
+            f"http://127.0.0.1:{self.dashboard_port}{expected_open_url}"
+        )
         self._wait_for_dashboard(str(comparison["dashboardUrl"]))
         classic_url = str(comparison.get("classicDashboardUrl", ""))
         if not classic_url.startswith(f"http://127.0.0.1:{self.grafana_port}/d/{dashboard_id}/"):
@@ -278,17 +291,26 @@ class ContainerSmoke:
             "print(json.dumps({'panels': panels(root), "
             "'ids': root.get('sbkDashboardComparisonEndpointIds'), "
             "'timeGroups': root.get('sbkDashboardComparisonPolicy', {}).get('maxTimeGroups'), "
+            "'minLanes': root.get('sbkDashboardComparisonPolicy', {}).get('minSingleTargetTimeLanes'), "
+            "'maxLanes': root.get('sbkDashboardComparisonPolicy', {}).get('maxTimeLanes'), "
             "'absoluteDays': root.get('sbkDashboardComparisonPolicy', {}).get('maxAbsoluteRangeDays')}))\n"
         )
         details = json.loads(
             command("docker", "exec", self.name, "python", "-c", verification_script).stdout
         )
-        if details != {"panels": 53, "ids": sorted(target_ids), "timeGroups": 4, "absoluteDays": 31}:
+        if details != {
+            "panels": 53,
+            "ids": sorted(target_ids),
+            "timeGroups": 4,
+            "minLanes": 2,
+            "maxLanes": 8,
+            "absoluteDays": 31,
+        }:
             raise AssertionError(f"Invalid generated comparison dashboard: {details}")
         command(
             "docker", "exec", self.name, "test", "-f",
             "/var/lib/sbk-dashboard/monitoring/grafana/data/plugins/"
-            "kmg-sbkcomparison-app/module.js",
+            "sbkcomparison-app/module.js",
         )
 
     def _start(self) -> None:
@@ -339,6 +361,24 @@ class ContainerSmoke:
 
     def _wait_for_dashboard(self, url: str) -> None:
         wait_for(url, 60)
+
+    def _wait_for_dashboard_ready(self, target: dict[str, Any]) -> None:
+        target_id = str(target["id"])
+        expected_open_url = f"/dashboards/{target_id}"
+        if target.get("dashboardOpenUrl") != expected_open_url:
+            raise AssertionError(f"Unexpected dashboard readiness URL: {target}")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            _, body = request(
+                f"http://127.0.0.1:{self.dashboard_port}/api/targets/{target_id}/dashboard"
+            )
+            status = json.loads(body)
+            if status.get("ready") is True:
+                if status.get("dashboardUrl") != target["dashboardUrl"]:
+                    raise AssertionError(f"Dashboard readiness URL drifted: {status}")
+                return
+            time.sleep(1)
+        raise AssertionError(f"Grafana never imported dashboard {target_id}")
 
     def _wait_for_target_up(self, target_id: str) -> None:
         deadline = time.monotonic() + 60

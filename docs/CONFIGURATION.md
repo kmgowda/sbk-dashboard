@@ -36,7 +36,8 @@ CLI options override their corresponding environment variable. Environment varia
 Operational-only variables without a CLI form are selected directly from the environment. Blank environment
 values are treated as unset.
 
-Comparison limits are deliberately fixed application policy, not operator options: 2–8 targets, four distinct time
+Comparison limits are deliberately fixed application policy, not operator options: one target with 2–8 time lanes
+or 2–8 distinct targets, four distinct time
 groups, a 31-day maximum fixed range, and 128 cached descriptors. See [Comparison](COMPARISON.md).
 
 ## Command-line options

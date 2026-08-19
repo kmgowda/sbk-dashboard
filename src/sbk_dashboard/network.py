@@ -14,13 +14,21 @@ from __future__ import annotations
 import ipaddress
 import re
 
-DNS_LABEL_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+MAX_DNS_NAME_CHARACTERS = 253
+MAX_DNS_LABEL_INTERIOR_CHARACTERS = 61
+DNS_LABEL_PATTERN = re.compile(
+    rf"[A-Za-z0-9](?:[A-Za-z0-9-]{{0,{MAX_DNS_LABEL_INTERIOR_CHARACTERS}}}[A-Za-z0-9])?"
+)
 
 
 def normalize_host(value: str | None, name: str, *, allow_unspecified: bool) -> str:
     """Return a canonical IP literal or conservative DNS name without network I/O."""
     selected = value.strip() if value is not None else ""
-    if not selected or len(selected) > 253 or any(character.isspace() for character in selected):
+    if (
+        not selected
+        or len(selected) > MAX_DNS_NAME_CHARACTERS
+        or any(character.isspace() for character in selected)
+    ):
         raise ValueError(f"{name} is invalid")
 
     bracketed = selected.startswith("[") or selected.endswith("]")
@@ -44,7 +52,7 @@ def normalize_host(value: str | None, name: str, *, allow_unspecified: bool) -> 
             raise ValueError(f"{name} is invalid") from None
         return normalized
 
-    if bracketed and address.version != 6:
+    if bracketed and not isinstance(address, ipaddress.IPv6Address):
         raise ValueError(f"{name} is invalid")
     if not allow_unspecified and address.is_unspecified:
         raise ValueError(f"{name} is invalid")

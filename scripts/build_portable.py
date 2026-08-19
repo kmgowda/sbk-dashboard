@@ -25,6 +25,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORY = ROOT / "src"
+HASH_CHUNK_BYTES = 1024 * 1024
 if str(SOURCE_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIRECTORY))
 
@@ -44,7 +45,7 @@ def current_platform() -> str:
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
 

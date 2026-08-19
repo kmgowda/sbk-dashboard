@@ -12,6 +12,9 @@
 ARG PYTHON_BASE_NAME=python:3.12.13-slim-trixie
 ARG PYTHON_BASE_DIGEST=sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 ARG PYTHON_BASE=${PYTHON_BASE_NAME}@${PYTHON_BASE_DIGEST}
+ARG NATIVE_DOWNLOAD_RETRIES=3
+ARG NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS=15
+ARG NATIVE_DOWNLOAD_TIMEOUT_SECONDS=600
 
 FROM ${PYTHON_BASE} AS package-builder
 WORKDIR /source
@@ -35,6 +38,9 @@ RUN apt-get update \
 
 FROM native-download-base AS prometheus-tools
 ARG TARGETARCH
+ARG NATIVE_DOWNLOAD_RETRIES
+ARG NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS
+ARG NATIVE_DOWNLOAD_TIMEOUT_SECONDS
 RUN --mount=type=cache,id=sbk-dashboard-prometheus-downloads,target=/var/cache/sbk-downloads,sharing=locked \
     set -eux; \
     target_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -51,7 +57,9 @@ RUN --mount=type=cache,id=sbk-dashboard-prometheus-downloads,target=/var/cache/s
     cached_archive="/var/cache/sbk-downloads/${prometheus_archive}"; \
     if ! echo "${prometheus_sha}  ${cached_archive}" | sha256sum --check --strict --status; then \
       rm -f "${cached_archive}" "${cached_archive}.part"; \
-      curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      curl --fail --location --retry "${NATIVE_DOWNLOAD_RETRIES}" --retry-all-errors \
+        --connect-timeout "${NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${NATIVE_DOWNLOAD_TIMEOUT_SECONDS}" \
         --max-filesize "${max_download_bytes}" \
         --output "${cached_archive}.part" \
         "${prometheus_url}"; \
@@ -65,6 +73,9 @@ RUN --mount=type=cache,id=sbk-dashboard-prometheus-downloads,target=/var/cache/s
 
 FROM native-download-base AS grafana-tools
 ARG TARGETARCH
+ARG NATIVE_DOWNLOAD_RETRIES
+ARG NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS
+ARG NATIVE_DOWNLOAD_TIMEOUT_SECONDS
 RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-downloads,sharing=locked \
     set -eux; \
     target_arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
@@ -81,7 +92,9 @@ RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-
     cached_archive="/var/cache/sbk-downloads/${grafana_archive}"; \
     if ! echo "${grafana_sha}  ${cached_archive}" | sha256sum --check --strict --status; then \
       rm -f "${cached_archive}" "${cached_archive}.part"; \
-      curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      curl --fail --location --retry "${NATIVE_DOWNLOAD_RETRIES}" --retry-all-errors \
+        --connect-timeout "${NATIVE_DOWNLOAD_CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${NATIVE_DOWNLOAD_TIMEOUT_SECONDS}" \
         --max-filesize "${max_download_bytes}" \
         --output "${cached_archive}.part" \
         "${grafana_url}"; \
@@ -143,12 +156,13 @@ ENV HOME=/var/lib/sbk-dashboard \
     SBK_DASHBOARD_PROMETHEUS_BIN=/opt/prometheus/prometheus \
     SBK_DASHBOARD_PROMETHEUS_BIND=127.0.0.1 \
     SBK_DASHBOARD_GRAFANA_HOME=/opt/grafana \
-    SBK_DASHBOARD_GRAFANA_BIND=0.0.0.0
+    SBK_DASHBOARD_GRAFANA_BIND=0.0.0.0 \
+    SBK_DASHBOARD_CONTAINER_HEALTH_TIMEOUT_SECONDS=3
 USER 10001:10001
 WORKDIR /var/lib/sbk-dashboard
 VOLUME ["/var/lib/sbk-dashboard"]
 EXPOSE 9721 3000
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=15s --timeout=5s --start-period=120s --retries=4 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9721/api/health', timeout=3).close()"]
+    CMD ["python", "-c", "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:9721/api/health', timeout=float(os.environ['SBK_DASHBOARD_CONTAINER_HEALTH_TIMEOUT_SECONDS'])).close()"]
 ENTRYPOINT ["/usr/bin/tini", "--", "sbk-dashboard"]

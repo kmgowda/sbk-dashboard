@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
+BOOTSTRAP_PROPERTIES_PATH = SCRIPT_DIRECTORY / "portable-bootstrap.properties"
 if str(SCRIPT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIRECTORY))
 
@@ -48,10 +49,27 @@ from sbk_dashboard.contracts import (  # noqa: E402
 from sbk_dashboard.layout import PortableHomeLayout  # noqa: E402
 from sbk_dashboard.platforms import portable_platform_id  # noqa: E402
 
+
+def positive_bootstrap_property(name: str) -> float:
+    """Read one positive numeric dependency-free bootstrap policy value."""
+    prefix = f"{name}="
+    try:
+        lines = BOOTSTRAP_PROPERTIES_PATH.read_text(encoding="utf-8").splitlines()
+        raw = next(line[len(prefix) :] for line in lines if line.startswith(prefix))
+        value = float(raw)
+    except (OSError, StopIteration, ValueError) as error:
+        raise SystemExit(f"Portable bootstrap property {name!r} is missing or invalid.") from error
+    if value <= 0:
+        raise SystemExit(f"Portable bootstrap property {name!r} must be positive.")
+    return value
+
+
 REQUIRED_MODULES = ("psutil", "sbk_dashboard")
-LOCK_WAIT_SECONDS = 180.0
-LOCK_STALE_SECONDS = 600.0
+LOCK_WAIT_SECONDS = positive_bootstrap_property("lock.wait.seconds")
+LOCK_STALE_SECONDS = positive_bootstrap_property("lock.stale.seconds")
+LOCK_POLL_SECONDS = positive_bootstrap_property("lock.poll.milliseconds") / 1000
 KEEP_RUNTIME_VERSIONS = 2
+FINGERPRINT_HEX_CHARACTERS = 16
 VERSION_PREFIX = 'VERSION = "'
 FINGERPRINT_ROOT_FILES = ("pyproject.toml", "MANIFEST.in")
 FINGERPRINT_EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
@@ -111,7 +129,7 @@ def source_fingerprint(project_directory: Path) -> str:
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")
-    return digest.hexdigest()[:16]
+    return digest.hexdigest()[:FINGERPRINT_HEX_CHARACTERS]
 
 
 def runtime_directory(home: Path, version: str, fingerprint: str) -> Path:
@@ -203,7 +221,7 @@ class InstallLock:
                 descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             except FileExistsError:
                 if self._remove_stale() or time.monotonic() < deadline:
-                    time.sleep(0.2)
+                    time.sleep(LOCK_POLL_SECONDS)
                     continue
                 raise SystemExit(f"Timed out waiting for portable runtime installation lock {self.path}.") from None
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:
@@ -367,7 +385,9 @@ def prune_runtimes(parent: Path, current: Path) -> None:
 def active_environment_marker(
     home: Path, project_directory: Path, fingerprint: str | None = None
 ) -> Path:
-    interpreter = hashlib.sha256(str(Path(sys.executable).resolve()).encode()).hexdigest()[:16]
+    interpreter = hashlib.sha256(str(Path(sys.executable).resolve()).encode()).hexdigest()[
+        :FINGERPRINT_HEX_CHARACTERS
+    ]
     selected_fingerprint = fingerprint or source_fingerprint(project_directory)
     return home / "app" / "active" / interpreter / f"{selected_fingerprint}.json"
 
