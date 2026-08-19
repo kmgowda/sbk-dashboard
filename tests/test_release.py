@@ -8,13 +8,14 @@
 ##
 
 import hashlib
+import io
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from scripts import build_release_manifest, release
+from scripts import build_release_manifest, release, select_release_assets
 from scripts.release_contract import (
     CHECKSUMS_FILENAME,
     RELEASE_MANIFEST_FILENAME,
@@ -36,6 +37,7 @@ def plan() -> release.ReleasePlan:
         repository="kmgowda/sbk-dashboard",
         remote="origin",
         branch="main",
+        checked_branch="main",
         image="kmgowda/sbk-dashboard",
     )
 
@@ -149,6 +151,12 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertEqual(runs[2], release.matching_workflow_run(runs, COMMIT, "main"))
         self.assertIsNone(release.matching_workflow_run(runs, COMMIT, "missing"))
 
+    def test_matching_workflow_accepts_fully_qualified_refs(self):
+        head = {"head_sha": COMMIT, "head_branch": "refs/heads/main"}
+        tag = {"head_sha": COMMIT, "head_branch": "refs/tags/v1.2.3.4"}
+        self.assertEqual(head, release.matching_workflow_run([head], COMMIT, "main"))
+        self.assertEqual(tag, release.matching_workflow_run([tag], COMMIT, "v1.2.3.4"))
+
     def test_pr_branch_check_may_differ_from_remote_main(self):
         git = Mock()
         git.clean.return_value = True
@@ -170,6 +178,16 @@ class ReleaseContractTest(unittest.TestCase):
                 online=False,
             )
         self.assertEqual(COMMIT, selected.commit)
+        self.assertEqual("release-feature", selected.checked_branch)
+        self.assertEqual("main", selected.branch)
+
+    def test_api_headers_are_specific_to_github_and_docker_hub(self):
+        github = release.GitHubClient("kmgowda/sbk-dashboard", "token")
+        docker_hub = release.DockerHubClient("kmgowda/sbk-dashboard")
+        self.assertEqual(release.GITHUB_ACCEPT, github.api.accept)
+        self.assertEqual(release.GITHUB_API_VERSION, github.api.api_version)
+        self.assertEqual(release.JSON_ACCEPT, docker_hub.api.accept)
+        self.assertIsNone(docker_hub.api.api_version)
 
     def test_wait_for_workflow_rejects_failed_exact_commit(self):
         github = Mock()
@@ -192,6 +210,90 @@ class ReleaseContractTest(unittest.TestCase):
                 timeout_seconds=1,
                 poll_seconds=0.01,
             )
+
+    def test_wait_for_assets_retries_while_generated_notes_are_empty(self):
+        selected = plan()
+        assets = [{"name": name} for name in required_release_assets(VERSION)]
+        github = Mock()
+        github.release.side_effect = [
+            {"assets": assets, "body": ""},
+            {"assets": assets, "body": "Generated notes"},
+        ]
+        sleeper = Mock()
+        monotonic = Mock(side_effect=[0, 0, 0, 0])
+        result = release.wait_for_assets(
+            github,
+            selected,
+            timeout_seconds=10,
+            poll_seconds=1,
+            sleeper=sleeper,
+            monotonic=monotonic,
+        )
+        self.assertEqual("Generated notes", result["body"])
+        sleeper.assert_called_once_with(1)
+
+    def test_docker_verification_honors_rate_limit_and_backs_off(self):
+        docker_hub = Mock()
+        docker_hub.digest.side_effect = [
+            release.RateLimitError("limited", 120),
+            "sha256:123",
+            "sha256:123",
+        ]
+        sleeper = Mock()
+        monotonic = Mock(side_effect=[0, 0, 0, 0])
+        digest = release.wait_for_docker_tags(
+            docker_hub,
+            plan(),
+            timeout_seconds=300,
+            poll_seconds=15,
+            sleeper=sleeper,
+            monotonic=monotonic,
+        )
+        self.assertEqual("sha256:123", digest)
+        sleeper.assert_called_once_with(120)
+
+    def test_retry_after_requires_a_positive_finite_delta(self):
+        self.assertEqual(30, release.retry_after_seconds("30"))
+        for value in (None, "date", "0", "-1", "inf"):
+            self.assertIsNone(release.retry_after_seconds(value))
+
+    def test_json_api_exposes_http_429_retry_after(self):
+        error = release.urllib.error.HTTPError(
+            "https://example.test/api",
+            429,
+            "rate limited",
+            {"Retry-After": "45"},
+            io.BytesIO(b'{"message":"slow down"}'),
+        )
+        with (
+            patch.object(release.urllib.request, "urlopen", side_effect=error),
+            self.assertRaises(release.RateLimitError) as raised,
+        ):
+            release.JsonApi("https://example.test").request("GET", "/api")
+        self.assertEqual(45, raised.exception.retry_after)
+
+    def test_asset_rerun_selects_only_missing_and_rejects_conflicts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_artifacts(directory)
+            build_release_manifest.build_manifest(directory, VERSION, release_tag(VERSION), COMMIT)
+            first_name = required_release_assets(VERSION)[0]
+            first_path = directory / first_name
+            existing = {
+                "name": first_name,
+                "size": first_path.stat().st_size,
+                "digest": f"sha256:{build_release_manifest.sha256(first_path)}",
+            }
+            missing = select_release_assets.missing_assets(
+                directory, VERSION, {"assets": [existing]}
+            )
+            self.assertEqual(len(required_release_assets(VERSION)) - 1, len(missing))
+            self.assertNotIn(first_path, missing)
+            existing["digest"] = "sha256:" + "0" * 64
+            with self.assertRaisesRegex(select_release_assets.AssetSelectionError, "differs"):
+                select_release_assets.missing_assets(
+                    directory, VERSION, {"assets": [existing]}
+                )
 
     def test_check_mode_never_calls_publish_or_remote_mutations(self):
         selected = plan()
@@ -309,6 +411,10 @@ class ReleaseContractTest(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/portable.yml").read_text(encoding="utf-8")
         self.assertIn("needs: [build, package]", workflow)
         self.assertIn("scripts/build_release_manifest.py", workflow)
+        self.assertIn("scripts/select_release_assets.py", workflow)
+        self.assertIn("missing_output=$(python scripts/select_release_assets.py", workflow)
+        self.assertNotIn("mapfile -t missing_assets < <(", workflow)
+        self.assertNotIn("--clobber", workflow)
         self.assertIn('if: github.event_name == \'release\'', workflow)
         self.assertNotIn("gh release upload \"${{ github.event.release.tag_name }}\" dist/portable/*", workflow)
 
