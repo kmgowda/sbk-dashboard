@@ -57,7 +57,8 @@ procedure in [Documentation validation](#documentation-validation), because a fe
 closed while containing invalid Mermaid.
 
 For live provisioning changes, register a previously unseen endpoint and immediately open its `dashboardOpenUrl`.
-Before Grafana imports the UID the route must return HTTP 202 with `Cache-Control: no-store`, never Grafana's 404.
+Also create a previously unseen comparison and immediately open its `/comparisons/<uid>?targetId=...` URL. Before
+Grafana imports either UID the route must return HTTP 202 with `Cache-Control: no-store`, never Grafana's 404.
 After the file-provider scan it must return HTTP 302 to the request-host-aware `dashboardUrl`. Repeat after a full
 restart and in the container smoke path; confirm the bounded sequence ends with a retry page if Grafana never imports
 the UID and leaves no waiting server thread between browser refreshes.

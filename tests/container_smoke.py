@@ -264,6 +264,15 @@ class ContainerSmoke:
             raise AssertionError(f"Invalid comparison dashboard ID: {comparison}")
         if not str(comparison.get("dashboardUrl", "")).startswith(expected_prefix):
             raise AssertionError(f"Comparison URL is not host-accessible: {comparison}")
+        expected_query = urllib.parse.urlencode([
+            ("targetId", target_id) for target_id in sorted(target_ids)
+        ])
+        expected_open_url = f"/comparisons/{dashboard_id}?{expected_query}"
+        if comparison.get("dashboardOpenUrl") != expected_open_url:
+            raise AssertionError(f"Comparison readiness URL is invalid: {comparison}")
+        self._wait_for_dashboard(
+            f"http://127.0.0.1:{self.dashboard_port}{expected_open_url}"
+        )
         self._wait_for_dashboard(str(comparison["dashboardUrl"]))
         classic_url = str(comparison.get("classicDashboardUrl", ""))
         if not classic_url.startswith(f"http://127.0.0.1:{self.grafana_port}/d/{dashboard_id}/"):

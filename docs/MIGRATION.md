@@ -32,6 +32,11 @@ loopback UID probes across browser refreshes and redirects only after Grafana re
 IDs, direct `dashboardUrl` values, bookmarks, persisted files, and Grafana URLs remain unchanged. API clients can use
 the new `dashboardOpenUrl` field or the `ready` field from `GET /api/targets/<id>/dashboard`.
 
+Comparison links now use the same readiness boundary. `POST /api/comparison-dashboard` adds a relative
+`dashboardOpenUrl` while retaining the existing direct `dashboardUrl` and `classicDashboardUrl`. The landing page
+uses the new URL, so a first open waits outside Grafana until the comparison UID is imported instead of briefly
+showing Grafana's misleading `Dashboard not found` page. Existing direct URLs and bookmarks remain compatible.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]

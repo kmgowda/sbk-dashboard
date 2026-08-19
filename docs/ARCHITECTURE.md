@@ -153,8 +153,9 @@ The comparison API normalizes 1–8 unique registered endpoint IDs by sorting th
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
 descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
 classic single-range fallback and is also the server-owned input to the bundled `kmg-sbkcomparison-app`. Grafana's
-file provider imports new descriptors asynchronously, so the app uses bounded exponential readiness checks long
-enough to cover the provider's observed polling cycle. One
+file provider imports new descriptors asynchronously. The landing page therefore opens the comparison-specific
+readiness gateway, which validates the endpoint set and redirects to the app only after that UID returns HTTP 200.
+The app retains bounded exponential readiness checks as defense in depth. One
 endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. Lane
 count and range selections live only in validated URL state, so this mode does not duplicate registrations,
 descriptors, discovery entries, or Prometheus series.

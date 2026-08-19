@@ -362,12 +362,12 @@ asset URLs and also requires browsers to revalidate those resources. Runtime pol
 the fingerprint just like source edits do. This prevents an upgrade from combining new HTML with an older cached
 script and displaying stale endpoint counters.
 
-**Open dashboard** uses a read-only readiness gateway rather than navigating directly to a newly written Grafana
-UID. Grafana's health endpoint can become ready before its asynchronous file provider imports that UID, so direct
-navigation previously produced a random short-lived `Dashboard not found` page. The gateway performs one bounded
-loopback readiness probe per browser refresh and redirects to the normal host-aware Grafana URL only after HTTP 200.
-REST responses retain `dashboardUrl` and also provide `dashboardOpenUrl`; the per-target dashboard endpoint reports
-`ready` for API clients.
+**Open dashboard** and comparison actions use read-only readiness gateways rather than navigating directly to a
+newly written Grafana UID. Grafana's health endpoint can become ready before its asynchronous file provider imports
+that UID, so direct navigation previously produced a random short-lived `Dashboard not found` page. The gateway
+performs one bounded loopback readiness probe per browser refresh and redirects to the normal host-aware Grafana URL
+only after HTTP 200. REST responses retain direct `dashboardUrl` values and also provide relative `dashboardOpenUrl`
+values; the per-target dashboard endpoint reports `ready` for API clients.
 
 The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
 opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,
@@ -632,9 +632,11 @@ with identical ranges share one bounded query group. The sorted endpoint-ID set 
 same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
 Comparison is bounded to eight lanes/targets, four distinct time groups, and a 31-day fixed range; the generated descriptor cache is
 bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
-Grafana imports a newly generated descriptor asynchronously. The app waits automatically through a bounded,
-low-frequency 37.5-second readiness window, so an ordinary provider cycle does not require closing or reopening the
-comparison. The classic single-range fallback uses the same provisioned descriptor.
+Grafana imports a newly generated descriptor asynchronously. The landing page first opens the response's
+`dashboardOpenUrl`, which probes that exact UID through the control plane and redirects into the app only after
+Grafana has imported it. The app retains its bounded, low-frequency 37.5-second readiness window as defense in depth,
+so an ordinary provider cycle does not require closing or reopening the comparison. The classic single-range
+fallback uses the same provisioned descriptor.
 The packaged comparison plugin carries a deterministic build revision, so restarting after a source update makes
 Grafana and the browser load the matching descriptor handling and canonical row layout instead of an older cached
 module. Reload any comparison tab that was already open before the restart.

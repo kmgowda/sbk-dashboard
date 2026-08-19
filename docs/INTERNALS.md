@@ -208,7 +208,9 @@ the canonical dashboard.
 `POST /api/comparison-dashboard` validates 1–8 unique registered IDs, sorts the set, and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
-provisioned-dashboard fallback URL. Repeating the same set in any order reuses the UID and file. The descriptor adds
+provisioned-dashboard fallback URL. It also returns a relative readiness URL; the landing page uses this gateway
+instead of entering the Grafana app before the descriptor UID exists. Repeating the same set in any order reuses the
+UID, file, and canonical gateway URL. The descriptor adds
 a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
 legends retain the readable name, kind, and immutable endpoint ID. Its title contains the UID digest so every cached
 descriptor is unique in Grafana's folder; Grafana disables file-provider writes when multiple files share a title.
@@ -255,7 +257,7 @@ For a current response, the stack builds a complete replacement status dictionar
 by Prometheus becomes `down`; it does not remain `pending` indefinitely. Readers receive already-published snapshots
 without network waits. Repeated identical refresh failures produce one warning until the error changes or recovers.
 
-## Dedicated-dashboard readiness
+## Dashboard readiness
 
 Writing `monitoring/grafana/dashboards/sbk-<id>.json` and Grafana serving that UID are separate events. Grafana's
 health endpoint may already be green while its asynchronous file provider is between scans. `dashboardUrl` remains
@@ -269,6 +271,13 @@ one browser-owned exponential refresh step. It never sleeps in a server worker. 
 37.5-second sequence it returns a friendly HTTP 503 page with manual retry; on readiness it redirects to the direct
 URL using the validated management request hostname. `GET /api/targets/<id>/dashboard` also includes a `ready`
 boolean for non-browser clients that need to avoid the same provisioning race.
+
+Comparison opens use the same readiness contract. `POST /api/comparison-dashboard` retains `dashboardUrl` as the
+stable direct app URL and returns `dashboardOpenUrl=/comparisons/<uid>?targetId=...` for browsers. Each gateway
+request revalidates the registered, order-independent endpoint set, idempotently ensures its descriptor, and probes
+that exact comparison UID. It redirects into the app only after Grafana returns HTTP 200. This prevents Grafana's
+own generic `Dashboard not found` page from handling the expected first file-provider 404. The app's internal
+bounded descriptor retries remain defense in depth for a later provider refresh or replacement.
 
 ## HTTP concurrency and browser activity
 

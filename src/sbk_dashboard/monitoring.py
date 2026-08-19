@@ -167,7 +167,13 @@ class ManagedMonitoringStack:
 
     def dashboard_ready(self, target_id: str) -> bool:
         """Probe Grafana's UID API once without waiting for its asynchronous file provider."""
-        uid = self.dashboard_provisioner.dashboard_uid(target_id)
+        return self._grafana_dashboard_ready(self.dashboard_provisioner.dashboard_uid(target_id))
+
+    def comparison_dashboard_ready(self, comparison_uid: str) -> bool:
+        """Return whether Grafana has imported one generated comparison descriptor."""
+        return self._grafana_dashboard_ready(comparison_uid)
+
+    def _grafana_dashboard_ready(self, uid: str) -> bool:
         host = _consumer_host(self.monitoring.grafana_bind_address)
         url = f"http://{host}:{self.monitoring.grafana_port}/api/dashboards/uid/{uid}"
         try:

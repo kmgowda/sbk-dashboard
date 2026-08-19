@@ -130,9 +130,10 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic app and classic-fallback URLs; one endpoint opens 2–8 time lanes |
+| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `GET /dashboards/<id>` | Probe Grafana's UID API and redirect a browser only after provisioning |
+| `GET /comparisons/<uid>?targetId=<id>...` | Validate a comparison and enter its app only after Grafana provisions the UID |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 
 Request bodies are JSON and capped at 64 KiB. Authentication is absent, so new mutating endpoints must not imply

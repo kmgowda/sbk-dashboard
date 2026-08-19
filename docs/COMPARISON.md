@@ -122,13 +122,17 @@ The response contains:
 {
   "dashboardId": "sbk-comparison-0123456789abcdef",
   "dashboardUrl": "http://127.0.0.1:3000/a/kmg-sbkcomparison-app?comparisonUid=sbk-comparison-0123456789abcdef",
+  "dashboardOpenUrl": "/comparisons/sbk-comparison-0123456789abcdef?targetId=1111111111111111&targetId=2222222222222222",
   "classicDashboardUrl": "http://127.0.0.1:3000/d/sbk-comparison-0123456789abcdef/?var-sbk_endpoints=..."
 }
 ```
 
-Use `dashboardUrl` for independent ranges. `classicDashboardUrl` is a compatibility fallback: it renders the exact
-provisioned canonical dashboard with one Grafana-wide range and cannot assign different ranges to individual targets.
-For a one-target request, that fallback is the ordinary single-range rendering, not a multi-range view.
+Browser clients should open `dashboardOpenUrl`. It stays on the management server while Grafana asynchronously
+imports a newly created descriptor, then redirects to `dashboardUrl` only after the exact UID exists. `dashboardUrl`
+remains the stable direct app URL for API compatibility and bookmarks. `classicDashboardUrl` is a compatibility
+fallback: it renders the exact provisioned canonical dashboard with one Grafana-wide range and cannot assign
+different ranges to individual targets. For a one-target request, that fallback is the ordinary single-range
+rendering, not a multi-range view.
 
 ## Implementation
 
@@ -155,9 +159,15 @@ sequenceDiagram
     participant P as Managed Prometheus
     U->>C: POST /api/comparison-dashboard (target IDs)
     C->>C: Validate, sort, hash, atomically write descriptor
-    C-->>U: App URL + classic fallback URL
+    C-->>U: Readiness URL + direct app URL + classic fallback
+    U->>C: Open readiness URL
+    loop Bounded browser refreshes
+        C->>G: GET /api/dashboards/uid/comparison UID
+        G-->>C: 404 until file-provider import; then 200
+    end
+    C-->>U: 302 to comparison app
     U->>G: Open comparison app
-    G->>G: Provision descriptor; validate policy/targets
+    G->>G: Validate provisioned descriptor policy/targets
     U->>G: Detach Board B to historical range
     G->>G: Group targets by exact range
     par Global live group

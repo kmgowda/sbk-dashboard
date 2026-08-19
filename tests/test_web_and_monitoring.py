@@ -37,6 +37,7 @@ class FakeMonitoring:
         self.targets = []
         self.reconcile_error = None
         self.dashboard_is_ready = True
+        self.comparison_is_ready = True
         self.dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
 
     def healthy(self):
@@ -77,6 +78,9 @@ class FakeMonitoring:
         normalized = sorted(set(target_ids))
         digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
         return f"sbk-comparison-{digest}"
+
+    def comparison_dashboard_ready(self, comparison_uid):
+        return self.comparison_is_ready
 
 
 class AssetRenderingTest(unittest.TestCase):
@@ -284,6 +288,7 @@ class WebTest(unittest.TestCase):
                 "http://dashboard.example:3000/a/kmg-sbkcomparison-app?comparisonUid="
             )
         )
+        self.assertTrue(body["dashboardOpenUrl"].startswith(f"/comparisons/{body['dashboardId']}?targetId="))
         self.assertEqual(2, body["classicDashboardUrl"].count("var-sbk_endpoints="))
         repeated = urllib.request.Request(
             self.base + "/api/comparison-dashboard",
@@ -295,6 +300,37 @@ class WebTest(unittest.TestCase):
             repeated_body = json.load(response)
         self.assertEqual(body, repeated_body)
         self.assertEqual({"SBK", "SBM"}, {target.kind for target in self.registry.list()})
+
+        self.monitoring.comparison_is_ready = False
+        with urllib.request.urlopen(self.base + body["dashboardOpenUrl"]) as response:
+            self.assertEqual(202, response.status)
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+            pending = response.read()
+        self.assertIn(b"importing the comparison descriptor", pending)
+        self.assertIn(b"attempt=1", pending)
+        with self.assertRaises(urllib.error.HTTPError) as exhausted:
+            urllib.request.urlopen(self.base + body["dashboardOpenUrl"] + "&attempt=99")
+        self.assertEqual(503, exhausted.exception.code)
+        self.assertIn(b"still provisioning this comparison", exhausted.exception.read())
+
+        invalid_open_url = body["dashboardOpenUrl"].replace(target_ids[0], "0" * 16)
+        with self.assertRaises(urllib.error.HTTPError) as missing:
+            urllib.request.urlopen(self.base + invalid_open_url)
+        self.assertEqual(404, missing.exception.code)
+        self.monitoring.comparison_is_ready = True
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, fp, code, message, headers, new_url):
+                return None
+
+        opener = urllib.request.build_opener(NoRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as redirected:
+            opener.open(urllib.request.Request(
+                self.base + body["dashboardOpenUrl"],
+                headers={"Host": "dashboard.example:9721"},
+            ))
+        self.assertEqual(302, redirected.exception.code)
+        self.assertEqual(body["dashboardUrl"], redirected.exception.headers["Location"])
 
     def test_rejects_invalid_comparison_selections(self):
         first = self.registry.register("One", "host", 9718, "/metrics")
@@ -575,6 +611,9 @@ class MonitoringContinueTest(unittest.TestCase):
             b'{"dashboard":{"uid":"sbk-new-target"}}'
         )
         self.assertTrue(stack.dashboard_ready("new-target"))
+        self.assertFalse(stack.comparison_dashboard_ready("sbk-comparison-0123456789abcdef"))
+        self.grafana_routes["/api/dashboards/uid/sbk-comparison-0123456789abcdef"] = b'{}'
+        self.assertTrue(stack.comparison_dashboard_ready("sbk-comparison-0123456789abcdef"))
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):
         data = Path(self.temporary.name)

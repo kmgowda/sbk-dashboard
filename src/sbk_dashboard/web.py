@@ -26,7 +26,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlparse, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 
 from sbk_dashboard.contracts import (
     CLIENT_ID_RANDOM_BYTES,
@@ -231,6 +231,8 @@ class DashboardHttpServer:
                 self._comparison_dashboard(request)
             elif path.startswith("/dashboards/"):
                 self._dashboard_open(request, path[len("/dashboards/"):])
+            elif path.startswith("/comparisons/"):
+                self._comparison_open(request, path[len("/comparisons/"):])
             elif path.startswith("/api/targets/"):
                 self._target(request, path[len("/api/targets/"):])
             else:
@@ -294,7 +296,7 @@ class DashboardHttpServer:
             raise ValueError("Select at least one endpoint to compare")
         if len(values) > MAX_COMPARISON_TARGETS:
             raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
-        target_ids = list(dict.fromkeys(values))
+        target_ids = sorted(dict.fromkeys(values))
         if len(target_ids) != len(values):
             raise ValueError("Comparison endpoints must be unique")
         with self._mutation_lock:
@@ -307,12 +309,14 @@ class DashboardHttpServer:
                 target_ids, self._request_hostname(request)
             )
             dashboard_id = self.monitoring.comparison_dashboard_id(target_ids)
+            dashboard_open_url = self._comparison_open_url(dashboard_id, target_ids)
         self._json(
             request,
             200,
             {
                 "dashboardId": dashboard_id,
                 "dashboardUrl": dashboard_url,
+                "dashboardOpenUrl": dashboard_open_url,
                 "classicDashboardUrl": classic_dashboard_url,
             },
         )
@@ -395,6 +399,68 @@ class DashboardHttpServer:
             (delay, next_path),
         )
         self._html(request, HTTPStatus.ACCEPTED, body)
+
+    def _comparison_open(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
+        """Redirect into the comparison app only after Grafana imports its descriptor UID."""
+        self._require(request, "GET")
+        comparison_uid = unquote(encoded)
+        query = parse_qs(urlparse(request.path).query)
+        target_ids = sorted(query.get("targetId", []))
+        if (
+            "/" in comparison_uid
+            or len(target_ids) < MIN_COMPARISON_TARGETS
+            or len(target_ids) > MAX_COMPARISON_TARGETS
+            or len(set(target_ids)) != len(target_ids)
+            or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
+        ):
+            self._json(request, 404, {"error": "Comparison not found"})
+            return
+        with self._mutation_lock:
+            if any(self.registry.find(target_id) is None for target_id in target_ids):
+                self._json(request, 404, {"error": "Comparison not found"})
+                return
+            dashboard_url = self.monitoring.comparison_dashboard_url(
+                target_ids, self._request_hostname(request)
+            )
+        if self.monitoring.comparison_dashboard_ready(comparison_uid):
+            request.send_response(HTTPStatus.FOUND)
+            request.send_header("Location", dashboard_url)
+            request.send_header("Cache-Control", "no-store")
+            request.end_headers()
+            return
+        try:
+            attempt = int(query.get("attempt", ["0"])[0])
+        except (TypeError, ValueError):
+            attempt = 0
+        attempt = max(0, attempt)
+        retry_path = self._comparison_open_url(comparison_uid, target_ids)
+        if attempt >= len(DASHBOARD_READINESS_RETRY_DELAYS_SECONDS):
+            body = _dashboard_wait_page(
+                "SBK/SBM comparison",
+                "Grafana is still provisioning this comparison.",
+                retry_path,
+                None,
+            )
+            self._html(request, HTTPStatus.SERVICE_UNAVAILABLE, body)
+            return
+        delay = DASHBOARD_READINESS_RETRY_DELAYS_SECONDS[attempt]
+        next_path = self._comparison_open_url(comparison_uid, target_ids, attempt + 1)
+        body = _dashboard_wait_page(
+            "SBK/SBM comparison",
+            "Grafana is importing the comparison descriptor. This page will open it automatically.",
+            retry_path,
+            (delay, next_path),
+        )
+        self._html(request, HTTPStatus.ACCEPTED, body)
+
+    @staticmethod
+    def _comparison_open_url(
+        comparison_uid: str, target_ids: list[str], attempt: int | None = None
+    ) -> str:
+        values = [("targetId", target_id) for target_id in target_ids]
+        if attempt is not None:
+            values.append(("attempt", str(attempt)))
+        return f"/comparisons/{quote(comparison_uid, safe='')}?{urlencode(values)}"
 
     def _best_effort_reconcile(self, operation: str) -> None:
         try:

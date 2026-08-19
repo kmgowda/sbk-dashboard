@@ -212,8 +212,8 @@ compareButton.addEventListener('click', async () => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || 'Unable to create comparison dashboard');
         reportActivity('grafana');
-        if (comparisonWindow) comparisonWindow.location.replace(body.dashboardUrl);
-        else window.location.assign(body.dashboardUrl);
+        if (comparisonWindow) comparisonWindow.location.replace(body.dashboardOpenUrl);
+        else window.location.assign(body.dashboardOpenUrl);
     } catch (error) {
         if (comparisonWindow) comparisonWindow.close();
         message.textContent = error.message;
