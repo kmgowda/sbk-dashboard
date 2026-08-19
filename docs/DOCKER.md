@@ -56,7 +56,7 @@ docker compose ps
 ```
 
 `compose.yaml` contains no `build` section. It pulls
-`kmgowda/sbk-dashboard:1.26.8.2` from Docker Hub when missing and reuses the local image afterward. Prometheus,
+`kmgowda/sbk-dashboard:1.26.8.3` from Docker Hub when missing and reuses the local image afterward. Prometheus,
 Grafana, and the Python wheel are already installed in that image; they are never downloaded during container
 startup. Override the pinned image only when deliberately testing another published build:
 
@@ -102,7 +102,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 127.0.0.1:9721:9721 --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.2
+  kmgowda/sbk-dashboard:1.26.8.3
 ```
 
 Use a pinned release in production instead of `latest`; use its immutable manifest digest where change control
@@ -124,8 +124,8 @@ transitive OS inventory. Builds fail closed when a reviewed direct package versi
 Resolve an immutable digest after pulling or publishing:
 
 ```bash
-docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.2
-SBK_DASHBOARD_IMAGE='kmgowda/sbk-dashboard:1.26.8.2@sha256:<manifest-digest>' docker compose up --detach
+docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.3
+SBK_DASHBOARD_IMAGE='kmgowda/sbk-dashboard:1.26.8.3@sha256:<manifest-digest>' docker compose up --detach
 ```
 
 ## Register endpoints
@@ -160,7 +160,7 @@ docker run --detach --name sbk-dashboard \
   --publish 9721:9721 --publish 3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.2 \
+  kmgowda/sbk-dashboard:1.26.8.3 \
   -retention 14 -status-seconds 30
 ```
 
@@ -201,7 +201,7 @@ docker volume create sbk-dashboard-restore
 docker run --rm --user 0:0 --entrypoint sh \
   --volume sbk-dashboard_sbk-dashboard-data:/source:ro \
   --volume sbk-dashboard-restore:/restore \
-  kmgowda/sbk-dashboard:1.26.8.2 \
+  kmgowda/sbk-dashboard:1.26.8.3 \
   -c 'set -eu; tar -C /source -cf - . | tar -C /restore -xf -'
 ```
 
@@ -283,8 +283,8 @@ Build and smoke-test the local architecture directly:
 ```bash
 docker build --build-arg VCS_REF=local \
   --build-arg BUILD_DATE="$(git show -s --format=%cI HEAD)" \
-  --tag sbk-dashboard:1.26.8.2 .
-python tests/container_smoke.py --image sbk-dashboard:1.26.8.2
+  --tag sbk-dashboard:1.26.8.3 .
+python tests/container_smoke.py --image sbk-dashboard:1.26.8.3
 ```
 
 The Dockerfile uses BuildKit cache mounts, so local builds require Docker BuildKit/the Buildx component. Docker

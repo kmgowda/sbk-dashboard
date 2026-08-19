@@ -11,7 +11,7 @@ name: sbk-dashboard
 
 services:
   sbk-dashboard:
-    image: ${SBK_DASHBOARD_IMAGE:-kmgowda/sbk-dashboard:1.26.8.2}
+    image: ${SBK_DASHBOARD_IMAGE:-kmgowda/sbk-dashboard:1.26.8.3}
     pull_policy: missing
     ports:
       # Authentication is disabled. Set SBK_DASHBOARD_PUBLISH_HOST=0.0.0.0 only on a protected network.

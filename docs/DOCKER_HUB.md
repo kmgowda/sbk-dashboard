@@ -22,7 +22,7 @@ Desktop can run the same Linux container build on macOS or Windows.
 
 The release build publishes two tags:
 
-- `kmgowda/sbk-dashboard:1.26.8.2` is the stable version tag used by `compose.yaml`.
+- `kmgowda/sbk-dashboard:1.26.8.3` is the stable version tag used by `compose.yaml`.
 - `kmgowda/sbk-dashboard:latest` is a convenient pointer to the newest stable release.
 
 Each tag points to one multi-architecture manifest containing:
@@ -100,7 +100,7 @@ printf 'Version: %s\nImage: %s\nCommit: %s\nCreated: %s\n' \
   "$SBK_VERSION" "$SBK_IMAGE" "$SBK_VCS_REF" "$SBK_BUILD_DATE"
 ```
 
-For the current release, the version output should be `1.26.8.2`. Stop if the version or commit is not the one you
+For the current release, the version output should be `1.26.8.3`. Stop if the version or commit is not the one you
 intend to publish.
 
 ## 3. Build locally with Docker Compose
@@ -326,7 +326,7 @@ docker compose logs --follow sbk-dashboard
 To pull a specific version explicitly:
 
 ```bash
-docker pull kmgowda/sbk-dashboard:1.26.8.2
+docker pull kmgowda/sbk-dashboard:1.26.8.3
 ```
 
 Run the image without a source checkout or Compose:
@@ -342,7 +342,7 @@ docker run --detach \
   --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.2
+  kmgowda/sbk-dashboard:1.26.8.3
 ```
 
 Check the container and its health endpoint:
@@ -358,7 +358,7 @@ Back up persistent data before an important production upgrade. Then pull the ne
 container against the same named volume:
 
 ```bash
-export SBK_DASHBOARD_IMAGE="kmgowda/sbk-dashboard:1.26.8.2"
+export SBK_DASHBOARD_IMAGE="kmgowda/sbk-dashboard:1.26.8.3"
 docker compose pull
 docker compose up --detach
 docker compose ps
@@ -411,7 +411,7 @@ Confirm the version exists in Docker Hub and the repository is public. Inspect t
 on `latest`:
 
 ```bash
-docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.2
+docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.3
 ```
 
 ### Only one architecture appears

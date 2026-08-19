@@ -115,7 +115,7 @@ variables. Operators should not set them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SBK_DASHBOARD_IMAGE` | `kmgowda/sbk-dashboard:1.26.8.2` | Production Compose image reference; may include an immutable digest. |
+| `SBK_DASHBOARD_IMAGE` | `kmgowda/sbk-dashboard:1.26.8.3` | Production Compose image reference; may include an immutable digest. |
 | `SBK_DASHBOARD_PUBLISH_HOST` | `127.0.0.1` | Host interface for published management/Grafana ports. |
 | `SBK_DASHBOARD_PIDS_LIMIT` | `512` | Base Compose process limit. |
 | `SBK_DASHBOARD_LOG_MAX_SIZE` | `10m` | Docker `json-file` generation size. |

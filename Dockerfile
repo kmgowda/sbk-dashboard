@@ -93,7 +93,7 @@ RUN --mount=type=cache,id=sbk-dashboard-grafana-downloads,target=/var/cache/sbk-
     test -x /opt/grafana/bin/grafana
 
 FROM ${PYTHON_BASE} AS runtime
-ARG APPLICATION_VERSION=1.26.8.2
+ARG APPLICATION_VERSION=1.26.8.3
 ARG VCS_REF=unknown
 ARG BUILD_DATE=1970-01-01T00:00:00Z
 ARG PYTHON_BASE_NAME
