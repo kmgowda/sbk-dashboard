@@ -8,7 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-export const COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 1;
+export const COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2;
 export const DESCRIPTOR_LOAD_ATTEMPTS = 12;
 export const DESCRIPTOR_RETRY_DELAY_MS = 500;
 

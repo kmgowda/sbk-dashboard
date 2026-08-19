@@ -210,7 +210,8 @@ the canonical dashboard.
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
 provisioned-dashboard fallback URL. Repeating the same set in any order reuses the UID and file. The descriptor adds
 a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
-legends retain the readable name, kind, and immutable endpoint ID.
+legends retain the readable name, kind, and immutable endpoint ID. Its title contains the UID digest so every cached
+descriptor is unique in Grafana's folder; Grafana disables file-provider writes when multiple files share a title.
 
 `grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
 `monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates
@@ -227,7 +228,8 @@ when the committed module changes, preventing a same-release source update from 
 implementation; identical inputs still reproduce identical metadata and bundles.
 
 Grafana discovers descriptor files asynchronously on its bounded provider polling interval. Each descriptor carries
-an explicit schema version. The comparison app treats HTTP 404 and an older or incomplete schema as transient
+an explicit schema version. Schema 2 introduces unique provisioner titles; reconciliation rewrites schema-1 cached
+files on restart. The comparison app treats HTTP 404 and an older or incomplete schema as transient
 provisioning states, retries twelve times at 500 ms intervals, and cancels the pending timer when the view closes.
 Other backend errors fail immediately with their HTTP status. If the bounded retries expire, the view offers a
 manual retry instead of retaining an unrecoverable blank state. Reconciliation upgrades a cached descriptor from an

@@ -65,7 +65,7 @@ class ProvisioningTest(unittest.TestCase):
         comparison_path.write_text(json.dumps(stale), encoding="utf-8")
         self.provisioner.reconcile([first, second])
         refreshed = json.loads(comparison_path.read_text(encoding="utf-8"))
-        self.assertEqual(1, refreshed["sbkDashboardComparisonSchemaVersion"])
+        self.assertEqual(2, refreshed["sbkDashboardComparisonSchemaVersion"])
         self.assertEqual("http://grafana:3000/d/sbk-first/", self.provisioner.dashboard_url("first"))
         self.assertEqual(
             "http://203.0.113.8:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "203.0.113.8")
@@ -86,8 +86,10 @@ class ProvisioningTest(unittest.TestCase):
         values = expressions(generated)
         comparison_uid = self.provisioner.comparison_dashboard_uid(["first", "second"])
         self.assertEqual(comparison_uid, generated["uid"])
-        self.assertEqual("SBK/SBM Live Comparison", generated["title"])
-        self.assertEqual(1, generated["sbkDashboardComparisonSchemaVersion"])
+        self.assertEqual(
+            f"SBK/SBM Comparison — {comparison_uid.removeprefix('sbk-comparison-')}", generated["title"]
+        )
+        self.assertEqual(2, generated["sbkDashboardComparisonSchemaVersion"])
         self.assertTrue(all(
             'sbk_endpoint_id=~"${sbk_endpoints:regex}"' in value
             for value in values if "SBK_" in value
@@ -128,6 +130,13 @@ class ProvisioningTest(unittest.TestCase):
         )
         files = list((self.directory / "dashboards").glob("sbk-comparison-*.json"))
         self.assertEqual([f"{first_uid}.json"], [path.name for path in files])
+
+    def test_distinct_comparisons_have_unique_grafana_titles(self):
+        first, second, third = target("first"), target("second", 9719), target("third", 9720)
+        first_dashboard = self.provisioner.generated_comparison_dashboard([first, second])
+        second_dashboard = self.provisioner.generated_comparison_dashboard([first, third])
+        self.assertNotEqual(first_dashboard["uid"], second_dashboard["uid"])
+        self.assertNotEqual(first_dashboard["title"], second_dashboard["title"])
 
     def test_generated_comparison_supports_one_target_and_requires_unique_targets(self):
         first = target("first")

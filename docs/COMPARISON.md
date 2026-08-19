@@ -106,6 +106,10 @@ URL; changing time ranges does not create another dashboard file or mutate endpo
 the URL also stores the bounded lane count. Existing multi-target bookmarks retain their original endpoint-keyed
 time state.
 
+Each descriptor's internal Grafana title includes that ID's digest. The title is intentionally unique even though
+the comparison app supplies the visible heading: Grafana rejects file-provider updates when different dashboard
+files in one folder have duplicate titles.
+
 ```bash
 curl --fail --request POST http://127.0.0.1:9721/api/comparison-dashboard \
   --header 'Content-Type: application/json' \

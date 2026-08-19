@@ -17,6 +17,10 @@ endpoint opens two time lanes for the same canonical dashboard and permits addin
 range selections are URL-only browser state. No registration, discovery, persistence, or native-process format
 changes are required. Existing multi-target comparison IDs, URLs, and behavior remain compatible.
 
+Comparison descriptor schema 2 also gives every cached descriptor a UID-derived unique Grafana title. On the first
+restart, reconciliation rewrites older schema-1 files automatically. This prevents Grafana from disabling its file
+provider when several different comparison files previously shared the `SBK/SBM Live Comparison` title.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]

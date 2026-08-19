@@ -25,7 +25,7 @@ from sbk_dashboard.models import BenchmarkTarget
 DATASOURCE_UID = "PBFA97CFB590B2093"
 COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
 COMPARISON_APP_PLUGIN_ID = "kmg-sbkcomparison-app"
-COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 1
+COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2
 MIN_COMPARISON_TARGETS = 1
 MAX_COMPARISON_TARGETS = 8
 MIN_SINGLE_TARGET_TIME_LANES = 2
@@ -131,7 +131,7 @@ class GrafanaDashboardProvisioner:
         dashboard = copy.deepcopy(self._canonical)
         dashboard["id"] = None
         dashboard["uid"] = self.comparison_dashboard_uid(target_ids)
-        dashboard["title"] = "SBK/SBM Live Comparison"
+        dashboard["title"] = f"SBK/SBM Comparison — {str(dashboard['uid']).removeprefix(COMPARISON_DASHBOARD_PREFIX)}"
         dashboard["version"] = 1
         dashboard["sbkDashboardComparisonSchemaVersion"] = COMPARISON_DESCRIPTOR_SCHEMA_VERSION
         dashboard["sbkDashboardComparisonEndpointIds"] = target_ids
