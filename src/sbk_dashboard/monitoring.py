@@ -19,9 +19,11 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform, executable, resolve_on_path
+from sbk_dashboard.contracts import GRAFANA_DASHBOARD_PROBE_TIMEOUT_SECONDS
 from sbk_dashboard.files import atomic_write
 from sbk_dashboard.grafana_plugin import install_comparison_plugin
 from sbk_dashboard.layout import DashboardDataLayout
@@ -162,6 +164,22 @@ class ManagedMonitoringStack:
         # receive a localhost-only Grafana link.
         dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None
         return self.dashboard_provisioner.dashboard_url(target_id, dynamic_host)
+
+    def dashboard_ready(self, target_id: str) -> bool:
+        """Probe Grafana's UID API once without waiting for its asynchronous file provider."""
+        uid = self.dashboard_provisioner.dashboard_uid(target_id)
+        host = _consumer_host(self.monitoring.grafana_bind_address)
+        url = f"http://{host}:{self.monitoring.grafana_port}/api/dashboards/uid/{uid}"
+        try:
+            with urllib.request.urlopen(url, timeout=GRAFANA_DASHBOARD_PROBE_TIMEOUT_SECONDS) as response:
+                return response.status == HTTPStatus.OK
+        except urllib.error.HTTPError as error:
+            if error.code != HTTPStatus.NOT_FOUND:
+                LOGGER.debug("Grafana dashboard readiness probe returned HTTP %s", error.code)
+            return False
+        except (OSError, urllib.error.URLError) as error:
+            LOGGER.debug("Grafana dashboard readiness probe failed: %s", error)
+            return False
 
     def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
         dynamic_host = browser_host if self.monitoring.sources.get("grafana-url") == "default" else None

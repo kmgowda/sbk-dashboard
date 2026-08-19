@@ -36,6 +36,7 @@ class FakeMonitoring:
     def __init__(self, data):
         self.targets = []
         self.reconcile_error = None
+        self.dashboard_is_ready = True
         self.dashboard = DashboardConfig(9721, False, False, data, 5, 7, {})
 
     def healthy(self):
@@ -53,6 +54,9 @@ class FakeMonitoring:
         host = browser_host or "grafana"
         formatted = f"[{host}]" if ":" in host else host
         return f"http://{formatted}:3000/d/sbk-{target_id}/"
+
+    def dashboard_ready(self, target_id):
+        return self.dashboard_is_ready
 
     def comparison_dashboard_url(self, target_ids, browser_host=None):
         host = browser_host or "grafana"
@@ -154,6 +158,7 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"reportActivity('grafana')", script)
             self.assertIn(b"window.sessionStorage", script)
             self.assertIn(b"/api/comparison-dashboard", script)
+            self.assertIn(b"dashboard.href = target.dashboardOpenUrl", script)
             self.assertIn(b"maxComparisonTargets: 8", script)
             self.assertIn(b"targetRefreshMilliseconds: 10000", script)
             self.assertNotIn(b"__SBK_", script)
@@ -184,6 +189,7 @@ class WebTest(unittest.TestCase):
             created = json.load(response)
             self.assertEqual(201, response.status)
             self.assertIn("dashboardUrl", created)
+            self.assertEqual(f"/dashboards/{created['id']}", created["dashboardOpenUrl"])
             self.assertEqual("SBK", created["kind"])
         repeated_request = urllib.request.Request(
             self.base + "/api/targets", method="POST", data=json.dumps({
@@ -212,10 +218,43 @@ class WebTest(unittest.TestCase):
         with urllib.request.urlopen(malformed_request) as response:
             self.assertTrue(json.load(response)[0]["dashboardUrl"].startswith("http://grafana:3000/"))
         with urllib.request.urlopen(self.base + f"/api/targets/{created['id']}/dashboard") as response:
-            self.assertIn(created["id"], json.load(response)["dashboardUrl"])
+            dashboard_status = json.load(response)
+            self.assertIn(created["id"], dashboard_status["dashboardUrl"])
+            self.assertTrue(dashboard_status["ready"])
         delete = urllib.request.Request(self.base + f"/api/targets/{created['id']}", method="DELETE")
         with urllib.request.urlopen(delete) as response:
             self.assertEqual(204, response.status)
+
+    def test_dashboard_open_waits_for_grafana_provisioning_before_redirect(self):
+        target = self.registry.register("New <run>", "127.0.0.1", 9718, "/metrics")
+        self.monitoring.dashboard_is_ready = False
+        with urllib.request.urlopen(self.base + f"/dashboards/{target.id}") as response:
+            self.assertEqual(202, response.status)
+            self.assertEqual("no-store", response.headers["Cache-Control"])
+            body = response.read()
+        self.assertIn(b"Grafana is importing the new dashboard", body)
+        self.assertIn(b"Preparing New &lt;run&gt;", body)
+        self.assertNotIn(b"Preparing New <run>", body)
+        self.assertIn(f"/dashboards/{target.id}?attempt=1".encode(), body)
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            urllib.request.urlopen(self.base + f"/dashboards/{target.id}?attempt=99")
+        self.assertEqual(503, caught.exception.code)
+        self.assertIn(b"still provisioning", caught.exception.read())
+
+        self.monitoring.dashboard_is_ready = True
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, request, fp, code, message, headers, new_url):
+                return None
+
+        opener = urllib.request.build_opener(NoRedirect)
+        with self.assertRaises(urllib.error.HTTPError) as redirected:
+            opener.open(self.base + f"/dashboards/{target.id}")
+        self.assertEqual(302, redirected.exception.code)
+        self.assertEqual(
+            f"http://127.0.0.1:3000/d/sbk-{target.id}/",
+            redirected.exception.headers["Location"],
+        )
 
     def test_registers_sbm_and_builds_bounded_comparison_url(self):
         target_ids = []
@@ -450,7 +489,8 @@ class MonitoringContinueTest(unittest.TestCase):
             "/api/v1/targets": b'{"data":{"activeTargets":[]}}',
         }
         self.prometheus = self._service(self.prometheus_routes)
-        self.grafana = self._service({"/api/health": b'{"database":"ok"}'})
+        self.grafana_routes = {"/api/health": b'{"database":"ok"}'}
+        self.grafana = self._service(self.grafana_routes)
 
     def tearDown(self):
         self.prometheus.shutdown()
@@ -517,6 +557,24 @@ class MonitoringContinueTest(unittest.TestCase):
             f"http://198.51.100.7:3000/d/{comparison_uid}/?var-sbk_endpoints=one&var-sbk_endpoints=two",
             default_stack.classic_comparison_dashboard_url(["one", "two"], "198.51.100.7"),
         )
+
+    def test_dashboard_readiness_tracks_grafana_uid_import(self):
+        data = Path(self.temporary.name)
+        dashboard = DashboardConfig(9721, False, True, data, 5, 7, {})
+        monitoring = MonitoringConfig(
+            Path("unused"),
+            data / "unused",
+            self.prometheus.server_port,
+            self.grafana.server_port,
+            f"http://localhost:{self.grafana.server_port}",
+            {},
+        )
+        stack = ManagedMonitoringStack(dashboard, monitoring)
+        self.assertFalse(stack.dashboard_ready("new-target"))
+        self.grafana_routes["/api/dashboards/uid/sbk-new-target"] = (
+            b'{"dashboard":{"uid":"sbk-new-target"}}'
+        )
+        self.assertTrue(stack.dashboard_ready("new-target"))
 
     def test_registered_target_missing_from_prometheus_is_down_and_can_recover(self):
         data = Path(self.temporary.name)

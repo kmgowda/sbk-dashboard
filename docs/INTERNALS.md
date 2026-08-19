@@ -255,6 +255,21 @@ For a current response, the stack builds a complete replacement status dictionar
 by Prometheus becomes `down`; it does not remain `pending` indefinitely. Readers receive already-published snapshots
 without network waits. Repeated identical refresh failures produce one warning until the error changes or recovers.
 
+## Dedicated-dashboard readiness
+
+Writing `monitoring/grafana/dashboards/sbk-<id>.json` and Grafana serving that UID are separate events. Grafana's
+health endpoint may already be green while its asynchronous file provider is between scans. `dashboardUrl` remains
+the stable direct Grafana URL for API compatibility, while each target view also exposes `dashboardOpenUrl`, the
+relative `GET /dashboards/<id>` readiness gateway used by the landing page.
+
+The gateway calls `ManagedMonitoringStack.dashboard_ready()` once per request. That method queries only the managed
+Grafana loopback UID API with a one-second timeout and never reads an unbounded body. HTTP 404, timeout, or temporary
+connection failure means “not imported yet.” The gateway returns a `no-store` HTTP 202 preparation page and advances
+one browser-owned exponential refresh step. It never sleeps in a server worker. After the centrally bounded
+37.5-second sequence it returns a friendly HTTP 503 page with manual retry; on readiness it redirects to the direct
+URL using the validated management request hostname. `GET /api/targets/<id>/dashboard` also includes a `ready`
+boolean for non-browser clients that need to avoid the same provisioning race.
+
 ## HTTP concurrency and browser activity
 
 `BoundedThreadPoolHttpServer` is an Active Object/Bulkhead:

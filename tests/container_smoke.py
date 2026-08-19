@@ -159,6 +159,7 @@ class ContainerSmoke:
         for target in targets:
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard_ready(target)
             self._wait_for_dashboard(target["dashboardUrl"])
         if comparison is not None:
             repeated_comparison = self._comparison_dashboard(list(reversed(target_ids)))
@@ -209,6 +210,7 @@ class ContainerSmoke:
             target_ids.append(target["id"])
             self._wait_for_target_up(target["id"])
             self._assert_metrics_and_panels(target["id"])
+            self._wait_for_dashboard_ready(target)
             self._wait_for_dashboard(target["dashboardUrl"])
         single_range_comparison = self._comparison_dashboard(target_ids[:1])
         self._assert_comparison_dashboard(single_range_comparison, target_ids[:1])
@@ -350,6 +352,24 @@ class ContainerSmoke:
 
     def _wait_for_dashboard(self, url: str) -> None:
         wait_for(url, 60)
+
+    def _wait_for_dashboard_ready(self, target: dict[str, Any]) -> None:
+        target_id = str(target["id"])
+        expected_open_url = f"/dashboards/{target_id}"
+        if target.get("dashboardOpenUrl") != expected_open_url:
+            raise AssertionError(f"Unexpected dashboard readiness URL: {target}")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            _, body = request(
+                f"http://127.0.0.1:{self.dashboard_port}/api/targets/{target_id}/dashboard"
+            )
+            status = json.loads(body)
+            if status.get("ready") is True:
+                if status.get("dashboardUrl") != target["dashboardUrl"]:
+                    raise AssertionError(f"Dashboard readiness URL drifted: {status}")
+                return
+            time.sleep(1)
+        raise AssertionError(f"Grafana never imported dashboard {target_id}")
 
     def _wait_for_target_up(self, target_id: str) -> None:
         deadline = time.monotonic() + 60

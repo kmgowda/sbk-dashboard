@@ -26,10 +26,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from typing import Any
-from urllib.parse import unquote, urlparse, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlparse, urlsplit
 
 from sbk_dashboard.contracts import (
     CLIENT_ID_RANDOM_BYTES,
+    DASHBOARD_READINESS_RETRY_DELAYS_SECONDS,
     GRAFANA_ACTIVITY_SECONDS,
     LANDING_ACTIVITY_SECONDS,
     LANDING_HEARTBEAT_MILLISECONDS,
@@ -51,6 +52,31 @@ CLIENT_ID_PATTERN = re.compile(
     rf"[A-Za-z0-9_-]{{{MIN_CLIENT_ID_CHARACTERS},{MAX_CLIENT_ID_CHARACTERS}}}"
 )
 LOGGER = logging.getLogger(__name__)
+
+
+def _dashboard_wait_page(
+    name: str,
+    detail: str,
+    retry_path: str,
+    refresh: tuple[float, str] | None,
+) -> bytes:
+    refresh_tag = ""
+    if refresh is not None:
+        delay, next_path = refresh
+        refresh_tag = (
+            f'<meta http-equiv="refresh" content="{delay:g};url={html.escape(next_path, quote=True)}">'
+        )
+    return (
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        f"{refresh_tag}<title>Preparing SBK Dashboard</title>"
+        "<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#07131d;color:#e7f8ff;"
+        "font:16px system-ui,sans-serif}.card{max-width:36rem;padding:2rem;border:1px solid #246477;border-radius:1rem;"
+        "background:#0d2230}h1{margin-top:0;color:#55e6cf}p{line-height:1.5}a{color:#68b8ff}</style></head>"
+        f"<body><main class=\"card\"><h1>Preparing {html.escape(name)}</h1><p>{html.escape(detail)}</p>"
+        f"<p><a href=\"{html.escape(retry_path, quote=True)}\">Retry now</a> · "
+        "<a href=\"/\">Return to SBK Dashboard</a></p></main></body></html>"
+    ).encode()
 
 
 def _render_javascript(body: bytes) -> bytes:
@@ -203,6 +229,8 @@ class DashboardHttpServer:
                 self._targets(request)
             elif path == "/api/comparison-dashboard":
                 self._comparison_dashboard(request)
+            elif path.startswith("/dashboards/"):
+                self._dashboard_open(request, path[len("/dashboards/"):])
             elif path.startswith("/api/targets/"):
                 self._target(request, path[len("/api/targets/"):])
             else:
@@ -298,7 +326,14 @@ class DashboardHttpServer:
             return
         if separator and action == "dashboard":
             self._require(request, "GET")
-            self._json(request, 200, {"dashboardUrl": self._dashboard_url(request, target_id)})
+            self._json(
+                request,
+                200,
+                {
+                    "dashboardUrl": self._dashboard_url(request, target_id),
+                    "ready": self.monitoring.dashboard_ready(target_id),
+                },
+            )
             return
         if separator:
             self._json(request, 404, {"error": "Not found"})
@@ -320,6 +355,46 @@ class DashboardHttpServer:
                 raise
         request.send_response(HTTPStatus.NO_CONTENT)
         request.end_headers()
+
+    def _dashboard_open(self, request: BaseHTTPRequestHandler, encoded: str) -> None:
+        """Wait across bounded browser refreshes until Grafana has imported one dashboard UID."""
+        self._require(request, "GET")
+        target_id = unquote(encoded)
+        target = self.registry.find(target_id)
+        if "/" in target_id or target is None:
+            self._json(request, 404, {"error": "Target not found"})
+            return
+        if self.monitoring.dashboard_ready(target_id):
+            request.send_response(HTTPStatus.FOUND)
+            request.send_header("Location", self._dashboard_url(request, target_id))
+            request.send_header("Cache-Control", "no-store")
+            request.end_headers()
+            return
+        query = parse_qs(urlparse(request.path).query)
+        try:
+            attempt = int(query.get("attempt", ["0"])[0])
+        except (TypeError, ValueError):
+            attempt = 0
+        attempt = max(0, attempt)
+        retry_path = f"/dashboards/{quote(target_id, safe='')}"
+        if attempt >= len(DASHBOARD_READINESS_RETRY_DELAYS_SECONDS):
+            body = _dashboard_wait_page(
+                target.name,
+                "Grafana is still provisioning this dashboard.",
+                retry_path,
+                None,
+            )
+            self._html(request, HTTPStatus.SERVICE_UNAVAILABLE, body)
+            return
+        delay = DASHBOARD_READINESS_RETRY_DELAYS_SECONDS[attempt]
+        next_path = f"{retry_path}?attempt={attempt + 1}"
+        body = _dashboard_wait_page(
+            target.name,
+            "Grafana is importing the new dashboard. This page will open it automatically.",
+            retry_path,
+            (delay, next_path),
+        )
+        self._html(request, HTTPStatus.ACCEPTED, body)
 
     def _best_effort_reconcile(self, operation: str) -> None:
         try:
@@ -372,6 +447,7 @@ class DashboardHttpServer:
             "metricsPath": target.metrics_path, "kind": target.kind, "createdAt": target.created_at,
             "status": self.monitoring.status(target.id).api(),
             "dashboardUrl": self._dashboard_url(request, target.id),
+            "dashboardOpenUrl": f"/dashboards/{quote(target.id, safe='')}",
         }
 
     def _dashboard_url(self, request: BaseHTTPRequestHandler, target_id: str) -> str:
@@ -426,6 +502,15 @@ class DashboardHttpServer:
         request.send_header("Content-Length", str(len(body)))
         for name, header_value in (extra_headers or {}).items():
             request.send_header(name, header_value)
+        request.end_headers()
+        request.wfile.write(body)
+
+    @staticmethod
+    def _html(request: BaseHTTPRequestHandler, status: int, body: bytes) -> None:
+        request.send_response(status)
+        request.send_header("Content-Type", "text/html; charset=utf-8")
+        request.send_header("Cache-Control", "no-store")
+        request.send_header("Content-Length", str(len(body)))
         request.end_headers()
         request.wfile.write(body)
 

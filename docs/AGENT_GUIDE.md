@@ -77,6 +77,8 @@ creates the guardian's kill-on-close Job Object before the native process is res
 4. Prometheus file discovery notices the target without a process restart.
 5. The supervisor maps Prometheus target health back to the endpoint ID.
 6. API rendering constructs a client-reachable Grafana URL. The URL is not part of endpoint identity.
+7. Landing-page links use the bounded readiness gateway so Grafana never receives a new UID before its asynchronous
+   file provider has imported that dashboard.
 
 ### Restart and recovery
 
@@ -130,6 +132,7 @@ task unless the user explicitly requests a recovery operation.
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
 | `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic app and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
+| `GET /dashboards/<id>` | Probe Grafana's UID API and redirect a browser only after provisioning |
 | `DELETE /api/targets/<id>` | Remove registration and generated dashboard/discovery entry |
 
 Request bodies are JSON and capped at 64 KiB. Authentication is absent, so new mutating endpoints must not imply

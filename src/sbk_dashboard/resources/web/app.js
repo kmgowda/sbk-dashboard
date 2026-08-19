@@ -100,7 +100,7 @@ function renderTarget(target) {
 
     const actions = element('div', 'target-actions');
     const dashboard = element('a', 'dashboard-link', 'Open dashboard ↗');
-    dashboard.href = target.dashboardUrl;
+    dashboard.href = target.dashboardOpenUrl;
     dashboard.target = '_blank';
     dashboard.rel = 'noopener';
     dashboard.addEventListener('click', () => reportActivity('grafana'));

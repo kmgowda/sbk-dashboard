@@ -103,14 +103,20 @@ flowchart TD
     Result -->|Yes| Created[Return new dashboard, HTTP 201]
     Result -->|No| Rollback[Restore registry and best-effort reconcile]
     Rollback --> Failure[Return HTTP 500]
+    Created --> Open[Browser opens readiness gateway]
+    Open --> Imported{Grafana UID API returns 200?}
+    Imported -->|No| Wait[Show preparing page and bounded refresh]
+    Wait --> Imported
+    Imported -->|Yes| Redirect[Redirect to request-host-aware Grafana URL]
 
     classDef request fill:#dbeafe,stroke:#2563eb,color:#172554;
     classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef success fill:#dcfce7,stroke:#16a34a,color:#14532d;
     classDef failure fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
     class Request,Persist,Reconcile request;
-    class Existing,Result decision;
-    class Reuse,Created success;
+    class Existing,Result,Imported decision;
+    class Reuse,Created,Redirect success;
+    class Open,Wait request;
     class Rollback,Failure failure;
 ```
 
@@ -135,6 +141,13 @@ Grafana before Prometheus, closes log pumps, removes owned PID records, and rest
 7. Every `SBK_*` PromQL selector receives the endpoint label.
 8. Grafana's file provisioner observes `sbk-<endpoint-id>.json` and exposes `/d/sbk-<endpoint-id>/`.
 9. `dashboard-mappings.json` records the deterministic relationship.
+
+Grafana health and dashboard readiness are different states: `/api/health` can be ready while the file provider has
+not imported a newly written UID. The landing page therefore links through `GET /dashboards/<id>`. Each request makes
+one one-second-bounded loopback UID probe. A missing UID returns a small `no-store` preparing page whose browser
+refresh follows the centrally bounded 37.5-second backoff; a ready UID produces an immediate HTTP 302 to the normal
+request-host-aware Grafana URL. No HTTP worker sleeps between attempts, direct `dashboardUrl` API compatibility is
+preserved, and an exhausted sequence offers explicit retry instead of exposing Grafana's transient 404 page.
 
 The comparison API normalizes 1–8 unique registered endpoint IDs by sorting them and derives
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard

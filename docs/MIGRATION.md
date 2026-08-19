@@ -25,6 +25,13 @@ The comparison app now waits through a bounded 37.5-second exponential readiness
 file provider. Existing IDs, bookmarks, classic fallback dashboards, and stored comparison files remain compatible.
 Repeated selection of an unchanged comparison no longer rewrites its descriptor.
 
+Dedicated endpoint links now pass through a read-only readiness gateway before entering Grafana. Grafana reports
+native health before its asynchronous file provider necessarily imports a newly written dashboard, which previously
+made a new link randomly show `Dashboard not found` for the first polling interval. The gateway performs bounded
+loopback UID probes across browser refreshes and redirects only after Grafana returns HTTP 200. Existing endpoint
+IDs, direct `dashboardUrl` values, bookmarks, persisted files, and Grafana URLs remain unchanged. API clients can use
+the new `dashboardOpenUrl` field or the `ready` field from `GET /api/targets/<id>/dashboard`.
+
 ```mermaid
 flowchart LR
     Java[Stop Java dashboard] --> Backup[Back up existing data directory]

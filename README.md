@@ -362,6 +362,13 @@ asset URLs and also requires browsers to revalidate those resources. Runtime pol
 the fingerprint just like source edits do. This prevents an upgrade from combining new HTML with an older cached
 script and displaying stale endpoint counters.
 
+**Open dashboard** uses a read-only readiness gateway rather than navigating directly to a newly written Grafana
+UID. Grafana's health endpoint can become ready before its asynchronous file provider imports that UID, so direct
+navigation previously produced a random short-lived `Dashboard not found` page. The gateway performs one bounded
+loopback readiness probe per browser refresh and redirects to the normal host-aware Grafana URL only after HTTP 200.
+REST responses retain `dashboardUrl` and also provide `dashboardOpenUrl`; the per-target dashboard endpoint reports
+`ready` for API clients.
+
 The periodic status includes `clients_recent`, `landing_clients_2m`, and `grafana_opens_5m`. The browser creates an
 opaque per-tab session ID; a 30-second heartbeat keeps an open landing page active for a two-minute rolling window,
 and clicking **Open dashboard** records that browser in a five-minute Grafana-open window. IDs and timestamps are

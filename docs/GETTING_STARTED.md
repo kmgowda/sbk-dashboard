@@ -130,8 +130,11 @@ curl --fail --request POST http://127.0.0.1:9721/api/targets \
 For a container deployment, replace `127.0.0.1` in the JSON with `host.docker.internal`. For a remote benchmark,
 use a DNS name, IPv4 address, or IPv6 address reachable from the dashboard host/container.
 
-The response contains a stable endpoint ID and `dashboardUrl`. Open that URL and select a time range containing the
-benchmark. When SBK exits, the target becomes `down`; already-scraped history remains until retention expires.
+The response contains a stable endpoint ID, direct `dashboardUrl`, and relative `dashboardOpenUrl`. Browser clients
+should open `dashboardOpenUrl`: it shows a short preparation page while Grafana imports a brand-new dashboard and
+redirects only when the UID is queryable. API clients can also poll `GET /api/targets/<id>/dashboard` until `ready`
+is true before using the direct URL. Select a time range containing the benchmark. When SBK exits, the target becomes
+`down`; already-scraped history remains until retention expires.
 
 ## Compare endpoints
 

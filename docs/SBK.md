@@ -153,7 +153,9 @@ scrape.
 ### 5. Open and interpret the dashboard
 
 After the target changes from `pending` to `up`, select **Open dashboard**. Each registered `host:port` receives a
-stable, isolated dashboard. Choose a Grafana time range that includes the benchmark run.
+stable, isolated dashboard. A new dashboard may briefly show the SBK preparation page while Grafana imports its file;
+the page redirects automatically only after the UID is ready, so Grafana's transient `Dashboard not found` state is
+not exposed. Choose a Grafana time range that includes the benchmark run.
 
 Target states have these meanings:
 
