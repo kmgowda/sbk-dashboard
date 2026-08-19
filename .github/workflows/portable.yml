@@ -18,6 +18,7 @@ on:
       - "scripts/build_portable.py"
       - "scripts/build_release_manifest.py"
       - "scripts/release_contract.py"
+      - "scripts/select_release_assets.py"
       - "scripts/sbk_dashboard_portable_entry.py"
       - "src/**"
   workflow_dispatch:
@@ -99,4 +100,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/release/*
+        run: |
+          missing_output=$(python scripts/select_release_assets.py \
+            --directory dist/release \
+            --tag "$RELEASE_TAG" \
+            --repository "$GITHUB_REPOSITORY")
+          if [[ -n "$missing_output" ]]; then
+            mapfile -t missing_assets <<< "$missing_output"
+            gh release upload --repo "$GITHUB_REPOSITORY" "$RELEASE_TAG" "${missing_assets[@]}"
+          else
+            echo "All contracted release assets already exist with identical digests."
+          fi
