@@ -105,6 +105,23 @@ export function groupSelections(
   });
 }
 
+export function exceedsTimeGroupLimit(
+  lanes: ComparisonLane[],
+  selections: Record<string, TargetTimeSelection>,
+  maxAbsoluteRangeDays: number,
+  maxTimeGroups: number,
+  globalFrom = 'now-5m',
+  globalTo = 'now'
+): boolean {
+  return groupSelections(
+    lanes,
+    selections,
+    maxAbsoluteRangeDays,
+    globalFrom,
+    globalTo
+  ).length > maxTimeGroups;
+}
+
 export function encodeSelection(selection: TargetTimeSelection, maxAbsoluteRangeDays: number): string | null {
   const key = selectionKey(selection, maxAbsoluteRangeDays);
   if (key === 'global') return null;
@@ -135,7 +152,7 @@ export function selectionsFromUrl(
     lane.id,
     decodeSelection(params.get(`tr-${lane.id}`), maxAbsoluteRangeDays),
   ]));
-  if (groupSelections(lanes, selections, maxAbsoluteRangeDays).length > maxTimeGroups) {
+  if (exceedsTimeGroupLimit(lanes, selections, maxAbsoluteRangeDays, maxTimeGroups)) {
     return Object.fromEntries(lanes.map((lane) => [lane.id, defaultSelection()]));
   }
   return selections;

@@ -9,9 +9,11 @@
  */
 
 import {
+  RELATIVE_RANGES,
   decodeSelection,
   encodeSelection,
   comparisonLanes,
+  exceedsTimeGroupLimit,
   groupSelections,
   selectionsFromUrl,
   selectionsToUrl,
@@ -94,6 +96,21 @@ test('single-target lane count and selections round trip through bounded URL sta
   expect(selectionsFromUrl(restoredLanes, url, maxAbsoluteRangeDays, 4)[lanes[2].id])
     .toEqual(selections[lanes[2].id]);
   expect(comparisonLanes([targets[0]], '?lanes=99', 2, 8)).toHaveLength(2);
+});
+
+test('adding a global lane cannot exceed the distinct time-group policy', () => {
+  const lanes = comparisonLanes([targets[0]], '?lanes=4', 2, 8);
+  const selections = Object.fromEntries(lanes.map((lane, index) => [
+    lane.id,
+    {mode: 'relative' as const, relativeFrom: RELATIVE_RANGES[index][0]},
+  ]));
+  const candidateLanes = comparisonLanes([targets[0]], '?lanes=5', 2, 8);
+  const candidateSelections = Object.fromEntries(candidateLanes.map((lane) => [
+    lane.id,
+    selections[lane.id] || {mode: 'global'},
+  ]));
+  expect(exceedsTimeGroupLimit(candidateLanes, candidateSelections, maxAbsoluteRangeDays, 4)).toBe(true);
+  expect(exceedsTimeGroupLimit(candidateLanes, candidateSelections, maxAbsoluteRangeDays, 5)).toBe(false);
 });
 
 test('descriptor validation rejects unknown endpoints', () => {

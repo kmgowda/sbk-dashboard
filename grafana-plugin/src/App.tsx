@@ -26,6 +26,7 @@ import {
   DEFAULT_RELATIVE_FROM,
   RELATIVE_RANGES,
   comparisonLanes,
+  exceedsTimeGroupLimit,
   groupSelections,
   selectionsFromUrl,
   selectionsToUrl,
@@ -162,15 +163,14 @@ function App(_props: AppRootProps) {
     }
     const candidate = {...selections, [targetId]: selection};
     const maxTimeGroups = dashboard?.sbkDashboardComparisonPolicy.maxTimeGroups || 1;
-    if (
-      groupSelections(
-        lanes,
-        candidate,
-        dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
-        globalWindow.current.from,
-        globalWindow.current.to
-      ).length > maxTimeGroups
-    ) {
+    if (exceedsTimeGroupLimit(
+      lanes,
+      candidate,
+      dashboard?.sbkDashboardComparisonPolicy.maxAbsoluteRangeDays || 1,
+      maxTimeGroups,
+      globalWindow.current.from,
+      globalWindow.current.to
+    )) {
       setError(`A comparison can use at most ${maxTimeGroups} distinct time ranges.`);
       return;
     }
@@ -201,6 +201,18 @@ function App(_props: AppRootProps) {
       lane.id,
       selections[lane.id] || {mode: 'global'},
     ]));
+    if (exceedsTimeGroupLimit(
+      candidateLanes,
+      candidateSelections,
+      policy.maxAbsoluteRangeDays,
+      policy.maxTimeGroups,
+      globalWindow.current.from,
+      globalWindow.current.to
+    )) {
+      setError(`A comparison can use at most ${policy.maxTimeGroups} distinct time ranges.`);
+      return;
+    }
+    setError('');
     setLanes(candidateLanes);
     setSelections(candidateSelections);
     window.history.replaceState(
