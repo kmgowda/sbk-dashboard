@@ -173,7 +173,7 @@ docker run --detach --name sbk-dashboard \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
   kmgowda/sbk-dashboard:1.26.8.3 \
-  -retention 14 -status-seconds 30
+  -retention 14 -status-seconds 30 -max-comparison-targets 8
 ```
 
 Environment variables documented in the README can be set with `--env` or Compose `environment`. Do not override

@@ -128,6 +128,7 @@ runtime data as source material.
 | `src/sbk_dashboard/version.py` | Single source of truth for package and runtime version |
 | `src/sbk_dashboard/config.py` | CLI/environment/default precedence, validation, platform/download definitions |
 | `src/sbk_dashboard/contracts.py` | Shared operational defaults and bounded environment settings |
+| `src/sbk_dashboard/comparison.py` | Immutable comparison policy, validation, normalization, and deterministic selection identity |
 | `src/sbk_dashboard/endpoint_policy.py` | Endpoint identity, kind, path, name, and port policy |
 | `src/sbk_dashboard/platforms.py` | Runtime and portable platform normalization |
 | `src/sbk_dashboard/layout.py` | Portable-home and persistent runtime path construction |

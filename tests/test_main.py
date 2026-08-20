@@ -43,6 +43,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("Python version:", error.getvalue())
         self.assertIn("-continue", output.getvalue())
         self.assertIn("-status-seconds", output.getvalue())
+        self.assertIn("-max-comparison-targets", output.getvalue())
         self.assertIn("-v, --version", output.getvalue())
 
     def test_version_option_prints_application_version(self):
@@ -82,6 +83,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("port=19721 [command line]", text)
         self.assertIn("retention-days=7 [default]", text)
         self.assertIn("status-seconds=60 [default]", text)
+        self.assertIn("max-comparison-targets=4 [default]", text)
         self.assertIn("default-target-host=127.0.0.1 [default]", text)
         self.assertIn("http-workers=12 [environment SBK_DASHBOARD_HTTP_WORKERS]", text)
         self.assertIn("monitoring-properties=packaged native-artifacts.json [default]", text)

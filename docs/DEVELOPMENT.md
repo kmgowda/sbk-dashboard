@@ -158,6 +158,7 @@ SBK procedures.
 | Change | Primary owner | Tests/documentation |
 |---|---|---|
 | CLI, env, defaults | `config.py`, `contracts.py` | `test_config.py`, configuration/README |
+| Comparison bounds/identity | `comparison.py` | comparison, provisioning, and web tests; comparison/internals docs |
 | Endpoint schema/identity | `models.py`, `registry.py`, `endpoint_policy.py` | registry, API, migration |
 | API/UI | `web.py`, `resources/web` | web/monitoring tests, configuration/usage |
 | Prometheus discovery/Grafana JSON | `provisioning.py` | provisioning tests, architecture/internals |

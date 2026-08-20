@@ -331,8 +331,9 @@ A down endpoint is non-fatal. Existing Prometheus history remains queryable unti
 
 ## Compare live SBK and SBM results
 
-Select one endpoint to compare the same dashboard across 2–8 time lanes, or select between two and eight endpoint
-checkboxes to compare different dashboards, then choose the comparison action. The opened
+Select one endpoint to compare the same dashboard across 2–8 time lanes, or select 2–4 endpoint checkboxes by
+default to compare different dashboards, then choose the comparison action. Start with
+`-max-comparison-targets <2..32>` to change the multi-target limit for that application instance. The opened
 Grafana comparison app applies the selected stable endpoint IDs to every `SBK_*` query and identifies each series by its
 friendly dashboard name, benchmark type, and stable endpoint ID. For example: `Primary NVMe [SBK · f9720cad…] —
 Average Latency`. Every target initially follows the global live range. After inspecting the shared view, set an

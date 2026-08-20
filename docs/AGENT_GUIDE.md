@@ -130,7 +130,7 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
+| `POST /api/comparison-dashboard` | Validate one endpoint or up to the configured maximum and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `GET /dashboards/<id>` | Probe Grafana's UID API and redirect a browser only after provisioning |
 | `GET /comparisons/<uid>?targetId=<id>...` | Validate a comparison and enter its app only after Grafana provisions the UID |
@@ -163,6 +163,7 @@ Important defaults:
 | HTTP workers / queue | 8 / 64 |
 | Client timeout | 15 seconds |
 | Max endpoints | 10,000 |
+| Maximum comparison endpoints | 4; configurable from 2 to 32 |
 | Native log generation/backups | 10 MiB / 3 |
 | Periodic short status | 60 seconds |
 | Target-health timeout | 4 seconds |
@@ -203,7 +204,8 @@ registration and deletion serialized through reconciliation and preserve compens
 1. Put operator-selectable application defaults and bounded environment settings in `contracts.py`, then select and
    validate them in `config.py`.
 2. Put endpoint identity, validation, or port-range policy in `endpoint_policy.py`; put path construction in
-   `layout.py`; put platform aliases in `platforms.py`.
+   `layout.py`; put platform aliases in `platforms.py`; put comparison bounds, normalized selections, and descriptor
+   policy in `comparison.py`.
 3. Put dependency-free installer transfer, checksum, retry, buffer, or lock bounds in
    `scripts/portable-bootstrap.properties` and consume the same key from POSIX, PowerShell, and Python bootstrap
    paths as applicable.

@@ -36,9 +36,10 @@ CLI options override their corresponding environment variable. Environment varia
 Operational-only variables without a CLI form are selected directly from the environment. Blank environment
 values are treated as unset.
 
-Comparison limits are deliberately fixed application policy, not operator options: one target with 2–8 time lanes
-or 2–8 distinct targets, four distinct time
-groups, a 31-day maximum fixed range, and 128 cached descriptors. See [Comparison](COMPARISON.md).
+Comparison endpoint capacity is operator-selectable: the default is four distinct targets and the accepted range
+is 2–32. One-target mode still has 2–8 time lanes; four distinct time groups, a 31-day maximum fixed range, and 128
+cached descriptors remain fixed bounded policy. These values are emitted together by one immutable comparison-policy
+object, while only the endpoint maximum is operator configurable. See [Comparison](COMPARISON.md).
 
 ## Command-line options
 
@@ -63,10 +64,11 @@ Run `sbk-dashboard --help` to obtain the installed version's generated help.
 | `-grafana-url` | absolute HTTP(S) URL | Browser-visible Grafana base URL for TLS, proxy, DNS, or host-port mapping. |
 | `-log-level` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`; `INFO` | Python control-plane log threshold. |
 | `-status-seconds` | `1..86400`; `60` | Periodic concise runtime status interval. |
+| `-max-comparison-targets`, `--max-comparison-targets` | `2..32`; `4` | Maximum distinct endpoints accepted by one comparison. Example: `-max-comparison-targets 8`. |
 | `-monitoring-properties` | file | Compatibility override for native artifact URLs, checksums, paths, and limits. |
 
-Single-dash long options are retained for compatibility. `--port`, `--data-dir`, and `--retention-days` are the
-available double-dash aliases.
+Single-dash long options are retained for compatibility. `--port`, `--data-dir`, `--retention-days`, and
+`--max-comparison-targets` are the available double-dash aliases.
 
 ## Application environment variables
 
@@ -86,6 +88,7 @@ available double-dash aliases.
 | `SBK_DASHBOARD_GRAFANA_URL` | `http://localhost:<grafana-port>` | Fallback for `-grafana-url`; authoritative for public links. |
 | `SBK_DASHBOARD_LOG_LEVEL` | `INFO` | Fallback for `-log-level`. |
 | `SBK_DASHBOARD_STATUS_SECONDS` | `60`; `1..86400` | Fallback for `-status-seconds`. |
+| `SBK_DASHBOARD_MAX_COMPARISON_TARGETS` | `4`; `2..32` | Fallback for `-max-comparison-targets`. |
 | `SBK_DASHBOARD_DEFAULT_TARGET_HOST` | native `127.0.0.1`; image `host.docker.internal` | Initial endpoint host shown by the landing page. |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | packaged manifest | External artifact-properties override. |
 | `SBK_DASHBOARD_HTTP_WORKERS` | `8`; `1..128` | Fixed management HTTP worker count. |

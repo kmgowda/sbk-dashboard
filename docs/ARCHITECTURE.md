@@ -61,8 +61,9 @@ There is one Prometheus process and one Grafana process per `sbk-dashboard` inst
 per endpoint. This is significantly less expensive and lets Prometheus query data across endpoints when required.
 
 Operational values have explicit owners rather than scattered literals. `contracts.py` owns application defaults
-and bounded environment settings, `endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns
-OS/architecture normalization, and `layout.py` owns persistent path construction. The packaged
+and bounded environment settings, `comparison.py` owns the immutable comparison policy and normalized selections,
+`endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns OS/architecture normalization, and
+`layout.py` owns persistent path construction. The packaged
 `native-artifacts.json` manifest is the sole built-in Prometheus/Grafana artifact catalog consumed by both direct
 bootstrap and Docker builds. Dependency-free installer transfer/retry/lock bounds live in
 `scripts/portable-bootstrap.properties`. Protocol syntax, schema versions, HTTP status codes, and intrinsic
@@ -152,14 +153,16 @@ refresh follows the centrally bounded 37.5-second backoff; a ready UID produces 
 request-host-aware Grafana URL. No HTTP worker sleeps between attempts, direct `dashboardUrl` API compatibility is
 preserved, and an exhausted sequence offers explicit retry instead of exposing Grafana's transient 404 page.
 
-The comparison API normalizes 1–8 unique registered endpoint IDs by sorting them and derives
+The comparison API normalizes one endpoint or up to the configured maximum of unique registered endpoint IDs by
+sorting them and derives
 `sbk-comparison-<16-hex>` from the SHA-256 digest of that set. It atomically provisions a canonical-dashboard
 descriptor; the same set in any order therefore reuses the same Grafana UID and file. The descriptor remains a
 classic single-range fallback and is also the server-owned input to the bundled `sbkcomparison-app`. Grafana's
 file provider imports new descriptors asynchronously. The landing page therefore opens the comparison-specific
 readiness gateway, which validates the endpoint set and redirects to the app only after that UID returns HTTP 200.
 The app retains bounded exponential readiness checks as defense in depth. One
-endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. Lane
+endpoint produces 2–8 deterministic browser-only time lanes; multiple endpoints retain one lane per target. The
+multi-target maximum defaults to 4 and is bounded to 2–32 through validated CLI/environment configuration. Lane
 count and range selections live only in validated URL state, so this mode does not duplicate registrations,
 descriptors, discovery entries, or Prometheus series.
 
@@ -329,6 +332,8 @@ The implementation uses patterns where they enforce runtime invariants:
 - **Process guardian:** one bounded helper per owned native service enforces parent-death cleanup even when the
   control plane cannot execute signal handlers.
 - **Repository:** `TargetRegistry` and `ManagedProcessRegistry` own validation and atomic persistence.
+- **Value Object:** immutable `ComparisonPolicy` and `ComparisonSelection` objects keep bounds, duplicate handling,
+  normalization, descriptor policy, and deterministic identity consistent across HTTP and provisioning boundaries.
 - **Compensating transaction:** target mutations are serialized across persistence and monitoring reconciliation;
   any reconciliation exception restores the prior registration snapshot before the API reports failure.
 - **Active Object / Bulkhead:** the HTTP executor isolates request concurrency with fixed workers and backpressure.

@@ -87,6 +87,7 @@ Documentation explains behavior; implementation contracts remain executable:
 - CLI parsing and precedence: `src/sbk_dashboard/config.py`;
 - defaults and numeric bounds: `src/sbk_dashboard/contracts.py`;
 - endpoint identity: `src/sbk_dashboard/endpoint_policy.py`;
+- comparison policy and deterministic selections: `src/sbk_dashboard/comparison.py`;
 - public API: `src/sbk_dashboard/web.py`;
 - native artifacts: `src/sbk_dashboard/resources/native-artifacts.json`;
 - agent rules: [`AGENTS.md`](../AGENTS.md).

@@ -41,6 +41,7 @@ class ConfigurationTest(unittest.TestCase):
         self.assertEqual(120, config.dashboard.grafana_startup_timeout_seconds)
         self.assertEqual(60, config.dashboard.status_interval_seconds)
         self.assertEqual("127.0.0.1", config.dashboard.default_target_host)
+        self.assertEqual(4, config.dashboard.max_comparison_targets)
 
     def test_command_line_overrides_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -49,10 +50,11 @@ class ConfigurationTest(unittest.TestCase):
             config = parse_configuration(
                 ["-data", str(cli_directory), "-retention", "30", "-prometheus-port", "9191", "-continue", "true",
                  "-bind", "127.0.0.1", "-prometheus-bind", "::1", "-log-level", "debug",
-                 "-status-seconds", "15"],
+                 "-status-seconds", "15", "-max-comparison-targets", "6"],
                 {"SBK_DASHBOARD_DATA_DIR": str(environment_directory),
                  "SBK_DASHBOARD_DISK_RETENTION_DAYS": "14", "SBK_DASHBOARD_BIND": "0.0.0.0",
-                 "SBK_DASHBOARD_STATUS_SECONDS": "30"},
+                 "SBK_DASHBOARD_STATUS_SECONDS": "30",
+                 "SBK_DASHBOARD_MAX_COMPARISON_TARGETS": "5"},
             )
             self.assertEqual(cli_directory.resolve(), config.dashboard.data_directory)
             self.assertEqual(30, config.dashboard.retention_days)
@@ -63,6 +65,8 @@ class ConfigurationTest(unittest.TestCase):
             self.assertEqual("DEBUG", config.dashboard.log_level)
             self.assertEqual(15, config.dashboard.status_interval_seconds)
             self.assertEqual("command line", config.dashboard.sources["status-seconds"])
+            self.assertEqual(6, config.dashboard.max_comparison_targets)
+            self.assertEqual("command line", config.dashboard.sources["max-comparison-targets"])
 
     def test_long_port_option_is_supported_and_reported(self):
         config = parse_configuration(["--port", "19721"], {})
@@ -112,6 +116,7 @@ class ConfigurationTest(unittest.TestCase):
                 "SBK_DASHBOARD_GRAFANA_URL": "https://grafana.example/base",
                 "SBK_DASHBOARD_STATUS_SECONDS": "75",
                 "SBK_DASHBOARD_DEFAULT_TARGET_HOST": "host.docker.internal",
+                "SBK_DASHBOARD_MAX_COMPARISON_TARGETS": "7",
             })
             self.assertEqual(Path(temporary).resolve(), config.dashboard.data_directory)
             self.assertEqual(11, config.dashboard.retention_days)
@@ -119,12 +124,17 @@ class ConfigurationTest(unittest.TestCase):
             self.assertEqual("https://grafana.example/base", config.monitoring.grafana_public_url)
             self.assertEqual(75, config.dashboard.status_interval_seconds)
             self.assertEqual("host.docker.internal", config.dashboard.default_target_host)
+            self.assertEqual(7, config.dashboard.max_comparison_targets)
             self.assertEqual(
                 "environment SBK_DASHBOARD_DEFAULT_TARGET_HOST",
                 config.dashboard.sources["default-target-host"],
             )
             self.assertEqual(
                 "environment SBK_DASHBOARD_STATUS_SECONDS", config.dashboard.sources["status-seconds"]
+            )
+            self.assertEqual(
+                "environment SBK_DASHBOARD_MAX_COMPARISON_TARGETS",
+                config.dashboard.sources["max-comparison-targets"],
             )
 
     def test_production_limits_are_configurable_and_bounded(self):
@@ -159,12 +169,17 @@ class ConfigurationTest(unittest.TestCase):
         for arguments in (["-port", "0"], ["-retention", "0"], ["-continue", "maybe"],
                           ["-grafana-url", "ftp://host"], ["-bind", "http://bad"],
                           ["-prometheus-bind", "bad host"], ["-log-level", "verbose"],
-                          ["-status-seconds", "0"], ["-status-seconds", "86401"]):
+                          ["-status-seconds", "0"], ["-status-seconds", "86401"],
+                          ["-max-comparison-targets", "1"],
+                          ["--max-comparison-targets", "33"],
+                          ["-max-comparison-targets", "many"]):
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 parse_configuration(list(arguments), {})
 
         with self.assertRaisesRegex(ValueError, "default target host"):
             parse_configuration([], {"SBK_DASHBOARD_DEFAULT_TARGET_HOST": "host:9718"})
+        with self.assertRaisesRegex(ValueError, "maximum comparison targets"):
+            parse_configuration([], {"SBK_DASHBOARD_MAX_COMPARISON_TARGETS": "33"})
 
     def test_rejects_malformed_ipv4_like_bind_addresses(self):
         for address in ("0.0.0.0.0", "127.000.000.001", "::::", "host:80"):

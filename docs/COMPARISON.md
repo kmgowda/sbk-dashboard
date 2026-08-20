@@ -13,7 +13,7 @@ You may obtain a copy of the License at
 SBK Dashboard supports two additive comparison modes in one Grafana app:
 
 - select one registered target to compare that dashboard across two or more time ranges; or
-- select 2–8 registered SBK or SBM targets to compare different dashboards as before.
+- select 2–4 registered SBK or SBM targets by default, or configure a limit from 2 to 32.
 
 Every lane initially follows one global live time range. After the comparison opens, detach only the lane whose time
 window must differ. Existing multi-target comparison URLs and behavior remain compatible.
@@ -21,7 +21,7 @@ window must differ. Existing multi-target comparison URLs and behavior remain co
 ## Use the comparison view
 
 1. Register every exporter on the SBK Dashboard landing page.
-2. Select one target and choose **Compare time ranges**, or select 2–8 targets and choose **Compare selected**.
+2. Select one target and choose **Compare time ranges**, or select 2–4 targets by default and choose **Compare selected**.
 3. Use the Grafana time picker in **Global live range** to inspect all targets together.
 4. In a target card, select one of these modes:
    - **Follow global live range** — stays synchronized with the global picker and refreshes with incoming samples.
@@ -67,7 +67,9 @@ to a different range creates a second group. Moving a third target to that same 
 
 The comparison is deliberately bounded:
 
-- one endpoint with 2–8 time lanes, or 2–8 distinct endpoints;
+- one endpoint with 2–8 time lanes;
+- 2–4 distinct endpoints by default, configurable from 2 to 32 with
+  `-max-comparison-targets` or `SBK_DASHBOARD_MAX_COMPARISON_TARGETS`;
 - at most four distinct time groups;
 - at most 31 days in one fixed historical range; and
 - at most 128 cached comparison descriptors.
@@ -75,6 +77,16 @@ The comparison is deliberately bounded:
 These are runtime policy values emitted in the server-owned comparison descriptor. Invalid or oversized URL state
 falls back to the global range. Prometheus retention still determines whether samples exist; the default retention is
 seven days, so a valid 31-day query can legitimately contain no data outside retained history.
+
+For example, start an instance that permits up to 12 endpoints in one comparison:
+
+```bash
+./sbk-dashboard -max-comparison-targets 12
+```
+
+The landing page, REST validation, readiness gateway, generated descriptor, and Grafana app all receive the same
+validated value. Lowering the limit on restart removes cached comparison descriptors that exceed the new limit;
+endpoint registrations and Prometheus history are not removed.
 
 ```mermaid
 flowchart TB

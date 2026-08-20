@@ -12,28 +12,18 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import threading
 from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from sbk_dashboard.comparison import ComparisonPolicy, comparison_dashboard_uid
 from sbk_dashboard.files import atomic_json, atomic_write
 from sbk_dashboard.models import BenchmarkTarget
 
 DATASOURCE_UID = "PBFA97CFB590B2093"
-COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
 COMPARISON_APP_PLUGIN_ID = "sbkcomparison-app"
-COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2
-MIN_COMPARISON_TARGETS = 1
-MAX_COMPARISON_TARGETS = 8
-MIN_SINGLE_TARGET_TIME_LANES = 2
-MAX_COMPARISON_TIME_LANES = 8
-MAX_COMPARISON_TIME_GROUPS = 4
-MAX_COMPARISON_ABSOLUTE_RANGE_DAYS = 31
-MAX_COMPARISON_DASHBOARDS = 128
-MAX_GENERATED_DASHBOARD_BYTES = 2 * 1024 * 1024
 SBK_METRIC_PREFIX = "SBK_"
 SBK_ENDPOINT_LABEL = "sbk_endpoint_id"
 
@@ -59,7 +49,12 @@ class PrometheusTargetDiscovery:
 
 
 class GrafanaDashboardProvisioner:
-    def __init__(self, dashboard_directory: Path, grafana_public_url: str) -> None:
+    def __init__(
+        self,
+        dashboard_directory: Path,
+        grafana_public_url: str,
+        comparison_policy: ComparisonPolicy | None = None,
+    ) -> None:
         resource = files("sbk_dashboard").joinpath("resources/grafana/dashboards/sbk-dashboard.json")
         try:
             self._canonical = json.loads(resource.read_text(encoding="utf-8"))
@@ -67,6 +62,7 @@ class GrafanaDashboardProvisioner:
             raise OSError(f"Canonical SBK Grafana dashboard is unavailable: {error}") from error
         self.dashboard_directory = dashboard_directory
         self.grafana_public_url = grafana_public_url.rstrip("/")
+        self.comparison_policy = comparison_policy or ComparisonPolicy()
         self._lock = threading.Lock()
 
     @staticmethod
@@ -79,24 +75,20 @@ class GrafanaDashboardProvisioner:
 
     @staticmethod
     def comparison_dashboard_uid(target_ids: list[str]) -> str:
-        normalized = sorted(set(target_ids))
-        digest = hashlib.sha256("\n".join(normalized).encode()).hexdigest()[:16]
-        return f"{COMPARISON_DASHBOARD_PREFIX}{digest}"
+        return comparison_dashboard_uid(target_ids)
 
     def comparison_dashboard_url(self, target_ids: list[str], browser_host: str | None = None) -> str:
-        normalized = sorted(set(target_ids))
-        uid = self.comparison_dashboard_uid(normalized)
-        query = urlencode({"comparisonUid": uid})
+        selection = self.comparison_policy.selection(target_ids)
+        query = urlencode({"comparisonUid": selection.uid})
         return f"{self._browser_base_url(browser_host)}/a/{COMPARISON_APP_PLUGIN_ID}?{query}"
 
     def classic_comparison_dashboard_url(
         self, target_ids: list[str], browser_host: str | None = None
     ) -> str:
         """Return the provisioned Grafana dashboard fallback for a comparison set."""
-        normalized = sorted(set(target_ids))
-        query = urlencode([("var-sbk_endpoints", target_id) for target_id in normalized])
-        uid = self.comparison_dashboard_uid(normalized)
-        return f"{self._browser_base_url(browser_host)}/d/{uid}/?{query}"
+        selection = self.comparison_policy.selection(target_ids)
+        query = urlencode([("var-sbk_endpoints", target_id) for target_id in selection.target_ids])
+        return f"{self._browser_base_url(browser_host)}/d/{selection.uid}/?{query}"
 
     def _browser_base_url(self, browser_host: str | None) -> str:
         base_url = self.grafana_public_url
@@ -120,20 +112,17 @@ class GrafanaDashboardProvisioner:
 
     def generated_comparison_dashboard(self, targets: list[BenchmarkTarget]) -> dict[str, object]:
         targets = sorted(targets, key=lambda target: target.id)
-        target_ids = [target.id for target in targets]
-        if (
-            not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
-            or len(set(target_ids)) != len(target_ids)
-        ):
-            raise ValueError(
-                f"Comparison dashboards require {MIN_COMPARISON_TARGETS}–{MAX_COMPARISON_TARGETS} unique endpoints"
-            )
+        selection = self.comparison_policy.selection([target.id for target in targets])
+        target_ids = list(selection.target_ids)
         dashboard = copy.deepcopy(self._canonical)
         dashboard["id"] = None
-        dashboard["uid"] = self.comparison_dashboard_uid(target_ids)
-        dashboard["title"] = f"SBK/SBM Comparison — {str(dashboard['uid']).removeprefix(COMPARISON_DASHBOARD_PREFIX)}"
+        dashboard["uid"] = selection.uid
+        dashboard["title"] = (
+            "SBK/SBM Comparison — "
+            f"{str(dashboard['uid']).removeprefix(ComparisonPolicy.DASHBOARD_PREFIX)}"
+        )
         dashboard["version"] = 1
-        dashboard["sbkDashboardComparisonSchemaVersion"] = COMPARISON_DESCRIPTOR_SCHEMA_VERSION
+        dashboard["sbkDashboardComparisonSchemaVersion"] = ComparisonPolicy.DESCRIPTOR_SCHEMA_VERSION
         dashboard["sbkDashboardComparisonEndpointIds"] = target_ids
         dashboard["sbkDashboardComparisonTargets"] = [
             {
@@ -144,14 +133,7 @@ class GrafanaDashboardProvisioner:
             }
             for target in targets
         ]
-        dashboard["sbkDashboardComparisonPolicy"] = {
-            "minTargets": MIN_COMPARISON_TARGETS,
-            "maxTargets": MAX_COMPARISON_TARGETS,
-            "minSingleTargetTimeLanes": MIN_SINGLE_TARGET_TIME_LANES,
-            "maxTimeLanes": MAX_COMPARISON_TIME_LANES,
-            "maxTimeGroups": MAX_COMPARISON_TIME_GROUPS,
-            "maxAbsoluteRangeDays": MAX_COMPARISON_ABSOLUTE_RANGE_DAYS,
-        }
+        dashboard["sbkDashboardComparisonPolicy"] = self.comparison_policy.descriptor()
         tags = dashboard.setdefault("tags", [])
         tags.extend(["sbk-dashboard-managed", "comparison"])
         templating = dashboard.setdefault("templating", {})
@@ -202,7 +184,7 @@ class GrafanaDashboardProvisioner:
                 expected.add(path)
                 atomic_json(path, self.generated_dashboard(target))
             targets_by_id = {target.id: target for target in targets}
-            for path in self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"):
+            for path in self.dashboard_directory.glob(f"{ComparisonPolicy.DASHBOARD_PREFIX}*.json"):
                 descriptor = self._comparison_descriptor(path)
                 if descriptor is None:
                     continue
@@ -228,31 +210,35 @@ class GrafanaDashboardProvisioner:
             pass
         atomic_write(path, content)
 
-    @staticmethod
-    def _comparison_descriptor(path: Path) -> tuple[list[str], bool] | None:
+    def _comparison_descriptor(self, path: Path) -> tuple[list[str], bool] | None:
         try:
             with path.open("rb") as source:
-                content = source.read(MAX_GENERATED_DASHBOARD_BYTES + 1)
-            if len(content) > MAX_GENERATED_DASHBOARD_BYTES:
+                content = source.read(self.comparison_policy.MAX_DESCRIPTOR_BYTES + 1)
+            if len(content) > self.comparison_policy.MAX_DESCRIPTOR_BYTES:
                 return None
             value = json.loads(content.decode("utf-8"))
             target_ids = value.get("sbkDashboardComparisonEndpointIds")
         except (OSError, UnicodeDecodeError, ValueError, AttributeError):
             return None
-        if (
-            not isinstance(target_ids, list)
-            or not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
-            or any(not isinstance(target_id, str) for target_id in target_ids)
-            or target_ids != sorted(set(target_ids))
-            or value.get("uid") != GrafanaDashboardProvisioner.comparison_dashboard_uid(target_ids)
-        ):
+        if not isinstance(target_ids, list) or any(not isinstance(target_id, str) for target_id in target_ids):
             return None
-        schema_current = value.get("sbkDashboardComparisonSchemaVersion") == COMPARISON_DESCRIPTOR_SCHEMA_VERSION
-        return target_ids, schema_current
+        try:
+            selection = self.comparison_policy.selection(target_ids)
+        except ValueError:
+            return None
+        if value.get("uid") != selection.uid:
+            return None
+        policy = value.get("sbkDashboardComparisonPolicy")
+        schema_current = (
+            value.get("sbkDashboardComparisonSchemaVersion")
+            == ComparisonPolicy.DESCRIPTOR_SCHEMA_VERSION
+            and self.comparison_policy.matches_descriptor(policy)
+        )
+        return list(selection.target_ids), schema_current
 
     def _prune_comparison_dashboards(self, retained_uid: str) -> None:
-        paths = list(self.dashboard_directory.glob(f"{COMPARISON_DASHBOARD_PREFIX}*.json"))
-        if len(paths) <= MAX_COMPARISON_DASHBOARDS:
+        paths = list(self.dashboard_directory.glob(f"{ComparisonPolicy.DASHBOARD_PREFIX}*.json"))
+        if len(paths) <= self.comparison_policy.MAX_CACHED_DASHBOARDS:
             return
         candidates: list[tuple[int, str, Path]] = []
         for path in paths:
@@ -262,7 +248,7 @@ class GrafanaDashboardProvisioner:
                 candidates.append((path.stat().st_mtime_ns, path.name, path))
             except OSError:
                 continue
-        remove_count = len(paths) - MAX_COMPARISON_DASHBOARDS
+        remove_count = len(paths) - self.comparison_policy.MAX_CACHED_DASHBOARDS
         for _modified, _name, path in sorted(candidates)[:remove_count]:
             path.unlink(missing_ok=True)
 

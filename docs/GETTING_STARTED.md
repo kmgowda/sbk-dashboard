@@ -139,7 +139,8 @@ is true before using the direct URL. Select a time range containing the benchmar
 ## Compare endpoints
 
 Register one or more endpoints, copy their IDs from `GET /api/targets`, and request a deterministic comparison. One
-ID opens two time lanes for that dashboard; 2–8 IDs compare different dashboards:
+ID opens two time lanes for that dashboard; 2–4 IDs compare different dashboards by default. Start SBK Dashboard
+with `-max-comparison-targets <2..32>` when the deployment needs a different bounded maximum:
 
 ```bash
 curl --fail --request POST http://127.0.0.1:9721/api/comparison-dashboard \

@@ -28,7 +28,9 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse, urlsplit
 
+from sbk_dashboard.comparison import ComparisonPolicy
 from sbk_dashboard.contracts import (
+    BYTES_PER_KIBIBYTE,
     CLIENT_ID_RANDOM_BYTES,
     DASHBOARD_READINESS_RETRY_DELAYS_SECONDS,
     GRAFANA_ACTIVITY_SECONDS,
@@ -45,7 +47,6 @@ from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.network import normalize_host
 from sbk_dashboard.processes import LifecycleController, LifecycleState
-from sbk_dashboard.provisioning import MAX_COMPARISON_TARGETS, MIN_COMPARISON_TARGETS
 from sbk_dashboard.registry import TargetRegistry
 
 CLIENT_ID_PATTERN = re.compile(
@@ -57,7 +58,6 @@ ASSET_FINGERPRINT_HEX_LENGTH = 12
 MIN_SOCKET_BACKLOG = 5
 MAX_SOCKET_BACKLOG = 256
 OVERLOAD_RESPONSE_TIMEOUT_SECONDS = 1.0
-BYTES_PER_KIBIBYTE = 1024
 WEB_ASSETS = {
     "/": "index.html",
     "/index.html": "index.html",
@@ -91,10 +91,10 @@ def _dashboard_wait_page(
     ).encode()
 
 
-def _render_javascript(body: bytes) -> bytes:
+def _render_javascript(body: bytes, max_comparison_targets: int) -> bytes:
     replacements = {
-        b"__MIN_COMPARISON_TARGETS__": MIN_COMPARISON_TARGETS,
-        b"__MAX_COMPARISON_TARGETS__": MAX_COMPARISON_TARGETS,
+        b"__MIN_COMPARISON_TARGETS__": ComparisonPolicy.MIN_TARGETS,
+        b"__MAX_COMPARISON_TARGETS__": max_comparison_targets,
         b"__TARGET_REFRESH_MILLISECONDS__": TARGET_REFRESH_MILLISECONDS,
         b"__LANDING_HEARTBEAT_MILLISECONDS__": LANDING_HEARTBEAT_MILLISECONDS,
         b"__CLIENT_ID_RANDOM_BYTES__": CLIENT_ID_RANDOM_BYTES,
@@ -191,6 +191,7 @@ class DashboardHttpServer:
 
         config = monitoring.dashboard
         self._default_target_host = config.default_target_host
+        self._comparison_policy = ComparisonPolicy(max_targets=config.max_comparison_targets)
         self._server = BoundedThreadPoolHttpServer(
             (config.bind_address, port),
             Handler,
@@ -308,13 +309,7 @@ class DashboardHttpServer:
         values = body.get("targetIds")
         if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
             raise ValueError("Target IDs must be an array of strings")
-        if len(values) < MIN_COMPARISON_TARGETS:
-            raise ValueError("Select at least one endpoint to compare")
-        if len(values) > MAX_COMPARISON_TARGETS:
-            raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
-        target_ids = sorted(dict.fromkeys(values))
-        if len(target_ids) != len(values):
-            raise ValueError("Comparison endpoints must be unique")
+        target_ids = list(self._comparison_policy.selection(values).target_ids)
         with self._mutation_lock:
             if any(self.registry.find(target_id) is None for target_id in target_ids):
                 raise ValueError("Every comparison endpoint must be registered")
@@ -421,16 +416,14 @@ class DashboardHttpServer:
         self._require(request, "GET")
         comparison_uid = unquote(encoded)
         query = parse_qs(urlparse(request.path).query)
-        target_ids = sorted(query.get("targetId", []))
-        if (
-            "/" in comparison_uid
-            or len(target_ids) < MIN_COMPARISON_TARGETS
-            or len(target_ids) > MAX_COMPARISON_TARGETS
-            or len(set(target_ids)) != len(target_ids)
-            or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
-        ):
+        try:
+            selection = self._comparison_policy.selection(query.get("targetId", []))
+        except ValueError:
+            selection = None
+        if "/" in comparison_uid or selection is None or selection.uid != comparison_uid:
             self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
             return
+        target_ids = list(selection.target_ids)
         with self._mutation_lock:
             if any(self.registry.find(target_id) is None for target_id in target_ids):
                 self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
@@ -496,7 +489,10 @@ class DashboardHttpServer:
             body = resource.read_bytes()
             if name == "index.html":
                 stylesheet = resource_root.joinpath("app.css").read_bytes()
-                javascript = _render_javascript(resource_root.joinpath("app.js").read_bytes())
+                javascript = _render_javascript(
+                    resource_root.joinpath("app.js").read_bytes(),
+                    self._comparison_policy.max_targets,
+                )
                 fingerprint = hashlib.sha256(
                     stylesheet + javascript
                 ).hexdigest()[:ASSET_FINGERPRINT_HEX_LENGTH]
@@ -505,8 +501,12 @@ class DashboardHttpServer:
                     b"__DEFAULT_TARGET_HOST__",
                     html.escape(self._default_target_host, quote=True).encode("utf-8"),
                 )
+                body = body.replace(
+                    b"__MAX_COMPARISON_TARGETS__",
+                    str(self._comparison_policy.max_targets).encode("ascii"),
+                )
             elif name == "app.js":
-                body = _render_javascript(body)
+                body = _render_javascript(body, self._comparison_policy.max_targets)
         except OSError:
             self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Missing application asset"})
             return
