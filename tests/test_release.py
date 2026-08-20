@@ -189,6 +189,17 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertEqual(release.JSON_ACCEPT, docker_hub.api.accept)
         self.assertIsNone(docker_hub.api.api_version)
 
+    def test_docker_hub_uses_current_namespace_repository_tag_api(self):
+        docker_hub = release.DockerHubClient("kmgowda/sbk-dashboard")
+        docker_hub.api = Mock()
+        docker_hub.api.request.return_value = (200, {"digest": "sha256:123"})
+        self.assertEqual("sha256:123", docker_hub.digest("1.2.3.4"))
+        docker_hub.api.request.assert_called_once_with(
+            "GET", "/namespaces/kmgowda/repositories/sbk-dashboard/tags/1.2.3.4"
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "namespace/repository"):
+            release.DockerHubClient("sbk-dashboard")
+
     def test_wait_for_workflow_rejects_failed_exact_commit(self):
         github = Mock()
         github.workflow_runs.return_value = [
@@ -211,6 +222,52 @@ class ReleaseContractTest(unittest.TestCase):
                 poll_seconds=0.01,
             )
 
+    def test_wait_for_workflow_honors_rate_limit_and_clamps_deadline(self):
+        github = Mock()
+        github.workflow_runs.side_effect = [
+            release.RateLimitError("limited", 120),
+            [
+                {
+                    "head_sha": COMMIT,
+                    "head_branch": "main",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            ],
+        ]
+        sleeper = Mock()
+        monotonic = Mock(side_effect=[0, 0, 0, 0])
+        release.wait_for_workflow(
+            github,
+            release.CI_WORKFLOW,
+            "push",
+            plan(),
+            head_branch="main",
+            timeout_seconds=300,
+            poll_seconds=15,
+            sleeper=sleeper,
+            monotonic=monotonic,
+        )
+        sleeper.assert_called_once_with(120)
+
+        github.workflow_runs.side_effect = None
+        github.workflow_runs.return_value = []
+        sleeper.reset_mock()
+        monotonic = Mock(side_effect=[0, 0, 9, 10])
+        with self.assertRaisesRegex(release.ReleaseError, "Timed out"):
+            release.wait_for_workflow(
+                github,
+                release.CI_WORKFLOW,
+                "push",
+                plan(),
+                head_branch="main",
+                timeout_seconds=10,
+                poll_seconds=15,
+                sleeper=sleeper,
+                monotonic=monotonic,
+            )
+        sleeper.assert_called_once_with(1)
+
     def test_wait_for_assets_retries_while_generated_notes_are_empty(self):
         selected = plan()
         assets = [{"name": name} for name in required_release_assets(VERSION)]
@@ -232,6 +289,27 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertEqual("Generated notes", result["body"])
         sleeper.assert_called_once_with(1)
 
+    def test_wait_for_assets_honors_github_rate_limit(self):
+        selected = plan()
+        assets = [{"name": name} for name in required_release_assets(VERSION)]
+        github = Mock()
+        github.release.side_effect = [
+            release.RateLimitError("limited", 90),
+            {"assets": assets, "body": "Generated notes"},
+        ]
+        sleeper = Mock()
+        monotonic = Mock(side_effect=[0, 0, 0, 0])
+        result = release.wait_for_assets(
+            github,
+            selected,
+            timeout_seconds=300,
+            poll_seconds=15,
+            sleeper=sleeper,
+            monotonic=monotonic,
+        )
+        self.assertEqual("Generated notes", result["body"])
+        sleeper.assert_called_once_with(90)
+
     def test_docker_verification_honors_rate_limit_and_backs_off(self):
         docker_hub = Mock()
         docker_hub.digest.side_effect = [
@@ -252,8 +330,19 @@ class ReleaseContractTest(unittest.TestCase):
         self.assertEqual("sha256:123", digest)
         sleeper.assert_called_once_with(120)
 
-    def test_retry_after_requires_a_positive_finite_delta(self):
+    def test_retry_after_accepts_a_delta_or_unix_timestamp(self):
         self.assertEqual(30, release.retry_after_seconds("30"))
+        self.assertEqual(
+            90,
+            release.retry_after_seconds(
+                "1700000090", wall_time=lambda: 1_700_000_000
+            ),
+        )
+        self.assertIsNone(
+            release.retry_after_seconds(
+                "1699999999", wall_time=lambda: 1_700_000_000
+            )
+        )
         for value in (None, "date", "0", "-1", "inf"):
             self.assertIsNone(release.retry_after_seconds(value))
 
@@ -294,6 +383,69 @@ class ReleaseContractTest(unittest.TestCase):
                 select_release_assets.missing_assets(
                     directory, VERSION, {"assets": [existing]}
                 )
+
+    def test_asset_rerun_waits_for_transient_open_or_null_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_artifacts(directory)
+            build_release_manifest.build_manifest(directory, VERSION, release_tag(VERSION), COMMIT)
+            first_name = required_release_assets(VERSION)[0]
+            first_path = directory / first_name
+            pending = {
+                "name": first_name,
+                "size": first_path.stat().st_size,
+                "state": "open",
+                "digest": None,
+            }
+            uploaded = {
+                **pending,
+                "state": "uploaded",
+                "digest": f"sha256:{build_release_manifest.sha256(first_path)}",
+            }
+            github = Mock()
+            github.release.side_effect = [
+                {"assets": [pending]},
+                {"assets": [uploaded]},
+            ]
+            sleeper = Mock()
+            monotonic = Mock(side_effect=[0, 0, 0, 0])
+            missing = select_release_assets.wait_for_missing_assets(
+                github,
+                directory,
+                VERSION,
+                release_tag(VERSION),
+                timeout_seconds=10,
+                poll_seconds=1,
+                sleeper=sleeper,
+                monotonic=monotonic,
+            )
+            self.assertEqual(len(required_release_assets(VERSION)) - 1, len(missing))
+            sleeper.assert_called_once_with(1)
+
+    def test_asset_rerun_applies_rate_limit_backoff(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.write_artifacts(directory)
+            build_release_manifest.build_manifest(directory, VERSION, release_tag(VERSION), COMMIT)
+            github = Mock()
+            github.release.side_effect = [
+                select_release_assets.RateLimitError("limited", 45),
+                {"assets": []},
+            ]
+            sleeper = Mock()
+            monotonic = Mock(side_effect=[0, 0, 0, 0])
+            missing = select_release_assets.wait_for_missing_assets(
+                github,
+                directory,
+                VERSION,
+                release_tag(VERSION),
+                timeout_seconds=60,
+                poll_seconds=5,
+                sleeper=sleeper,
+                monotonic=monotonic,
+            )
+            self.assertEqual(len(required_release_assets(VERSION)), len(missing))
+            sleeper.assert_called_once_with(45)
 
     def test_check_mode_never_calls_publish_or_remote_mutations(self):
         selected = plan()

@@ -54,8 +54,9 @@ git diff --check
 ```
 
 Release tests mock Git, GitHub, and Docker Hub mutation boundaries. They build only temporary artifact fixtures and
-prove that `check` cannot create or push a tag. Never invoke `release publish` during automated or development
-testing.
+prove that `check` cannot create or push a tag. They also cover relative and absolute rate-limit values,
+deadline-clamped polling, current Docker Hub tag paths, and transient GitHub asset metadata. Never invoke
+`release publish` during automated or development testing.
 
 Documentation-only changes still run the complete fast checks. Mermaid diagrams must also be rendered with the
 procedure in [Documentation validation](#documentation-validation), because a fenced block can be syntactically

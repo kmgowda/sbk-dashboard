@@ -182,8 +182,10 @@ The command never moves an existing tag and never overwrites a release asset.
 
 The `--resume` option accepts existing state only when the local tag, remote tag, release, and checked-out commit are
 consistent. The final workflow compares the size and GitHub SHA-256 digest of every existing asset, keeps identical
-assets, and uploads only missing assets. It never overwrites a conflicting published file. It does not bypass failed
-workflows or missing assets.
+assets, and uploads only missing assets. If GitHub still reports an asset as open or has not populated its digest,
+the workflow waits for a bounded five-minute metadata-propagation window instead of treating that asset as missing
+or overwriting it. A completed conflicting asset still fails the job. It does not bypass failed workflows or
+missing assets.
 
 ## Implementation boundaries
 
@@ -193,7 +195,8 @@ owns asset names and bounds; [`build_release_manifest.py`](../scripts/build_rele
 workflow outputs; [`select_release_assets.py`](../scripts/select_release_assets.py) makes partial-upload retries
 idempotent without weakening immutability. GitHub requests pin API version `2022-11-28`; Docker Hub uses its own JSON
 media type and bounded exponential/rate-limit backoff. GitHub Actions owns native builds, secrets, attestations, and
-publication.
+publication. Rate-limit handling accepts either relative delays or numeric Unix timestamps, clamps every sleep to
+the remaining release timeout, and queries Docker Hub through its current namespace/repository tag API.
 
 This separation is preferable to local multi-platform release builds: a macOS laptop cannot natively validate
 Windows and Linux ARM64, local credentials should not include every registry/signing capability, and duplicating

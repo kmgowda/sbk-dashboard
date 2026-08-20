@@ -15,6 +15,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +25,28 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from build_release_manifest import sha256  # noqa: E402
-from release import DEFAULT_REPOSITORY, GitHubClient, ReleaseError  # noqa: E402
+from release import (  # noqa: E402
+    DEFAULT_REPOSITORY,
+    GitHubClient,
+    RateLimitError,
+    ReleaseError,
+    bounded_sleep,
+    rate_limit_delay,
+)
 from release_contract import MAX_RELEASE_ASSETS, release_tag, required_release_assets  # noqa: E402
 from sync_release_metadata import package_version  # noqa: E402
 
 
 class AssetSelectionError(RuntimeError):
     """Existing release state is unsafe for an immutable incremental upload."""
+
+
+class PendingAssetError(AssetSelectionError):
+    """GitHub has not finished processing one otherwise matching release asset."""
+
+
+ASSET_PROPAGATION_TIMEOUT_SECONDS = 5 * 60
+ASSET_PROPAGATION_POLL_SECONDS = 5.0
 
 
 def missing_assets(directory: Path, version: str, release: dict[str, Any]) -> list[Path]:
@@ -58,10 +75,51 @@ def missing_assets(directory: Path, version: str, release: dict[str, Any]) -> li
         if remote is None:
             selected.append(path)
             continue
-        if remote.get("size") != path.stat().st_size or remote.get("digest") != f"sha256:{digest}":
+        state = remote.get("state")
+        remote_digest = remote.get("digest")
+        if (isinstance(state, str) and state != "uploaded") or remote_digest is None:
+            raise PendingAssetError(f"GitHub is still processing release asset: {name}")
+        if not isinstance(remote_digest, str):
+            raise AssetSelectionError(f"GitHub Release returned invalid digest metadata: {name}")
+        if remote.get("size") != path.stat().st_size or remote_digest != f"sha256:{digest}":
             raise AssetSelectionError(f"Existing GitHub Release asset differs from local file: {name}")
         print(f"Keeping identical existing release asset: {name}", file=sys.stderr)
     return selected
+
+
+def wait_for_missing_assets(
+    github: GitHubClient,
+    directory: Path,
+    version: str,
+    tag: str,
+    *,
+    timeout_seconds: float = ASSET_PROPAGATION_TIMEOUT_SECONDS,
+    poll_seconds: float = ASSET_PROPAGATION_POLL_SECONDS,
+    sleeper: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> list[Path]:
+    """Wait a bounded period for existing GitHub asset digests, then select missing files."""
+    deadline = monotonic() + timeout_seconds
+    delay = poll_seconds
+    while monotonic() < deadline:
+        try:
+            release = github.release(tag)
+            delay = poll_seconds
+        except RateLimitError as error:
+            delay = rate_limit_delay(delay, poll_seconds, error.retry_after)
+            print("GitHub rate-limited asset inspection; applying bounded backoff...", file=sys.stderr)
+            if not bounded_sleep(deadline, delay, sleeper=sleeper, monotonic=monotonic):
+                break
+            continue
+        if release is None:
+            raise AssetSelectionError(f"GitHub Release {tag!r} was not found")
+        try:
+            return missing_assets(directory, version, release)
+        except PendingAssetError as error:
+            print(f"{error}; waiting for GitHub asset metadata...", file=sys.stderr)
+        if not bounded_sleep(deadline, poll_seconds, sleeper=sleeper, monotonic=monotonic):
+            break
+    raise AssetSelectionError("Timed out waiting for GitHub release asset metadata")
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -79,11 +137,9 @@ def main(arguments: list[str] | None = None) -> int:
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise SystemExit("error: GITHUB_TOKEN is required to inspect release assets")
-    release = GitHubClient(selected.repository, token).release(selected.tag)
-    if release is None:
-        raise SystemExit(f"error: GitHub Release {selected.tag!r} was not found")
     try:
-        for path in missing_assets(selected.directory, version, release):
+        github = GitHubClient(selected.repository, token)
+        for path in wait_for_missing_assets(github, selected.directory, version, selected.tag):
             print(path)
     except (OSError, UnicodeError, ValueError, ReleaseError, AssetSelectionError) as error:
         raise SystemExit(f"error: {error}") from error
