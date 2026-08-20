@@ -73,8 +73,9 @@ For version `<version>`, the command verifies these explicit GitHub Release asse
 | `release-manifest.json` | Version, tag, commit, sizes, and SHA-256 values |
 
 GitHub also supplies its standard source-code ZIP and TAR archives. The release body is generated from commits and
-merged pull requests since the preceding release. Docker Hub receives `kmgowda/sbk-dashboard:<version>` and
-`kmgowda/sbk-dashboard:latest`, pointing to the same signed multi-architecture digest.
+merged pull requests since the preceding release. One gated build publishes version and `latest` tags to both
+Docker Hub (`kmgowda/sbk-dashboard`) and GitHub Packages (`ghcr.io/kmgowda/sbk-dashboard`). Each registry's two
+tags must resolve to one multi-architecture digest before the container workflow can pass.
 
 ## Prerequisites
 
@@ -164,10 +165,11 @@ complete. The command prints links for each workflow. It returns success only af
 1. the exact `main` commit passed cross-platform CI;
 2. the annotated tag was pushed;
 3. AMD64 and ARM64 images passed their native smoke gates;
-4. the version and `latest` multi-architecture image was published, attested, and signed;
+4. the version and `latest` multi-architecture image was published to Docker Hub and GitHub Packages, attested,
+   verified in both registries, and signed;
 5. the generated-notes GitHub Release was published;
 6. every portable and Python artifact was attached; and
-7. the release assets and Docker Hub tag digests were verified.
+7. the release assets and both container-registry tag pairs were verified.
 
 ## Recover a partial release
 

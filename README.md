@@ -91,7 +91,7 @@ Start at the [documentation center](docs/README.md). The most useful paths are:
 - [Implementation internals](docs/INTERNALS.md): code-level startup, request, reconciliation, supervision, and
   shutdown paths.
 - [Docker deployment](docs/DOCKER.md): container networking, persistence, security, and release images.
-- [Docker Hub build and publishing](docs/DOCKER_HUB.md): copy-and-paste local build, versioned multi-architecture
+- [Container build and publishing](docs/DOCKER_HUB.md): Docker Hub and GitHub Packages multi-architecture
   publishing, verification, pull, run, and upgrade procedures.
 - [Release publishing](docs/RELEASING.md): one guarded cross-platform command for tags, notes, artifacts, and images.
 - [Testing](docs/TESTING.md): automated validation and real SBK procedures.
@@ -148,7 +148,8 @@ docker compose pull
 docker compose up --detach
 ```
 
-The production Compose definition pulls the pinned, multi-architecture image from Docker Hub. That
+The production Compose definition pulls the pinned, multi-architecture image from Docker Hub; the same release is
+also published to `ghcr.io/kmgowda/sbk-dashboard`. The
 image already contains the Python package and checksum-verified Prometheus and Grafana distributions, so customer
 startup never builds source or downloads native archives separately. The first image pull depends on network speed;
 subsequent `docker compose start` operations use the local image and persistent volume.
@@ -206,7 +207,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
 ```
 
 See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,
-troubleshooting, validation, and the complete Docker Hub publishing procedure for image maintainers.
+troubleshooting, validation, and the complete dual-registry publishing procedure for image maintainers.
 
 ## Install with venv
 

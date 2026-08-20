@@ -57,6 +57,8 @@ Release tests mock Git, GitHub, and Docker Hub mutation boundaries. They build o
 prove that `check` cannot create or push a tag. They also cover relative and absolute rate-limit values,
 deadline-clamped polling, current Docker Hub tag paths, and transient GitHub asset metadata. Never invoke
 `release publish` during automated or development testing.
+Container workflow contract tests separately require dual Docker Hub/GitHub Packages metadata targets, scoped
+`packages: write`, GHCR authentication through the job token, and version/`latest` verification in both registries.
 
 Documentation-only changes still run the complete fast checks. Mermaid diagrams must also be rendered with the
 procedure in [Documentation validation](#documentation-validation), because a fenced block can be syntactically

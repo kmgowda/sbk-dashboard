@@ -232,6 +232,11 @@ Release 1.26.8.2 switched the published-image workflow to Docker Hub, added sour
 launchers for Linux, macOS, and Windows, and changed only the container endpoint-form default to
 `host.docker.internal`. Direct Python/Conda target defaults and persisted registrations remain unchanged.
 
+After release 1.26.8.3, tagged container delivery publishes the same gated AMD64/ARM64 build to both Docker Hub and
+GitHub Packages. Existing Compose deployments continue to use `kmgowda/sbk-dashboard`; operators may instead pull
+`ghcr.io/kmgowda/sbk-dashboard:<version>` when their GitHub Packages visibility and authentication policy permits.
+No persistent data, port, entry-point, or runtime-process migration is required.
+
 The multi-instance launcher extension keeps the historical default-port data root and launcher filenames. An
 instance using a non-default management port now defaults to `~/.sbk-dashboard/instances/<port>`. If the built-in
 Prometheus 9090 or Grafana 3000 port is occupied, and that native port was not supplied by CLI or environment,

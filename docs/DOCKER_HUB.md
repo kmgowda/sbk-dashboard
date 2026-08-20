@@ -8,11 +8,12 @@ You may obtain a copy of the License at
     http://www.apache.org/licenses/LICENSE-2.0
 -->
 
-# Build, publish, and pull the Docker image
+# Build, publish, and pull container images
 
-This guide shows how to build SBK Dashboard on your computer, test it, publish a versioned AMD64/ARM64 image to
-Docker Hub, and pull that image on another computer. The examples use the public Docker Hub repository
-`kmgowda/sbk-dashboard`.
+This guide shows how to build SBK Dashboard on your computer, test it, publish a versioned AMD64/ARM64 image, and
+pull that image on another computer. Official releases publish the same gated build to the public Docker Hub
+repository `kmgowda/sbk-dashboard` and the GitHub Packages repository
+`ghcr.io/kmgowda/sbk-dashboard`.
 
 Run the commands from the root of the `sbk-dashboard` source checkout—the directory that contains `Dockerfile`,
 `compose.yaml`, and `pyproject.toml`. The commands use a POSIX shell such as Bash or Zsh on Linux or macOS. Docker
@@ -392,9 +393,11 @@ then creates the generated-notes GitHub Release and waits for every portable/Pyt
 [`RELEASING.md`](RELEASING.md) for Windows syntax, the exact asset list, safety checks, and partial-release recovery.
 
 The container workflow natively builds and smoke-tests runnable AMD64 and ARM64 images, rejects fixed high/critical
-vulnerabilities with pinned Trivy, attaches provenance and an SBOM, publishes both the version and `latest` tags, and
-keylessly signs their shared digest with GitHub OIDC. It stops before Docker Hub login when the Git tag and package
-version do not match. No long-lived signing key is stored in repository secrets. Any reviewed scanner exception is
+vulnerabilities with pinned Trivy, attaches provenance and an SBOM, and publishes both the version and `latest`
+tags to Docker Hub and GitHub Packages. It verifies version/`latest` convergence in each registry and keylessly
+signs every published registry reference with GitHub OIDC. It stops before either registry login when the Git tag
+and package version do not match. GHCR uses the job-scoped `GITHUB_TOKEN` with `packages: write`; no separate GHCR
+secret or long-lived signing key is stored. Any reviewed scanner exception is
 target-scoped, documented, and time-limited in `.trivyignore.yaml`; expiry deliberately blocks publishing until the
 native dependencies are upgraded or the exception is reviewed again.
 The validation jobs also run weekly so disclosure of a new vulnerability is visible without waiting for a source

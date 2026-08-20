@@ -93,7 +93,8 @@ that option deletes endpoint registrations, Prometheus history, Grafana state, a
 
 ## Released image
 
-Release tags publish `linux/amd64` and `linux/arm64` images to Docker Hub. Run a pinned release:
+Release tags publish `linux/amd64` and `linux/arm64` images to Docker Hub and GitHub Packages. Run the public
+Docker Hub image as a pinned release:
 
 ```bash
 docker run --detach --name sbk-dashboard --restart unless-stopped \
@@ -137,6 +138,7 @@ Resolve an immutable digest after pulling or publishing:
 
 ```bash
 docker buildx imagetools inspect kmgowda/sbk-dashboard:1.26.8.3
+docker buildx imagetools inspect ghcr.io/kmgowda/sbk-dashboard:1.26.8.3
 SBK_DASHBOARD_IMAGE='kmgowda/sbk-dashboard:1.26.8.3@sha256:<manifest-digest>' docker compose up --detach
 ```
 

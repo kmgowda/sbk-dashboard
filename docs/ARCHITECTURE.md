@@ -436,6 +436,10 @@ Both paths execute the same Dockerfile runtime stage, entry point, process topol
 network policy. Independent cached Prometheus and Grafana build stages reduce build latency without splitting
 runtime services or transferring lifecycle ownership away from the Python process.
 
+Tagged delivery publishes that validated multi-architecture build to both Docker Hub and GitHub Packages in one
+Buildx operation. Version and `latest` convergence is checked in each registry before all four references are
+keylessly signed; a missing GHCR package therefore fails the container gate before release orchestration continues.
+
 The image runs as UID/GID 10001, uses a digest-pinned official Python 3.12 slim image on the current Debian stable
 generation, embeds checksum-pinned official AMD64 or ARM64 Linux native tools as immutable root-owned content, and
 stores the entire writable data root in `/var/lib/sbk-dashboard`. Compose makes the remaining root filesystem

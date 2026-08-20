@@ -369,7 +369,7 @@ Review changes in this order:
 - `docs/MIGRATION.md`: compatibility and upgrade behavior.
 - `SBK.md`: benchmark/exporter integration and endpoint examples.
 - `docs/DOCKER.md`: container architecture, operation, persistence, networking, and security.
-- `docs/DOCKER_HUB.md`: Docker Hub build, publication, pull, and upgrade workflow.
+- `docs/DOCKER_HUB.md`: Docker Hub/GitHub Packages build, publication, pull, and upgrade workflow.
 - `docs/RELEASING.md`: guarded cross-platform tag, release-note, artifact, and container publication workflow.
 - `AGENTS.md`: concise normative instructions for all agents.
 - `docs/AGENT_GUIDE.md`: detailed implementation navigation and recipes.
