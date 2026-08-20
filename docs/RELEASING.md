@@ -69,7 +69,7 @@ For version `<version>`, the command verifies these explicit GitHub Release asse
 | `sbk-dashboard-<version>-linux-amd64.tar.gz` and `.sha256` | Python-free Linux x86-64 application |
 | `sbk-dashboard-<version>-macos-arm64.tar.gz` and `.sha256` | Python-free Apple-silicon application |
 | `sbk-dashboard-<version>-windows-amd64.zip` and `.sha256` | Python-free Windows x86-64 application |
-| `SHA256SUMS` | Unified checksum list for all eight build artifacts |
+| `SHA256SUMS` | Direct SHA-256 entries for all eight build artifacts, including archives, Python packages, and per-archive checksum files |
 | `release-manifest.json` | Version, tag, commit, sizes, and SHA-256 values |
 
 GitHub also supplies its standard source-code ZIP and TAR archives. The release body is generated from commits and
@@ -128,8 +128,9 @@ Windows PowerShell or Command Prompt:
 .\release-sbk-dashboard.cmd check
 ```
 
-The command prints the repository, commit, version, planned tag, Docker tags, GitHub Release URL, and every required
-asset. It fails if metadata is stale, the tree is dirty, `HEAD` differs from remote `main`, or the version tag/release
+The command prints the checked-out branch, required release branch, repository, commit, version, planned tag, Docker
+tags, GitHub Release URL, and every required asset. It fails if metadata is stale, the tree is dirty, `HEAD` differs
+from remote `main`, or the version tag/release
 already exists, or the exact commit has not passed the main CI workflow. It never writes a tag or calls a mutating
 GitHub API.
 
@@ -180,14 +181,22 @@ The command never moves an existing tag and never overwrites a release asset.
 - If a tag points to another commit, stop. Use a new version; do not delete or move a published release tag.
 
 The `--resume` option accepts existing state only when the local tag, remote tag, release, and checked-out commit are
-consistent. It does not bypass failed workflows or missing assets.
+consistent. The final workflow compares the size and GitHub SHA-256 digest of every existing asset, keeps identical
+assets, and uploads only missing assets. If GitHub still reports an asset as open or has not populated its digest,
+the workflow waits for a bounded five-minute metadata-propagation window instead of treating that asset as missing
+or overwriting it. A completed conflicting asset still fails the job. It does not bypass failed workflows or
+missing assets.
 
 ## Implementation boundaries
 
 [`scripts/release.py`](../scripts/release.py) is an OS-neutral, standard-library orchestrator. POSIX and PowerShell
 dispatchers only select Python and pass arguments unchanged. [`release_contract.py`](../scripts/release_contract.py)
 owns asset names and bounds; [`build_release_manifest.py`](../scripts/build_release_manifest.py) validates the exact
-workflow outputs. GitHub Actions owns native builds, secrets, attestations, and publication.
+workflow outputs; [`select_release_assets.py`](../scripts/select_release_assets.py) makes partial-upload retries
+idempotent without weakening immutability. GitHub requests pin API version `2022-11-28`; Docker Hub uses its own JSON
+media type and bounded exponential/rate-limit backoff. GitHub Actions owns native builds, secrets, attestations, and
+publication. Rate-limit handling accepts either relative delays or numeric Unix timestamps, clamps every sleep to
+the remaining release timeout, and queries Docker Hub through its current namespace/repository tag API.
 
 This separation is preferable to local multi-platform release builds: a macOS laptop cannot natively validate
 Windows and Linux ARM64, local credentials should not include every registry/signing capability, and duplicating

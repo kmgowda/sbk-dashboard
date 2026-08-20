@@ -149,7 +149,7 @@ runtime data as source material.
 | `scripts/portable-bootstrap.properties` | Shared dependency-free release URL and bootstrap bounds |
 | `scripts/sbk_dashboard_launcher.py` | Cross-platform foreground/background ownership, logs, and selective stop |
 | `scripts/build_portable.py`, `scripts/sbk_dashboard_portable_entry.py` | Frozen archive construction and entry dispatch |
-| `scripts/release.py`, `scripts/release_contract.py`, `scripts/build_release_manifest.py` | Guarded release orchestration and artifact contract |
+| `scripts/release.py`, `scripts/release_contract.py`, `scripts/build_release_manifest.py`, `scripts/select_release_assets.py` | Guarded release orchestration and immutable artifact contract |
 | `sbk-dashboard`, `sbk-dashboard.ps1`, `sbk-dashboard.cmd` | Root source-checkout command dispatchers |
 | `release-sbk-dashboard.sh`, `Release-SbkDashboard.ps1`, `release-sbk-dashboard.cmd` | Dedicated cross-platform release commands |
 | `Dockerfile`, `compose.yaml`, `compose.dev.yaml`, `compose.resources.yaml` | Non-root release image, production deployment, development build and optional resource overrides |

@@ -28,6 +28,7 @@ include scripts/build_portable.py
 include scripts/build_release_manifest.py
 include scripts/release.py
 include scripts/release_contract.py
+include scripts/select_release_assets.py
 include scripts/check_mermaid.py
 include scripts/start-sbk-dashboard.sh
 include scripts/start-sbk-dashboard-background.sh

@@ -46,14 +46,19 @@ CI_WORKFLOW = "ci.yml"
 CONTAINER_WORKFLOW = "container.yml"
 PORTABLE_WORKFLOW = "portable.yml"
 GITHUB_API_URL = "https://api.github.com"
-DOCKER_HUB_API_URL = "https://hub.docker.com/v2/repositories"
+DOCKER_HUB_API_URL = "https://hub.docker.com/v2"
 DEFAULT_POLL_SECONDS = 15.0
+DOCKER_MIN_POLL_SECONDS = 30.0
 DEFAULT_TIMEOUT_SECONDS = 2 * 60 * 60
 MAX_POLL_SECONDS = 5 * 60
 MAX_TIMEOUT_SECONDS = 6 * 60 * 60
+RETRY_AFTER_EPOCH_FLOOR = 1_000_000_000
 HTTP_TIMEOUT_SECONDS = 30.0
 MAX_API_RESPONSE_BYTES = 10 * 1024 * 1024
 MAX_WORKFLOW_RUNS = 50
+GITHUB_API_VERSION = "2022-11-28"
+GITHUB_ACCEPT = "application/vnd.github+json"
+JSON_ACCEPT = "application/json"
 REPOSITORY_PATTERN = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 GITHUB_REMOTE_PATTERN = re.compile(
     r"(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)([^/]+/[^/]+?)(?:\.git)?$"
@@ -62,6 +67,14 @@ GITHUB_REMOTE_PATTERN = re.compile(
 
 class ReleaseError(RuntimeError):
     """A safe release precondition or remote operation failed."""
+
+
+class RateLimitError(ReleaseError):
+    """A remote API requested that bounded polling slow down."""
+
+    def __init__(self, message: str, retry_after: float | None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,7 @@ class ReleasePlan:
     repository: str
     remote: str
     branch: str
+    checked_branch: str
     image: str
 
 
@@ -141,18 +155,46 @@ class GitRepository:
         self.run("push", remote, f"refs/tags/{tag}:refs/tags/{tag}")
 
 
+def retry_after_seconds(
+    value: str | None, *, wall_time: Callable[[], float] = time.time
+) -> float | None:
+    """Parse a positive finite Retry-After delta or numeric Unix timestamp."""
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds) or seconds <= 0:
+        return None
+    if seconds >= RETRY_AFTER_EPOCH_FLOOR:
+        seconds -= wall_time()
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
+
+
 class JsonApi:
     """Bounded JSON HTTP client using only the Python standard library."""
 
-    def __init__(self, base_url: str, token: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None = None,
+        *,
+        accept: str = JSON_ACCEPT,
+        api_version: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.accept = accept
+        self.api_version = api_version
 
     def request(
         self, method: str, path: str, payload: dict[str, object] | None = None
     ) -> tuple[int, dict[str, Any]]:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "sbk-dashboard-release"}
+        headers = {"Accept": self.accept, "User-Agent": "sbk-dashboard-release"}
+        if self.api_version:
+            headers["X-GitHub-Api-Version"] = self.api_version
         if data is not None:
             headers["Content-Type"] = "application/json"
         if self.token:
@@ -175,6 +217,13 @@ class JsonApi:
                 message = body
             if error.code == HTTPStatus.NOT_FOUND:
                 return error.code, {}
+            if error.code == HTTPStatus.TOO_MANY_REQUESTS:
+                retry_after = retry_after_seconds(error.headers.get("Retry-After"))
+                if retry_after is None:
+                    retry_after = retry_after_seconds(error.headers.get("X-Retry-After"))
+                raise RateLimitError(
+                    f"Remote API returned HTTP {error.code}: {message}", retry_after
+                ) from error
             raise ReleaseError(f"Remote API returned HTTP {error.code}: {message}") from error
         except (OSError, UnicodeError, json.JSONDecodeError) as error:
             raise ReleaseError(f"Unable to use remote API: {error}") from error
@@ -185,7 +234,9 @@ class GitHubClient:
 
     def __init__(self, repository: str, token: str | None) -> None:
         self.repository = repository
-        self.api = JsonApi(GITHUB_API_URL, token)
+        self.api = JsonApi(
+            GITHUB_API_URL, token, accept=GITHUB_ACCEPT, api_version=GITHUB_API_VERSION
+        )
 
     def _path(self, suffix: str) -> str:
         return f"/repos/{self.repository}{suffix}"
@@ -239,11 +290,20 @@ class DockerHubClient:
 
     def __init__(self, image: str) -> None:
         self.image = image
+        namespace, separator, repository = image.partition("/")
+        if not separator or not namespace or not repository or "/" in repository:
+            raise ReleaseError(f"Docker image must be a namespace/repository pair: {image!r}")
+        self.namespace = namespace
+        self.repository = repository
         self.api = JsonApi(DOCKER_HUB_API_URL)
 
     def digest(self, tag: str) -> str | None:
         status, response = self.api.request(
-            "GET", f"/{self.image}/tags/{urllib.parse.quote(tag, safe='')}"
+            "GET",
+            "/namespaces/"
+            f"{urllib.parse.quote(self.namespace, safe='')}/repositories/"
+            f"{urllib.parse.quote(self.repository, safe='')}/tags/"
+            f"{urllib.parse.quote(tag, safe='')}",
         )
         if status == HTTPStatus.NOT_FOUND:
             return None
@@ -302,8 +362,18 @@ def resolve_plan(
         repository=selected_repository,
         remote=remote,
         branch=branch,
+        checked_branch=current_branch,
         image=image,
     )
+
+
+def workflow_ref_matches(actual: object, expected: str) -> bool:
+    """Match GitHub's short or fully qualified representation of one branch or tag."""
+    return isinstance(actual, str) and actual in {
+        expected,
+        f"refs/heads/{expected}",
+        f"refs/tags/{expected}",
+    }
 
 
 def matching_workflow_run(
@@ -311,9 +381,32 @@ def matching_workflow_run(
 ) -> dict[str, Any] | None:
     """Return the newest workflow run for an exact release commit and optional branch/tag."""
     for run in runs:
-        if run.get("head_sha") == commit and (branch is None or run.get("head_branch") == branch):
+        if run.get("head_sha") == commit and (
+            branch is None or workflow_ref_matches(run.get("head_branch"), branch)
+        ):
             return run
     return None
+
+
+def bounded_sleep(
+    deadline: float,
+    delay: float,
+    *,
+    sleeper: Callable[[float], None],
+    monotonic: Callable[[], float],
+) -> bool:
+    """Sleep no longer than the remaining bounded polling window."""
+    remaining = max(0.0, deadline - monotonic())
+    if remaining <= 0:
+        return False
+    sleeper(min(delay, remaining))
+    return True
+
+
+def rate_limit_delay(current: float, poll_seconds: float, retry_after: float | None) -> float:
+    """Apply bounded exponential backoff while honoring a larger server delay."""
+    backoff = min(MAX_POLL_SECONDS, max(poll_seconds, current * 2))
+    return max(backoff, retry_after or 0.0)
 
 
 def wait_for_workflow(
@@ -330,8 +423,19 @@ def wait_for_workflow(
 ) -> dict[str, Any]:
     """Wait a bounded period for one exact-commit workflow and require success."""
     deadline = monotonic() + timeout_seconds
+    delay = poll_seconds
     while monotonic() < deadline:
-        run = matching_workflow_run(github.workflow_runs(workflow, event), plan.commit, head_branch)
+        try:
+            run = matching_workflow_run(
+                github.workflow_runs(workflow, event), plan.commit, head_branch
+            )
+            delay = poll_seconds
+        except RateLimitError as error:
+            delay = rate_limit_delay(delay, poll_seconds, error.retry_after)
+            print(f"GitHub rate-limited {workflow} verification; applying bounded backoff...")
+            if not bounded_sleep(deadline, delay, sleeper=sleeper, monotonic=monotonic):
+                break
+            continue
         if run is None:
             print(f"Waiting for {workflow} to start for {plan.commit[:12]}...")
         elif run.get("status") == "completed":
@@ -343,7 +447,8 @@ def wait_for_workflow(
             return run
         else:
             print(f"Waiting for {workflow}: {run.get('status', 'unknown')}...")
-        sleeper(poll_seconds)
+        if not bounded_sleep(deadline, poll_seconds, sleeper=sleeper, monotonic=monotonic):
+            break
     raise ReleaseError(f"Timed out after {timeout_seconds:g} seconds waiting for {workflow}")
 
 
@@ -353,12 +458,23 @@ def wait_for_assets(
     *,
     timeout_seconds: float,
     poll_seconds: float,
+    sleeper: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Wait until the published GitHub Release exposes the complete contracted asset set."""
     expected = set(required_release_assets(plan.version))
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        release = github.release(plan.tag)
+    deadline = monotonic() + timeout_seconds
+    delay = poll_seconds
+    while monotonic() < deadline:
+        try:
+            release = github.release(plan.tag)
+            delay = poll_seconds
+        except RateLimitError as error:
+            delay = rate_limit_delay(delay, poll_seconds, error.retry_after)
+            print("GitHub rate-limited release verification; applying bounded backoff...")
+            if not bounded_sleep(deadline, delay, sleeper=sleeper, monotonic=monotonic):
+                break
+            continue
         if release is not None:
             assets = release.get("assets", [])
             names = {
@@ -367,11 +483,14 @@ def wait_for_assets(
             missing = expected - names
             if not missing:
                 if not str(release.get("body", "")).strip():
-                    raise ReleaseError("GitHub Release notes are empty")
-                return release
-            print("Waiting for release assets: " + ", ".join(sorted(missing)))
-        time.sleep(poll_seconds)
-    raise ReleaseError("Timed out waiting for the complete GitHub Release asset set")
+                    print("Waiting for GitHub to finish generating release notes...")
+                else:
+                    return release
+            else:
+                print("Waiting for release assets: " + ", ".join(sorted(missing)))
+        if not bounded_sleep(deadline, poll_seconds, sleeper=sleeper, monotonic=monotonic):
+            break
+    raise ReleaseError("Timed out waiting for complete GitHub Release assets and generated notes")
 
 
 def wait_for_docker_tags(
@@ -380,23 +499,35 @@ def wait_for_docker_tags(
     *,
     timeout_seconds: float,
     poll_seconds: float,
+    sleeper: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> str:
     """Wait for version and latest Docker tags to resolve to one immutable digest."""
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        version_digest = docker_hub.digest(plan.version)
-        latest_digest = docker_hub.digest("latest")
-        if version_digest and version_digest == latest_digest:
-            return version_digest
-        print("Waiting for Docker Hub version/latest tags to converge...")
-        time.sleep(poll_seconds)
+    deadline = monotonic() + timeout_seconds
+    delay = max(poll_seconds, DOCKER_MIN_POLL_SECONDS)
+    while monotonic() < deadline:
+        retry_after: float | None = None
+        try:
+            version_digest = docker_hub.digest(plan.version)
+            latest_digest = docker_hub.digest("latest")
+            if version_digest and version_digest == latest_digest:
+                return version_digest
+            print("Waiting for Docker Hub version/latest tags to converge...")
+        except RateLimitError as error:
+            retry_after = error.retry_after
+            print("Docker Hub rate-limited verification; applying bounded backoff...")
+        selected_delay = max(delay, retry_after or 0.0)
+        if not bounded_sleep(deadline, selected_delay, sleeper=sleeper, monotonic=monotonic):
+            break
+        delay = min(delay * 2, MAX_POLL_SECONDS)
     raise ReleaseError("Timed out waiting for Docker Hub version and latest tags")
 
 
 def print_plan(plan: ReleasePlan) -> None:
     """Print the immutable inputs and outputs before any release mutation."""
     print(f"Repository: {plan.repository}")
-    print(f"Branch: {plan.branch}")
+    print(f"Checked-out branch: {plan.checked_branch}")
+    print(f"Required release branch: {plan.branch}")
     print(f"Commit: {plan.commit}")
     print(f"Version: {plan.version}")
     print(f"Git tag: {plan.tag}")

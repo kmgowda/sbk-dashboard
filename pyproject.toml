@@ -90,6 +90,7 @@ files = [
   "scripts/check_mermaid.py",
   "scripts/release.py",
   "scripts/release_contract.py",
+  "scripts/select_release_assets.py",
   "scripts/sbk_dashboard_bootstrap.py",
   "scripts/sbk_dashboard_launcher.py",
   "scripts/sbk_dashboard_portable_entry.py",
