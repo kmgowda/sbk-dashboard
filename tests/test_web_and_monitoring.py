@@ -19,6 +19,7 @@ import unittest
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,6 +102,7 @@ class AssetRenderingTest(unittest.TestCase):
             with self.subTest(host=host):
                 server = object.__new__(DashboardHttpServer)
                 server._default_target_host = host
+                server._max_comparison_targets = 4
                 page = self.render(server, "/")
                 self.assertIn(f'value="{host}"'.encode(), page)
                 self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
@@ -108,14 +110,16 @@ class AssetRenderingTest(unittest.TestCase):
     def test_asset_fingerprint_uses_the_final_substituted_javascript(self):
         server = object.__new__(DashboardHttpServer)
         server._default_target_host = "127.0.0.1"
-        with mock.patch("sbk_dashboard.web.MAX_COMPARISON_TARGETS", 9):
-            page = self.render(server, "/")
-            javascript = self.render(server, "/app.js")
-            stylesheet = self.render(server, "/app.css")
+        server._max_comparison_targets = 9
+        page = self.render(server, "/")
+        javascript = self.render(server, "/app.js")
+        stylesheet = self.render(server, "/app.css")
         expected = hashlib.sha256(stylesheet + javascript).hexdigest()[:12].encode("ascii")
         versions = re.findall(rb'(?:app\.css|app\.js)\?v=([0-9a-f]{12})', page)
         self.assertEqual([expected, expected], versions)
         self.assertIn(b"maxComparisonTargets: 9", javascript)
+        self.assertIn(b"2\xe2\x80\x939 endpoints", page)
+        self.assertNotIn(b"__MAX_COMPARISON_TARGETS__", page)
 
 
 class WebTest(unittest.TestCase):
@@ -163,7 +167,7 @@ class WebTest(unittest.TestCase):
             self.assertIn(b"window.sessionStorage", script)
             self.assertIn(b"/api/comparison-dashboard", script)
             self.assertIn(b"dashboard.href = target.dashboardOpenUrl", script)
-            self.assertIn(b"maxComparisonTargets: 8", script)
+            self.assertIn(b"maxComparisonTargets: 4", script)
             self.assertIn(b"targetRefreshMilliseconds: 10000", script)
             self.assertNotIn(b"__SBK_", script)
         with urllib.request.urlopen(self.base + "/app.css") as response:
@@ -348,7 +352,7 @@ class WebTest(unittest.TestCase):
             {"targetIds": []},
             {"targetIds": [first.id, first.id]},
             {"targetIds": [first.id, "missing"]},
-            {"targetIds": [str(index) for index in range(9)]},
+            {"targetIds": [str(index) for index in range(5)]},
             {"targetIds": [first.id, 123]},
         )
         for payload in payloads:
@@ -361,6 +365,33 @@ class WebTest(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(request)
             self.assertEqual(400, caught.exception.code)
+
+    def test_comparison_api_and_ui_use_configured_endpoint_limit(self):
+        self.server.close()
+        self.monitoring.dashboard = replace(
+            self.monitoring.dashboard, max_comparison_targets=6
+        )
+        self.server = DashboardHttpServer(0, self.registry, self.monitoring)
+        self.server.start()
+        self.base = f"http://127.0.0.1:{self.server._server.server_port}"
+        targets = [
+            self.registry.register(
+                f"Target {index}", f"host-{index}.example", 9718 + index, "/metrics"
+            )
+            for index in range(6)
+        ]
+        request = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": [target.id for target in targets]}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request) as response:
+            self.assertEqual(200, response.status)
+        with urllib.request.urlopen(self.base + "/app.js") as response:
+            self.assertIn(b"maxComparisonTargets: 6", response.read())
+        with urllib.request.urlopen(self.base + "/") as response:
+            self.assertIn(b"2\xe2\x80\x936 endpoints", response.read())
 
     def test_ui_uses_configured_container_default_target_host(self):
         self.server.close()

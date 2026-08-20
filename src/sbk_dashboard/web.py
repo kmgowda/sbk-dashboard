@@ -45,7 +45,7 @@ from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.monitoring import ManagedMonitoringStack
 from sbk_dashboard.network import normalize_host
 from sbk_dashboard.processes import LifecycleController, LifecycleState
-from sbk_dashboard.provisioning import MAX_COMPARISON_TARGETS, MIN_COMPARISON_TARGETS
+from sbk_dashboard.provisioning import MIN_COMPARISON_TARGETS
 from sbk_dashboard.registry import TargetRegistry
 
 CLIENT_ID_PATTERN = re.compile(
@@ -91,10 +91,10 @@ def _dashboard_wait_page(
     ).encode()
 
 
-def _render_javascript(body: bytes) -> bytes:
+def _render_javascript(body: bytes, max_comparison_targets: int) -> bytes:
     replacements = {
         b"__MIN_COMPARISON_TARGETS__": MIN_COMPARISON_TARGETS,
-        b"__MAX_COMPARISON_TARGETS__": MAX_COMPARISON_TARGETS,
+        b"__MAX_COMPARISON_TARGETS__": max_comparison_targets,
         b"__TARGET_REFRESH_MILLISECONDS__": TARGET_REFRESH_MILLISECONDS,
         b"__LANDING_HEARTBEAT_MILLISECONDS__": LANDING_HEARTBEAT_MILLISECONDS,
         b"__CLIENT_ID_RANDOM_BYTES__": CLIENT_ID_RANDOM_BYTES,
@@ -191,6 +191,7 @@ class DashboardHttpServer:
 
         config = monitoring.dashboard
         self._default_target_host = config.default_target_host
+        self._max_comparison_targets = config.max_comparison_targets
         self._server = BoundedThreadPoolHttpServer(
             (config.bind_address, port),
             Handler,
@@ -310,8 +311,10 @@ class DashboardHttpServer:
             raise ValueError("Target IDs must be an array of strings")
         if len(values) < MIN_COMPARISON_TARGETS:
             raise ValueError("Select at least one endpoint to compare")
-        if len(values) > MAX_COMPARISON_TARGETS:
-            raise ValueError(f"No more than {MAX_COMPARISON_TARGETS} endpoints can be compared")
+        if len(values) > self._max_comparison_targets:
+            raise ValueError(
+                f"No more than {self._max_comparison_targets} endpoints can be compared"
+            )
         target_ids = sorted(dict.fromkeys(values))
         if len(target_ids) != len(values):
             raise ValueError("Comparison endpoints must be unique")
@@ -425,7 +428,7 @@ class DashboardHttpServer:
         if (
             "/" in comparison_uid
             or len(target_ids) < MIN_COMPARISON_TARGETS
-            or len(target_ids) > MAX_COMPARISON_TARGETS
+            or len(target_ids) > self._max_comparison_targets
             or len(set(target_ids)) != len(target_ids)
             or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
         ):
@@ -496,7 +499,10 @@ class DashboardHttpServer:
             body = resource.read_bytes()
             if name == "index.html":
                 stylesheet = resource_root.joinpath("app.css").read_bytes()
-                javascript = _render_javascript(resource_root.joinpath("app.js").read_bytes())
+                javascript = _render_javascript(
+                    resource_root.joinpath("app.js").read_bytes(),
+                    self._max_comparison_targets,
+                )
                 fingerprint = hashlib.sha256(
                     stylesheet + javascript
                 ).hexdigest()[:ASSET_FINGERPRINT_HEX_LENGTH]
@@ -505,8 +511,12 @@ class DashboardHttpServer:
                     b"__DEFAULT_TARGET_HOST__",
                     html.escape(self._default_target_host, quote=True).encode("utf-8"),
                 )
+                body = body.replace(
+                    b"__MAX_COMPARISON_TARGETS__",
+                    str(self._max_comparison_targets).encode("ascii"),
+                )
             elif name == "app.js":
-                body = _render_javascript(body)
+                body = _render_javascript(body, self._max_comparison_targets)
         except OSError:
             self._json(request, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "Missing application asset"})
             return

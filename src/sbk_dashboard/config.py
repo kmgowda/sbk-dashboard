@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from sbk_dashboard.contracts import (
+    COMPARISON_TARGETS,
     DATA_DIRECTORY_ENVIRONMENT,
     DEFAULT_DASHBOARD_PORT,
     DEFAULT_GRAFANA_BIND,
@@ -120,6 +121,7 @@ class DashboardConfig:
     grafana_startup_timeout_seconds: int = GRAFANA_STARTUP_TIMEOUT_SECONDS.default
     status_interval_seconds: int = DEFAULT_STATUS_INTERVAL_SECONDS
     default_target_host: str = DEFAULT_TARGET_HOST
+    max_comparison_targets: int = COMPARISON_TARGETS.default
 
 
 @dataclass(frozen=True)
@@ -238,6 +240,16 @@ def parser() -> argparse.ArgumentParser:
         metavar="seconds",
         help=f"periodic short-status interval seconds (default: {DEFAULT_STATUS_INTERVAL_SECONDS})",
     )
+    result.add_argument(
+        "-max-comparison-targets",
+        "--max-comparison-targets",
+        metavar="count",
+        help=(
+            "maximum endpoints in one comparison "
+            f"(default: {COMPARISON_TARGETS.default}; "
+            f"range: {COMPARISON_TARGETS.minimum}-{COMPARISON_TARGETS.maximum})"
+        ),
+    )
     result.add_argument("-monitoring-properties", metavar="file", help="native download properties file")
     return result
 
@@ -283,6 +295,18 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
     selected_status_interval = _positive(status_interval, "status interval")
     if selected_status_interval > MAX_STATUS_INTERVAL_SECONDS:
         raise ValueError(f"status interval must be between 1 and {MAX_STATUS_INTERVAL_SECONDS} seconds")
+    comparison_targets, comparison_targets_source = _select(
+        namespace.max_comparison_targets,
+        environment,
+        COMPARISON_TARGETS.environment,
+        str(COMPARISON_TARGETS.default),
+    )
+    selected_comparison_targets = _bounded_value(
+        comparison_targets,
+        "maximum comparison targets",
+        COMPARISON_TARGETS.minimum,
+        COMPARISON_TARGETS.maximum,
+    )
     default_target_host, default_target_host_source = _select(
         None,
         environment,
@@ -313,6 +337,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
          "continue": "command line" if "-continue" in arguments else "default", "data": data_source,
          "retention-days": retention_source, "scrape-seconds": scrape_source,
          "bind": bind_source, "log-level": log_level_source, "status-seconds": status_interval_source,
+         "max-comparison-targets": comparison_targets_source,
          "default-target-host": default_target_host_source,
          "http-workers": _environment_source(environment, "SBK_DASHBOARD_HTTP_WORKERS"),
          "http-queue-capacity": _environment_source(environment, "SBK_DASHBOARD_HTTP_QUEUE"),
@@ -346,6 +371,7 @@ def parse_configuration(arguments: list[str], environment: dict[str, str] | None
         grafana_startup_timeout,
         selected_status_interval,
         normalize_host(default_target_host, "default target host", allow_unspecified=False),
+        selected_comparison_targets,
     )
     prometheus, prometheus_source = _select(namespace.prometheus_bin, environment,
                                              "SBK_DASHBOARD_PROMETHEUS_BIN", "prometheus")
@@ -392,8 +418,13 @@ def _bounded_environment(
     environment: dict[str, str], name: str, default: int, minimum: int, maximum: int
 ) -> int:
     value = environment.get(name, "").strip()
+    return _bounded_value(value or str(default), name, minimum, maximum)
+
+
+def _bounded_value(value: str, name: str, minimum: int, maximum: int) -> int:
+    """Parse one bounded integer selected from CLI, environment, or defaults."""
     try:
-        selected = default if not value else int(value)
+        selected = int(value)
     except ValueError as error:
         raise ValueError(f"{name} must be a number") from error
     if not minimum <= selected <= maximum:

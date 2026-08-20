@@ -169,8 +169,9 @@ includes storage class and read/write action labels. Prometheus adds `sbk_endpoi
 different registered endpoints isolated.
 
 To compare one result across multiple time windows, select its endpoint and choose **Compare time ranges**. To
-compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–8 endpoint
-checkboxes, and choose **Compare selected**. The selector displays name, type, and exporter address; chart legends
+compare concurrent results, register every exporter with the correct `SBK` or `SBM` type, select 2–4 endpoint
+checkboxes by default (or configure a 2–32 maximum with `-max-comparison-targets`), and choose **Compare selected**.
+The selector displays name, type, and exporter address; chart legends
 show the registered dashboard name and type plus the immutable endpoint ID. All targets begin on one global live
 range. A target can then use an independent relative-live or fixed historical range and later rejoin global time.
 Comparison uses wall-clock time and does not shift sequential historical runs to a common elapsed-time origin. See

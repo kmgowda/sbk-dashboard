@@ -82,7 +82,9 @@ class ManagedMonitoringStack:
         self.runtime_directory = self.layout.root
         self.target_discovery = PrometheusTargetDiscovery(self.layout.prometheus_targets)
         self.dashboard_provisioner = GrafanaDashboardProvisioner(
-            self.layout.grafana_dashboards, monitoring.grafana_public_url
+            self.layout.grafana_dashboards,
+            monitoring.grafana_public_url,
+            dashboard.max_comparison_targets,
         )
         self.process_registry = ManagedProcessRegistry(self.layout.process_registry)
         self.lifecycle = LifecycleController()

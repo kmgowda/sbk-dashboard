@@ -309,7 +309,7 @@ unchanged; direct native-server clients are deliberately not asserted as observa
 
 Comparison regressions verify SBK/SBM kind compatibility, readable name/kind scrape labels, all 53 generated panels,
 complete regex scoping of every `SBK_*` selector, name/kind/endpoint-ID legends, deterministic order-independent
-comparison UIDs, bounded 1–8-ID API validation, two-or-more single-target time lanes and comparison cache,
+comparison UIDs, configured and bounded comparison-ID API validation, two-or-more single-target time lanes and comparison cache,
 request-host URL behavior, unique UID-derived Grafana titles across multiple cached descriptors, schema-1 refresh,
 idempotent repeat writes, and removal of cached comparisons when an endpoint is removed. Plugin tests additionally
 prove bounded 37.5-second exponential descriptor-provisioning retries,

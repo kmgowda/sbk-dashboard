@@ -28,8 +28,9 @@ The current release is `1.26.8.3`. Releases use `Major.Year.Month.Minor`, and
 - Stable endpoint IDs and Grafana URLs compatible with the earlier Java implementation.
 - Exact 53-panel SBK dashboard from `src/sbk_dashboard/resources/grafana/dashboards/sbk-dashboard.json`.
 - A dedicated dashboard clone per endpoint, isolated by the `sbk_endpoint_id` Prometheus label.
-- A deterministic comparison view for one endpoint across multiple ranges or any 2–8 SBK/SBM endpoints, with shared or per-target live and
-  historical ranges, a reusable ID, and a shareable URL.
+- A deterministic comparison view for one endpoint across multiple ranges or 2–4 SBK/SBM endpoints by default
+  (configurable from 2 to 32), with shared or per-target live and historical ranges, a reusable ID, and a shareable
+  URL.
 - Persistent endpoint registry, URL mappings, Prometheus TSDB, and Grafana state.
 - Seven-day Prometheus retention by default; Prometheus removes expired TSDB blocks in the background.
 - Verified Prometheus and Grafana downloads with live progress when native installations are absent.
@@ -394,6 +395,7 @@ sbk-dashboard \
   -grafana-port 3000 \
   -grafana-bind 0.0.0.0 \
   -grafana-url http://dashboard.example.com:3000 \
+  -max-comparison-targets 6 \
   -status-seconds 60
 ```
 
@@ -426,6 +428,7 @@ from Grafana's local listen address.
 -grafana-url <url>            Browser-accessible Grafana base URL
 -log-level <level>            DEBUG, INFO, WARNING, ERROR, or CRITICAL
 -status-seconds <seconds>     Periodic short-status interval (default 60; range 1-86400)
+-max-comparison-targets <n>   Maximum endpoints per comparison (default 4; range 2-32)
 -monitoring-properties <file> Download URLs, checksums, and install directories
 ```
 
@@ -447,6 +450,7 @@ Command-line values override environment variables, which override built-in defa
 | `SBK_DASHBOARD_GRAFANA_URL` | Fallback for `-grafana-url` |
 | `SBK_DASHBOARD_LOG_LEVEL` | Fallback for `-log-level`; default `INFO` |
 | `SBK_DASHBOARD_STATUS_SECONDS` | Fallback for `-status-seconds`; default 60, maximum 86,400 |
+| `SBK_DASHBOARD_MAX_COMPARISON_TARGETS` | Fallback for `-max-comparison-targets`; default 4, range 2–32 |
 | `SBK_DASHBOARD_DEFAULT_TARGET_HOST` | Endpoint-form default; native default `127.0.0.1`, image default `host.docker.internal` |
 | `SBK_DASHBOARD_MONITORING_PROPERTIES` | External download properties file |
 | `SBK_DASHBOARD_HTTP_WORKERS` | Fixed management HTTP workers; default 8, maximum 128 |
@@ -625,14 +629,16 @@ configuration.
 
 The landing page also provides a checkbox beside every endpoint. Select one endpoint and choose **Compare time
 ranges** to open two independently configurable lanes for the same dashboard, with controls to add up to eight
-lanes. Or select 2–8 endpoints and choose **Compare selected** to retain the multi-target behavior. Every lane
+lanes. Or select 2–4 endpoints by default and choose **Compare selected**. Use `-max-comparison-targets` to select a
+deployment limit from 2 to 32. Every lane
 initially follows one global live range; after it opens, a
 target can be detached to an independent relative-live range or a fixed historical range and later rejoined. Targets
 with identical ranges share one bounded query group. The sorted endpoint-ID set produces a deterministic
 `sbk-comparison-<16-hex>` dashboard ID, so selecting the same dashboards again—even in another order—returns the
 same ID and URL. Time choices are encoded in the app URL for bookmarking and do not create another dashboard.
-Comparison is bounded to eight lanes/targets, four distinct time groups, and a 31-day fixed range; the generated descriptor cache is
-bounded to 128 dashboards. Ranges use wall-clock time—historical runs are not shifted to a common relative origin.
+Comparison is bounded to eight time lanes, the configured endpoint maximum, four distinct time groups, and a 31-day
+fixed range; the generated descriptor cache is bounded to 128 dashboards. Ranges use wall-clock time—historical
+runs are not shifted to a common relative origin.
 Grafana imports a newly generated descriptor asynchronously. The landing page first opens the response's
 `dashboardOpenUrl`, which probes that exact UID through the control plane and redirects into the app only after
 Grafana has imported it. The app retains its bounded, low-frequency 37.5-second readiness window as defense in depth,

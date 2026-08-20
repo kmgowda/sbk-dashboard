@@ -10,9 +10,17 @@ You may obtain a copy of the License at
 
 # Migration from the Java implementation
 
+## Configurable comparison endpoint capacity
+
+The multi-target comparison default is now four endpoints instead of eight. Operators can select a value from 2 to
+32 with `-max-comparison-targets` or `SBK_DASHBOARD_MAX_COMPARISON_TARGETS`; command line takes precedence. The
+landing UI, API, readiness gateway, generated descriptor, and Grafana app enforce the same effective value. A
+restart with a lower value removes only cached comparison descriptors above the new limit. Registrations,
+endpoint-specific dashboards, mappings, and Prometheus history remain intact.
+
 ## Single-dashboard multi-range comparison
 
-The comparison API now accepts one registered endpoint as well as the existing 2–8 endpoint sets. Selecting one
+The comparison API now accepts one registered endpoint as well as the then-existing 2–8 endpoint sets. Selecting one
 endpoint opens two time lanes for the same canonical dashboard and permits adding up to eight lanes. Lane count and
 range selections are URL-only browser state. No registration, discovery, persistence, or native-process format
 changes are required. Existing multi-target comparison IDs, URLs, and behavior remain compatible.

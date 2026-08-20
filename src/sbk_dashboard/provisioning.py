@@ -19,6 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
+from sbk_dashboard.contracts import COMPARISON_TARGETS
 from sbk_dashboard.files import atomic_json, atomic_write
 from sbk_dashboard.models import BenchmarkTarget
 
@@ -27,7 +28,7 @@ COMPARISON_DASHBOARD_PREFIX = "sbk-comparison-"
 COMPARISON_APP_PLUGIN_ID = "sbkcomparison-app"
 COMPARISON_DESCRIPTOR_SCHEMA_VERSION = 2
 MIN_COMPARISON_TARGETS = 1
-MAX_COMPARISON_TARGETS = 8
+DEFAULT_MAX_COMPARISON_TARGETS = COMPARISON_TARGETS.default
 MIN_SINGLE_TARGET_TIME_LANES = 2
 MAX_COMPARISON_TIME_LANES = 8
 MAX_COMPARISON_TIME_GROUPS = 4
@@ -59,7 +60,17 @@ class PrometheusTargetDiscovery:
 
 
 class GrafanaDashboardProvisioner:
-    def __init__(self, dashboard_directory: Path, grafana_public_url: str) -> None:
+    def __init__(
+        self,
+        dashboard_directory: Path,
+        grafana_public_url: str,
+        max_comparison_targets: int = DEFAULT_MAX_COMPARISON_TARGETS,
+    ) -> None:
+        if not COMPARISON_TARGETS.minimum <= max_comparison_targets <= COMPARISON_TARGETS.maximum:
+            raise ValueError(
+                "Maximum comparison targets must be between "
+                f"{COMPARISON_TARGETS.minimum} and {COMPARISON_TARGETS.maximum}"
+            )
         resource = files("sbk_dashboard").joinpath("resources/grafana/dashboards/sbk-dashboard.json")
         try:
             self._canonical = json.loads(resource.read_text(encoding="utf-8"))
@@ -67,6 +78,7 @@ class GrafanaDashboardProvisioner:
             raise OSError(f"Canonical SBK Grafana dashboard is unavailable: {error}") from error
         self.dashboard_directory = dashboard_directory
         self.grafana_public_url = grafana_public_url.rstrip("/")
+        self.max_comparison_targets = max_comparison_targets
         self._lock = threading.Lock()
 
     @staticmethod
@@ -122,11 +134,12 @@ class GrafanaDashboardProvisioner:
         targets = sorted(targets, key=lambda target: target.id)
         target_ids = [target.id for target in targets]
         if (
-            not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
+            not MIN_COMPARISON_TARGETS <= len(target_ids) <= self.max_comparison_targets
             or len(set(target_ids)) != len(target_ids)
         ):
             raise ValueError(
-                f"Comparison dashboards require {MIN_COMPARISON_TARGETS}–{MAX_COMPARISON_TARGETS} unique endpoints"
+                "Comparison dashboards require "
+                f"{MIN_COMPARISON_TARGETS}–{self.max_comparison_targets} unique endpoints"
             )
         dashboard = copy.deepcopy(self._canonical)
         dashboard["id"] = None
@@ -146,7 +159,7 @@ class GrafanaDashboardProvisioner:
         ]
         dashboard["sbkDashboardComparisonPolicy"] = {
             "minTargets": MIN_COMPARISON_TARGETS,
-            "maxTargets": MAX_COMPARISON_TARGETS,
+            "maxTargets": self.max_comparison_targets,
             "minSingleTargetTimeLanes": MIN_SINGLE_TARGET_TIME_LANES,
             "maxTimeLanes": MAX_COMPARISON_TIME_LANES,
             "maxTimeGroups": MAX_COMPARISON_TIME_GROUPS,
@@ -228,8 +241,7 @@ class GrafanaDashboardProvisioner:
             pass
         atomic_write(path, content)
 
-    @staticmethod
-    def _comparison_descriptor(path: Path) -> tuple[list[str], bool] | None:
+    def _comparison_descriptor(self, path: Path) -> tuple[list[str], bool] | None:
         try:
             with path.open("rb") as source:
                 content = source.read(MAX_GENERATED_DASHBOARD_BYTES + 1)
@@ -241,13 +253,19 @@ class GrafanaDashboardProvisioner:
             return None
         if (
             not isinstance(target_ids, list)
-            or not MIN_COMPARISON_TARGETS <= len(target_ids) <= MAX_COMPARISON_TARGETS
+            or not MIN_COMPARISON_TARGETS <= len(target_ids) <= self.max_comparison_targets
             or any(not isinstance(target_id, str) for target_id in target_ids)
             or target_ids != sorted(set(target_ids))
             or value.get("uid") != GrafanaDashboardProvisioner.comparison_dashboard_uid(target_ids)
         ):
             return None
-        schema_current = value.get("sbkDashboardComparisonSchemaVersion") == COMPARISON_DESCRIPTOR_SCHEMA_VERSION
+        policy = value.get("sbkDashboardComparisonPolicy")
+        schema_current = (
+            value.get("sbkDashboardComparisonSchemaVersion")
+            == COMPARISON_DESCRIPTOR_SCHEMA_VERSION
+            and isinstance(policy, dict)
+            and policy.get("maxTargets") == self.max_comparison_targets
+        )
         return target_ids, schema_current
 
     def _prune_comparison_dashboards(self, retained_uid: str) -> None:

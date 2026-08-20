@@ -130,7 +130,7 @@ task unless the user explicitly requests a recovery operation.
 | `GET /api/health` | Control-plane/native health summary |
 | `GET /api/targets` | List registrations with live status and request-reachable dashboard URL |
 | `POST /api/targets` | Register an endpoint and reconcile monitoring configuration |
-| `POST /api/comparison-dashboard` | Validate 1–8 endpoints and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
+| `POST /api/comparison-dashboard` | Validate one endpoint or up to the configured maximum and return deterministic direct, readiness-gateway, and classic-fallback URLs; one endpoint opens 2–8 time lanes |
 | `GET /api/targets/<id>/dashboard` | Resolve the dedicated dashboard URL |
 | `GET /dashboards/<id>` | Probe Grafana's UID API and redirect a browser only after provisioning |
 | `GET /comparisons/<uid>?targetId=<id>...` | Validate a comparison and enter its app only after Grafana provisions the UID |
@@ -163,6 +163,7 @@ Important defaults:
 | HTTP workers / queue | 8 / 64 |
 | Client timeout | 15 seconds |
 | Max endpoints | 10,000 |
+| Maximum comparison endpoints | 4; configurable from 2 to 32 |
 | Native log generation/backups | 10 MiB / 3 |
 | Periodic short status | 60 seconds |
 | Target-health timeout | 4 seconds |

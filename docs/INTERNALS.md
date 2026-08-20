@@ -206,7 +206,8 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
-`POST /api/comparison-dashboard` validates 1–8 unique registered IDs, sorts the set, and derives a stable
+`POST /api/comparison-dashboard` validates one ID or up to the configured maximum of unique registered IDs, sorts
+the set, and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
 provisioned-dashboard fallback URL. It also returns a relative readiness URL; the landing page uses this gateway
