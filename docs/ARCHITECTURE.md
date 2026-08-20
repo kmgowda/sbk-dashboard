@@ -73,25 +73,28 @@ explicit fixture values.
 
 ## Control-plane lifecycle
 
-Startup is dependency ordered. The management port is not opened until the native monitoring stack is ready:
+Startup is dependency ordered. The management socket is bound before native child acquisition, preventing a late
+platform bind failure after Prometheus or Grafana has started. HTTP request admission does not begin until the native
+monitoring stack is ready:
 
 ```mermaid
 flowchart TD
     Input[CLI and environment] --> Parse[Parse, validate, report sources]
     Parse --> Bootstrap[Resolve or safely download native tools]
-    Bootstrap --> Restore[Load registry and generate configuration]
-    Restore --> Validate[Validate Prometheus and port ownership]
+    Bootstrap --> Restore[Load registry]
+    Restore --> Reserve[Reserve management HTTP socket]
+    Reserve --> Validate[Generate configuration and validate native port ownership]
     Validate --> Prometheus[Start Prometheus and await readiness]
     Prometheus --> Grafana[Start Grafana and await readiness]
     Grafana --> Supervisor[Start native supervisor]
-    Supervisor --> HTTP[Open bounded management server]
+    Supervisor --> HTTP[Start bounded HTTP admission]
     HTTP --> Browser[Optionally open browser]
 
     classDef input fill:#dbeafe,stroke:#2563eb,color:#172554;
     classDef prepare fill:#fef3c7,stroke:#d97706,color:#78350f;
     classDef runtime fill:#dcfce7,stroke:#16a34a,color:#14532d;
     class Input input;
-    class Parse,Bootstrap,Restore,Validate prepare;
+    class Parse,Bootstrap,Restore,Reserve,Validate prepare;
     class Prometheus,Grafana,Supervisor,HTTP,Browser runtime;
 ```
 

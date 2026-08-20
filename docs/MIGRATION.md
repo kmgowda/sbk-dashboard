@@ -237,6 +237,10 @@ GitHub Packages. Existing Compose deployments continue to use `kmgowda/sbk-dashb
 `ghcr.io/kmgowda/sbk-dashboard:<version>` when their GitHub Packages visibility and authentication policy permits.
 No persistent data, port, entry-point, or runtime-process migration is required.
 
+Version 1.26.8.4 reserves the management HTTP listener before starting Prometheus or Grafana. An occupied management
+port now fails with listener details and a `-port <available-port>` remedy instead of a raw operating-system bind
+error. The existing listener is never stopped, and no persisted data or configured port is changed automatically.
+
 The multi-instance launcher extension keeps the historical default-port data root and launcher filenames. An
 instance using a non-default management port now defaults to `~/.sbk-dashboard/instances/<port>`. If the built-in
 Prometheus 9090 or Grafana 3000 port is occupied, and that native port was not supplied by CLI or environment,

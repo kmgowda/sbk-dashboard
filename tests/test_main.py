@@ -8,6 +8,7 @@
 ##
 
 import contextlib
+import errno
 import io
 import os
 import socket
@@ -17,6 +18,7 @@ from unittest.mock import MagicMock, call, patch
 
 from sbk_dashboard.config import parse_configuration
 from sbk_dashboard.main import (
+    create_dashboard_server,
     dashboard_links,
     log_status,
     main,
@@ -374,6 +376,60 @@ class MainTest(unittest.TestCase):
         server_type.return_value.close.assert_called_once_with()
         monitoring_type.return_value.close.assert_called_once_with()
 
+    @patch("sbk_dashboard.main.DashboardHttpServer")
+    @patch("sbk_dashboard.main.PortProcessManager.port_unavailable_message")
+    def test_management_bind_conflict_reports_owner_and_port_remediation(
+        self, unavailable_message, server_type
+    ):
+        configuration = parse_configuration(["-port", "19721", "-bind", "127.0.0.1"], {})
+        server_type.side_effect = OSError(errno.EADDRINUSE, "Address already in use")
+        unavailable_message.return_value = (
+            "Management HTTP port 19721 on bind address 127.0.0.1 is already in use by "
+            "PID 42 (/usr/bin/python3); this port was user supplied via command line. "
+            "start SBK Dashboard with -port <available-port>; no process was stopped"
+        )
+        with self.assertRaisesRegex(
+            OSError,
+            "Management HTTP port 19721.*PID 42.*-port <available-port>.*no process was stopped",
+        ):
+            create_dashboard_server(configuration, MagicMock(), MagicMock())
+        unavailable_message.assert_called_once_with(
+            "Management HTTP",
+            19721,
+            "127.0.0.1",
+            "command line",
+            selection_hint="start SBK Dashboard with -port <available-port>",
+        )
+
+    def test_live_management_bind_conflict_preserves_existing_listener(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            configuration = parse_configuration(
+                ["-port", str(port), "-bind", "127.0.0.1"],
+                {},
+            )
+            monitoring = MagicMock()
+            monitoring.dashboard = configuration.dashboard
+            with self.assertRaisesRegex(
+                OSError,
+                f"Management HTTP port {port}.*-port <available-port>.*no process was stopped",
+            ):
+                create_dashboard_server(configuration, MagicMock(), monitoring)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                self.assertEqual(0, probe.connect_ex(("127.0.0.1", port)))
+
+    @patch("sbk_dashboard.main.DashboardHttpServer")
+    def test_non_address_conflict_bind_error_is_preserved(self, server_type):
+        configuration = parse_configuration([], {})
+        failure = OSError(errno.EACCES, "Permission denied")
+        server_type.side_effect = failure
+        with self.assertRaises(OSError) as captured:
+            create_dashboard_server(configuration, MagicMock(), MagicMock())
+        self.assertIs(failure, captured.exception)
+
     @patch("sbk_dashboard.main.signal.signal", return_value=0)
     @patch("sbk_dashboard.main.threading.Event")
     @patch("sbk_dashboard.main.open_landing_page")
@@ -436,6 +492,34 @@ class MainTest(unittest.TestCase):
         configuration = parse_configuration([], {})
         with self.assertRaisesRegex(OSError, "constructor failed"):
             run(configuration, configuration.monitoring)
+        monitoring_type.return_value.close.assert_called_once_with()
+
+    @patch("sbk_dashboard.main.DashboardHttpServer")
+    @patch("sbk_dashboard.main.ManagedMonitoringStack")
+    @patch("sbk_dashboard.main.TargetRegistry")
+    def test_run_reserves_http_port_before_starting_monitoring(
+        self, _registry_type, monitoring_type, server_type
+    ):
+        configuration = parse_configuration([], {})
+        events = []
+        server_type.side_effect = lambda *_arguments: events.append("management-bind") or MagicMock()
+        monitoring_type.return_value.start.side_effect = lambda *_arguments: events.append("monitoring-start")
+        with patch("sbk_dashboard.main.threading.Event") as event_type:
+            event_type.return_value.wait.return_value = True
+            run(configuration, configuration.monitoring)
+        self.assertEqual(["management-bind", "monitoring-start"], events)
+
+    @patch("sbk_dashboard.main.DashboardHttpServer")
+    @patch("sbk_dashboard.main.ManagedMonitoringStack")
+    @patch("sbk_dashboard.main.TargetRegistry")
+    def test_run_closes_reserved_http_server_when_monitoring_start_fails(
+        self, _registry_type, monitoring_type, server_type
+    ):
+        configuration = parse_configuration([], {})
+        monitoring_type.return_value.start.side_effect = OSError("native startup failed")
+        with self.assertRaisesRegex(OSError, "native startup failed"):
+            run(configuration, configuration.monitoring)
+        server_type.return_value.close.assert_called_once_with()
         monitoring_type.return_value.close.assert_called_once_with()
 
 

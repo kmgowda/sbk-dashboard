@@ -206,6 +206,10 @@ Native-port tests verify startup reporting for available defaults, automatic fal
 values; occupied operator-supplied ports report identifiable owners and stop no process. A second acquisition-time
 test verifies that even an expected Prometheus/Grafana executable cannot be replaced on an operator-supplied port
 if it appears after initial selection. Continue-mode tests retain compatible attachment behavior.
+Management-listener tests reproduce cross-platform `EADDRINUSE` (macOS reports it as `Errno 48`), verify that the
+message identifies the selected bind/port and gives the `-port` remedy, and prove the management socket is reserved
+before Prometheus or Grafana child acquisition. A native macOS smoke test should additionally hold port 9721 with an
+unrelated listener and confirm that listener survives the failed start.
 Configuration and composition-root regressions verify the 60-second status default, CLI-over-environment precedence,
 range validation, effective-source output, exact interruptible wait interval, concise endpoint/native summary, and
 non-fatal handling of a reporting failure. Browser-launch regressions verify new-tab requests on graphical Linux,

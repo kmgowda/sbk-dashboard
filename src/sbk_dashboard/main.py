@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import errno
 import ipaddress
 import logging
 import os
@@ -75,11 +76,16 @@ def main(arguments: list[str] | None = None) -> None:
 def run(configuration: ParsedConfiguration, monitoring_configuration: MonitoringConfig) -> None:
     registry = TargetRegistry(configuration.dashboard.data_directory, configuration.dashboard.max_targets)
     monitoring = ManagedMonitoringStack(configuration.dashboard, monitoring_configuration)
+    server: DashboardHttpServer | None = None
     try:
+        server = create_dashboard_server(configuration, registry, monitoring)
         monitoring.start(registry.list())
-        server = DashboardHttpServer(configuration.dashboard.port, registry, monitoring)
     except BaseException:
-        monitoring.close()
+        if server is not None:
+            with suppress(OSError, RuntimeError):
+                server.close()
+        with suppress(OSError, RuntimeError):
+            monitoring.close()
         raise
     stopped = threading.Event()
 
@@ -137,6 +143,28 @@ def run(configuration: ParsedConfiguration, monitoring_configuration: Monitoring
                 signal.signal(signum, handler)
         if shutdown_errors:
             raise OSError("Incomplete shutdown: " + "; ".join(shutdown_errors))
+
+
+def create_dashboard_server(
+    configuration: ParsedConfiguration,
+    registry: TargetRegistry,
+    monitoring: ManagedMonitoringStack,
+) -> DashboardHttpServer:
+    """Reserve the management listener before native child acquisition."""
+    dashboard = configuration.dashboard
+    try:
+        return DashboardHttpServer(dashboard.port, registry, monitoring)
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        message = PortProcessManager.port_unavailable_message(
+            "Management HTTP",
+            dashboard.port,
+            dashboard.bind_address,
+            dashboard.sources.get("port", "default"),
+            selection_hint="start SBK Dashboard with -port <available-port>",
+        )
+        raise OSError(message) from error
 
 
 def select_native_ports(

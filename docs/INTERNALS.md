@@ -96,11 +96,14 @@ extracted distribution is promoted from a temporary install directory only after
 
 1. `TargetRegistry`, which creates or validates `targets.json`;
 2. `ManagedMonitoringStack`, which owns native configuration and service lifecycles; and
-3. `DashboardHttpServer`, created only after monitoring startup succeeds.
+3. `DashboardHttpServer`, whose bounded listener is reserved before monitoring startup.
 
 Monitoring startup creates directory structure and configuration, reconciles persisted targets, runs `promtool`
 when available, applies the selected port policy, starts Prometheus then Grafana, publishes initial target status,
 and starts one supervisor. The management server begins admission only after both native readiness probes succeed.
+If the management bind fails with `EADDRINUSE` (`Errno 48` on macOS), the composition root reports the listener
+identity where available, recommends `-port <available-port>`, and acquires no native child. Any later native startup
+failure closes the reserved HTTP socket before bounded monitoring cleanup.
 
 ## Configuration pipeline
 

@@ -332,10 +332,32 @@ class PortProcessManager:
         port: int,
         bind_address: str,
         source: str,
+        selection_hint: str | None = None,
     ) -> None:
         """Reject an occupied operator-selected port without stopping its owner."""
         if cls.available(port, bind_address):
             return
+        raise OSError(
+            cls.port_unavailable_message(
+                name,
+                port,
+                bind_address,
+                source,
+                selection_hint=selection_hint,
+            )
+        )
+
+    @classmethod
+    def port_unavailable_message(
+        cls,
+        name: str,
+        port: int,
+        bind_address: str,
+        source: str,
+        *,
+        selection_hint: str | None = None,
+    ) -> str:
+        """Describe an observed bind conflict without modifying the listener."""
         processes: list[psutil.Process] = []
         try:
             connections = [
@@ -348,9 +370,14 @@ class PortProcessManager:
         except (psutil.Error, OSError):
             processes = []
         detail = cls._occupied_port_message(name, port, bind_address, processes)
-        raise OSError(
-            f"{detail}; this port was user supplied via {source}. Choose an available {name} port; "
-            "no process was stopped"
+        choose = selection_hint or f"Choose an available {name} port"
+        if source == "default":
+            return (
+                f"{detail}; this is the built-in default. Stop the existing listener or {choose}; "
+                "no process was stopped"
+            )
+        return (
+            f"{detail}; this port was user supplied via {source}. {choose}; no process was stopped"
         )
 
     @staticmethod

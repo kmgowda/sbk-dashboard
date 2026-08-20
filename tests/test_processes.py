@@ -322,6 +322,20 @@ class LifecycleTest(unittest.TestCase):
         owner.terminate.assert_not_called()
         owner.kill.assert_not_called()
 
+    def test_default_management_port_message_explains_safe_remediation(self):
+        with patch("sbk_dashboard.processes.psutil.net_connections", return_value=[]):
+            message = PortProcessManager.port_unavailable_message(
+                "Management HTTP",
+                9721,
+                "0.0.0.0",
+                "default",
+                selection_hint="start SBK Dashboard with -port <available-port>",
+            )
+        self.assertIn("built-in default", message)
+        self.assertIn("Stop the existing listener", message)
+        self.assertIn("-port <available-port>", message)
+        self.assertIn("no process was stopped", message)
+
     def test_replacement_check_rejects_busy_user_port_even_for_expected_executable(self):
         listener = SimpleNamespace(
             status=psutil.CONN_LISTEN,

@@ -265,6 +265,16 @@ starting another instance can be as simple as:
 ./scripts/start-sbk-dashboard-background.sh -port 19721
 ```
 
+The management port is reserved before Prometheus or Grafana starts. If another process already owns the selected
+management port, startup identifies the listener PID/executable when the operating system permits, leaves it
+running, and exits with a command-line remedy instead of exposing a raw platform socket error such as macOS
+`Errno 48`. Stop the existing launcher-managed instance or select a different management port:
+
+```bash
+./sbk-dashboard stop -port 9721
+./sbk-dashboard -port 19721
+```
+
 `-continue true` is the exception: it retains the configured/default native ports so the existing health-checked
 services can be attached rather than selecting replacements.
 
