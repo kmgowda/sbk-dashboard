@@ -20,6 +20,7 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 |---|---|---|
 | `main.py` | `main()`, `run()` | Composition, signal handlers, periodic status, top-level shutdown |
 | `config.py` | `parse_configuration()` | Immutable dashboard, monitoring, platform, and download configuration |
+| `comparison.py` | `ComparisonPolicy`, `ComparisonSelection` | Comparison bounds, normalization, descriptor policy, deterministic UID |
 | `bootstrap.py` | `NativeToolBootstrap` | Verified download, partial file, safe extraction, atomic tool installation |
 | `registry.py` | `TargetRegistry` | Validated endpoint snapshot and `targets.json` |
 | `provisioning.py` | discovery/provisioner classes | Prometheus file discovery, dashboard clones, mappings |
@@ -33,8 +34,10 @@ decisions in [`ARCHITECTURE.md`](ARCHITECTURE.md), and operator procedures in [`
 | `models.py` | immutable dataclasses | Endpoint identity, persisted schema, API status values |
 | `network.py` | `normalize_host()` | Shared conservative IP/DNS normalization |
 
-Constructors prepare Python objects only. Native processes, listener threads, and supervisor threads are acquired by
-explicit `start()` methods and released by idempotent `close()` or `stop()` methods.
+Constructors never acquire native processes, listener threads, or supervisor threads. Persistence/resource owners
+may validate and load bounded local inputs during construction: `TargetRegistry` loads or initializes its atomic
+registry file and `GrafanaDashboardProvisioner` loads the packaged canonical dashboard. Runtime processes and
+threads are acquired only by explicit `start()` methods and released by idempotent `close()` or `stop()` methods.
 
 Container packaging does not introduce another composition root. Production Compose pulls the completed runtime
 image; the development override builds that image locally. Both invoke the same `sbk-dashboard` entry point, and the
@@ -206,8 +209,9 @@ removes only files matching the managed `sbk-*.json` namespace that are absent f
 Grafana's file provider polls this directory and its provisioned Prometheus datasource uses the fixed UID expected by
 the canonical dashboard.
 
-`POST /api/comparison-dashboard` validates one ID or up to the configured maximum of unique registered IDs, sorts
-the set, and derives a stable
+`POST /api/comparison-dashboard` delegates duplicate detection, configured-limit validation, sorting, and identity
+to an immutable `ComparisonSelection`. The same value object validates readiness-gateway query parameters, so HTTP
+entry points cannot drift in validation order. It accepts one ID or up to the configured maximum and derives a stable
 `sbk-comparison-<16-hex>` UID from its SHA-256 digest. The provisioner atomically writes or refreshes that
 selection's canonical-dashboard descriptor and returns both a request-host-aware Grafana app URL and a classic
 provisioned-dashboard fallback URL. It also returns a relative readiness URL; the landing page uses this gateway
@@ -216,7 +220,9 @@ UID, file, and canonical gateway URL. The descriptor adds
 a multi-select variable and immutable target metadata/policy. All canonical `SBK_*` selectors use its regex matcher;
 legends retain the readable name, kind, and immutable endpoint ID. Its title contains the UID digest so every cached
 descriptor is unique in Grafana's folder; Grafana disables file-provider writes when multiple files share a title.
-Repeated requests do not rewrite a byte-identical descriptor, avoiding unnecessary file-provider events.
+Repeated requests do not rewrite a byte-identical descriptor, avoiding unnecessary file-provider events. The
+immutable `ComparisonPolicy` emits the complete descriptor policy and cached descriptors are reused only when every
+policy field and the descriptor schema match; changing a fixed bound therefore refreshes stale files deterministically.
 
 `grafana_plugin.py` atomically copies the packaged production app into the managed Grafana plugin directory.
 `monitoring.py` permits only that unsigned plugin ID and provisions the app before Grafana starts. The app validates

@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sbk_dashboard.comparison import ComparisonPolicy
 from sbk_dashboard.models import BenchmarkTarget
 from sbk_dashboard.provisioning import GrafanaDashboardProvisioner, PrometheusTargetDiscovery
 
@@ -61,11 +62,12 @@ class ProvisioningTest(unittest.TestCase):
         comparison_path = self.directory / f"dashboards/{comparison_uid}.json"
         self.assertTrue(comparison_path.is_file())
         stale = json.loads(comparison_path.read_text(encoding="utf-8"))
-        stale.pop("sbkDashboardComparisonSchemaVersion")
+        stale["sbkDashboardComparisonPolicy"]["maxTimeGroups"] = 3
         comparison_path.write_text(json.dumps(stale), encoding="utf-8")
         self.provisioner.reconcile([first, second])
         refreshed = json.loads(comparison_path.read_text(encoding="utf-8"))
         self.assertEqual(2, refreshed["sbkDashboardComparisonSchemaVersion"])
+        self.assertEqual(4, refreshed["sbkDashboardComparisonPolicy"]["maxTimeGroups"])
         self.assertEqual("http://grafana:3000/d/sbk-first/", self.provisioner.dashboard_url("first"))
         self.assertEqual(
             "http://203.0.113.8:3000/d/sbk-first/", self.provisioner.dashboard_url("first", "203.0.113.8")
@@ -134,6 +136,12 @@ class ProvisioningTest(unittest.TestCase):
         files = list((self.directory / "dashboards").glob("sbk-comparison-*.json"))
         self.assertEqual([f"{first_uid}.json"], [path.name for path in files])
 
+    def test_comparison_urls_enforce_policy_selection(self):
+        with self.assertRaisesRegex(ValueError, "must be unique"):
+            self.provisioner.comparison_dashboard_url(["first", "first"])
+        with self.assertRaisesRegex(ValueError, "must be unique"):
+            self.provisioner.classic_comparison_dashboard_url(["first", "first"])
+
     def test_distinct_comparisons_have_unique_grafana_titles(self):
         first, second, third = target("first"), target("second", 9719), target("third", 9720)
         first_dashboard = self.provisioner.generated_comparison_dashboard([first, second])
@@ -146,26 +154,30 @@ class ProvisioningTest(unittest.TestCase):
         generated = self.provisioner.generated_comparison_dashboard([first])
         self.assertEqual(["first"], generated["sbkDashboardComparisonEndpointIds"])
         self.assertEqual(1, generated["sbkDashboardComparisonPolicy"]["minTargets"])
-        with self.assertRaisesRegex(ValueError, "1–4 unique endpoints"):
+        with self.assertRaisesRegex(ValueError, "must be unique"):
             self.provisioner.generated_comparison_dashboard([first, first])
-        with self.assertRaisesRegex(ValueError, "1–4 unique endpoints"):
+        with self.assertRaisesRegex(ValueError, "No more than 4"):
             self.provisioner.generated_comparison_dashboard(
                 [target(f"target-{index}", 9718 + index) for index in range(5)]
             )
 
     def test_comparison_endpoint_limit_is_configurable_and_bounded(self):
         provisioner = GrafanaDashboardProvisioner(
-            self.directory / "custom-dashboards", "http://grafana:3000/", 6
+            self.directory / "custom-dashboards",
+            "http://grafana:3000/",
+            ComparisonPolicy(max_targets=6),
         )
         targets = [target(f"target-{index}", 9718 + index) for index in range(6)]
         generated = provisioner.generated_comparison_dashboard(targets)
         self.assertEqual(6, generated["sbkDashboardComparisonPolicy"]["maxTargets"])
-        with self.assertRaisesRegex(ValueError, "1–6 unique endpoints"):
+        with self.assertRaisesRegex(ValueError, "No more than 6"):
             provisioner.generated_comparison_dashboard(targets + [target("extra", 9800)])
         for invalid in (1, 33):
             with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "between 2 and 32"):
                 GrafanaDashboardProvisioner(
-                    self.directory / f"invalid-{invalid}", "http://grafana:3000/", invalid
+                    self.directory / f"invalid-{invalid}",
+                    "http://grafana:3000/",
+                    ComparisonPolicy(max_targets=invalid),
                 )
 
     def test_reconcile_refreshes_cached_descriptor_when_configured_limit_changes(self):
@@ -175,7 +187,7 @@ class ProvisioningTest(unittest.TestCase):
         before = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(4, before["sbkDashboardComparisonPolicy"]["maxTargets"])
         configured = GrafanaDashboardProvisioner(
-            self.directory / "dashboards", "http://grafana:3000/", 6
+            self.directory / "dashboards", "http://grafana:3000/", ComparisonPolicy(max_targets=6)
         )
         configured.reconcile([first, second])
         after = json.loads(path.read_text(encoding="utf-8"))
@@ -184,7 +196,7 @@ class ProvisioningTest(unittest.TestCase):
     def test_reconcile_removes_cached_descriptor_above_lowered_limit(self):
         targets = [target(f"target-{index}", 9718 + index) for index in range(5)]
         permissive = GrafanaDashboardProvisioner(
-            self.directory / "dashboards", "http://grafana:3000/", 6
+            self.directory / "dashboards", "http://grafana:3000/", ComparisonPolicy(max_targets=6)
         )
         uid = permissive.ensure_comparison_dashboard(targets)
         path = self.directory / f"dashboards/{uid}.json"
@@ -195,7 +207,7 @@ class ProvisioningTest(unittest.TestCase):
     def test_comparison_dashboard_cache_is_bounded(self):
         targets = [target(f"target-{index}", 9718 + index) for index in range(5)]
         retained_uid = ""
-        with patch("sbk_dashboard.provisioning.MAX_COMPARISON_DASHBOARDS", 3):
+        with patch.object(ComparisonPolicy, "MAX_CACHED_DASHBOARDS", 3):
             for index in range(4):
                 retained_uid = self.provisioner.ensure_comparison_dashboard([targets[index], targets[index + 1]])
         files = list((self.directory / "dashboards").glob("sbk-comparison-*.json"))

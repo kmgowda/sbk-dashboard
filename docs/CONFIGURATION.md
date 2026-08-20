@@ -38,7 +38,8 @@ values are treated as unset.
 
 Comparison endpoint capacity is operator-selectable: the default is four distinct targets and the accepted range
 is 2–32. One-target mode still has 2–8 time lanes; four distinct time groups, a 31-day maximum fixed range, and 128
-cached descriptors remain fixed bounded policy. See [Comparison](COMPARISON.md).
+cached descriptors remain fixed bounded policy. These values are emitted together by one immutable comparison-policy
+object, while only the endpoint maximum is operator configurable. See [Comparison](COMPARISON.md).
 
 ## Command-line options
 

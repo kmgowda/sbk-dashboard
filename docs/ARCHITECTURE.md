@@ -61,8 +61,9 @@ There is one Prometheus process and one Grafana process per `sbk-dashboard` inst
 per endpoint. This is significantly less expensive and lets Prometheus query data across endpoints when required.
 
 Operational values have explicit owners rather than scattered literals. `contracts.py` owns application defaults
-and bounded environment settings, `endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns
-OS/architecture normalization, and `layout.py` owns persistent path construction. The packaged
+and bounded environment settings, `comparison.py` owns the immutable comparison policy and normalized selections,
+`endpoint_policy.py` owns endpoint identity and validation, `platforms.py` owns OS/architecture normalization, and
+`layout.py` owns persistent path construction. The packaged
 `native-artifacts.json` manifest is the sole built-in Prometheus/Grafana artifact catalog consumed by both direct
 bootstrap and Docker builds. Dependency-free installer transfer/retry/lock bounds live in
 `scripts/portable-bootstrap.properties`. Protocol syntax, schema versions, HTTP status codes, and intrinsic
@@ -331,6 +332,8 @@ The implementation uses patterns where they enforce runtime invariants:
 - **Process guardian:** one bounded helper per owned native service enforces parent-death cleanup even when the
   control plane cannot execute signal handlers.
 - **Repository:** `TargetRegistry` and `ManagedProcessRegistry` own validation and atomic persistence.
+- **Value Object:** immutable `ComparisonPolicy` and `ComparisonSelection` objects keep bounds, duplicate handling,
+  normalization, descriptor policy, and deterministic identity consistent across HTTP and provisioning boundaries.
 - **Compensating transaction:** target mutations are serialized across persistence and monitoring reconciliation;
   any reconciliation exception restores the prior registration snapshot before the API reports failure.
 - **Active Object / Bulkhead:** the HTTP executor isolates request concurrency with fixed workers and backpressure.

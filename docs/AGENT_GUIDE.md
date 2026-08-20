@@ -204,7 +204,8 @@ registration and deletion serialized through reconciliation and preserve compens
 1. Put operator-selectable application defaults and bounded environment settings in `contracts.py`, then select and
    validate them in `config.py`.
 2. Put endpoint identity, validation, or port-range policy in `endpoint_policy.py`; put path construction in
-   `layout.py`; put platform aliases in `platforms.py`.
+   `layout.py`; put platform aliases in `platforms.py`; put comparison bounds, normalized selections, and descriptor
+   policy in `comparison.py`.
 3. Put dependency-free installer transfer, checksum, retry, buffer, or lock bounds in
    `scripts/portable-bootstrap.properties` and consume the same key from POSIX, PowerShell, and Python bootstrap
    paths as applicable.

@@ -110,6 +110,8 @@ flowchart LR
 ### While editing
 
 - Prefer composition, immutable values, explicit lifecycle methods, and short lock scopes.
+- Keep comparison bounds and selection validation in the immutable value objects in `comparison.py`; HTTP and
+  provisioning code must not duplicate those rules.
 - Add focused success/failure/concurrency tests alongside behavior.
 - Never use real operator data or default live-test ports.
 - Keep external writes, publication, deletion, and credentials within explicit user authority.

@@ -22,8 +22,9 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from pathlib import Path
 
+from sbk_dashboard.comparison import ComparisonPolicy
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform, executable, resolve_on_path
-from sbk_dashboard.contracts import GRAFANA_DASHBOARD_PROBE_TIMEOUT_SECONDS
+from sbk_dashboard.contracts import BYTES_PER_MEBIBYTE, GRAFANA_DASHBOARD_PROBE_TIMEOUT_SECONDS
 from sbk_dashboard.files import atomic_write
 from sbk_dashboard.grafana_plugin import install_comparison_plugin
 from sbk_dashboard.layout import DashboardDataLayout
@@ -84,7 +85,7 @@ class ManagedMonitoringStack:
         self.dashboard_provisioner = GrafanaDashboardProvisioner(
             self.layout.grafana_dashboards,
             monitoring.grafana_public_url,
-            dashboard.max_comparison_targets,
+            ComparisonPolicy(max_targets=dashboard.max_comparison_targets),
         )
         self.process_registry = ManagedProcessRegistry(self.layout.process_registry)
         self.lifecycle = LifecycleController()
@@ -338,7 +339,7 @@ class ManagedMonitoringStack:
                 self.refresh_statuses()
 
     def _native_services(self) -> tuple[ManagedNativeService, ManagedNativeService]:
-        log_size = self.dashboard.process_log_size_mb * 1024 * 1024
+        log_size = self.dashboard.process_log_size_mb * BYTES_PER_MEBIBYTE
         prometheus = ManagedNativeService(
             NativeServiceSpec(
                 "Prometheus",

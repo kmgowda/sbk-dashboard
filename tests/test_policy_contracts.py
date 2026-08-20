@@ -12,6 +12,9 @@ import unittest
 from pathlib import Path
 
 from sbk_dashboard.contracts import (
+    BYTES_PER_GIBIBYTE,
+    BYTES_PER_KIBIBYTE,
+    BYTES_PER_MEBIBYTE,
     COMPARISON_TARGETS,
     DASHBOARD_READINESS_RETRY_DELAYS_SECONDS,
     DEFAULT_DASHBOARD_PORT,
@@ -58,6 +61,11 @@ class PolicyContractTest(unittest.TestCase):
             COMPARISON_TARGETS.minimum,
             COMPARISON_TARGETS.maximum,
         ))
+
+    def test_binary_size_units_have_one_shared_definition(self):
+        self.assertEqual(1024, BYTES_PER_KIBIBYTE)
+        self.assertEqual(BYTES_PER_KIBIBYTE**2, BYTES_PER_MEBIBYTE)
+        self.assertEqual(BYTES_PER_KIBIBYTE**3, BYTES_PER_GIBIBYTE)
 
     def test_native_manifest_covers_every_supported_platform(self):
         manifest = json.loads(

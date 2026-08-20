@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from sbk_dashboard.comparison import ComparisonPolicy
 from sbk_dashboard.config import DashboardConfig, MonitoringConfig, RuntimePlatform
 from sbk_dashboard.models import BenchmarkTarget, TargetStatus
 from sbk_dashboard.monitoring import ManagedMonitoringStack
@@ -102,7 +103,7 @@ class AssetRenderingTest(unittest.TestCase):
             with self.subTest(host=host):
                 server = object.__new__(DashboardHttpServer)
                 server._default_target_host = host
-                server._max_comparison_targets = 4
+                server._comparison_policy = ComparisonPolicy(max_targets=4)
                 page = self.render(server, "/")
                 self.assertIn(f'value="{host}"'.encode(), page)
                 self.assertNotIn(b"__DEFAULT_TARGET_HOST__", page)
@@ -110,7 +111,7 @@ class AssetRenderingTest(unittest.TestCase):
     def test_asset_fingerprint_uses_the_final_substituted_javascript(self):
         server = object.__new__(DashboardHttpServer)
         server._default_target_host = "127.0.0.1"
-        server._max_comparison_targets = 9
+        server._comparison_policy = ComparisonPolicy(max_targets=9)
         page = self.render(server, "/")
         javascript = self.render(server, "/app.js")
         stylesheet = self.render(server, "/app.css")
