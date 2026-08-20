@@ -9,7 +9,7 @@
 
 services:
   sbk-dashboard:
-    image: sbk-dashboard:1.26.8.3
+    image: sbk-dashboard:1.26.8.4
     pull_policy: never
     build:
       context: .

@@ -1,6 +1,6 @@
 {
   "name": "sbk-dashboard-comparison",
-  "version": "1.26.8.3",
+  "version": "1.26.8.4",
   "private": true,
   "description": "Bundled Grafana Scenes application for SBK/SBM comparison time ranges",
   "license": "Apache-2.0",

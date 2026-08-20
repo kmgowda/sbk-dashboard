@@ -31,6 +31,7 @@ TARGETS: dict[str, tuple[str, ...]] = {
         rf"(sbk-dashboard:){VERSION_PATTERN}()",
         rf"(version output should be `){VERSION_PATTERN}(`)",
     ),
+    "docs/CONFIGURATION.md": (rf"(kmgowda/sbk-dashboard:){VERSION_PATTERN}()",),
     "grafana-plugin/package.json": (rf'("version": "){VERSION_PATTERN}(")',),
     "grafana-plugin/package-lock.json": (rf'("version": "){VERSION_PATTERN}(")',),
     "grafana-plugin/src/plugin.json": (rf'("version": "){VERSION_PATTERN}(")',),

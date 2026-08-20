@@ -18,7 +18,7 @@ Prometheus and Grafana are official native child processes—not Python librarie
 verified installation, configuration, readiness, reconciliation, health, and shutdown. The application can run
 directly in Python/Conda or as a Linux container; container packaging does not change that process architecture.
 
-The current release is `1.26.8.3`. Releases use `Major.Year.Month.Minor`, and
+The current release is `1.26.8.4`. Releases use `Major.Year.Month.Minor`, and
 `src/sbk_dashboard/version.py` is the single source used by package metadata, startup logging, and `-v` output.
 
 ## Features
@@ -203,7 +203,7 @@ docker run --detach --name sbk-dashboard --restart unless-stopped \
   --publish 127.0.0.1:9721:9721 --publish 127.0.0.1:3000:3000 \
   --add-host host.docker.internal:host-gateway \
   --volume sbk-dashboard-data:/var/lib/sbk-dashboard \
-  kmgowda/sbk-dashboard:1.26.8.3
+  kmgowda/sbk-dashboard:1.26.8.4
 ```
 
 See [Docker deployment](docs/DOCKER.md) for upgrades, configuration, security, persistence, architecture support,
