@@ -347,6 +347,19 @@ class WebTest(unittest.TestCase):
         with urllib.request.urlopen(single) as response:
             single_body = json.load(response)
         self.assertTrue(single_body["dashboardId"].startswith("sbk-comparison-"))
+        duplicate_request = urllib.request.Request(
+            self.base + "/api/comparison-dashboard",
+            method="POST",
+            data=json.dumps({"targetIds": [first.id] * 5}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with self.assertRaises(urllib.error.HTTPError) as duplicate_error:
+            urllib.request.urlopen(duplicate_request)
+        self.assertEqual(400, duplicate_error.exception.code)
+        self.assertEqual(
+            "Comparison endpoints must be unique",
+            json.load(duplicate_error.exception)["error"],
+        )
         payloads = (
             {},
             {"targetIds": []},

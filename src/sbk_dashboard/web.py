@@ -311,13 +311,13 @@ class DashboardHttpServer:
             raise ValueError("Target IDs must be an array of strings")
         if len(values) < MIN_COMPARISON_TARGETS:
             raise ValueError("Select at least one endpoint to compare")
-        if len(values) > self._max_comparison_targets:
-            raise ValueError(
-                f"No more than {self._max_comparison_targets} endpoints can be compared"
-            )
         target_ids = sorted(dict.fromkeys(values))
         if len(target_ids) != len(values):
             raise ValueError("Comparison endpoints must be unique")
+        if len(target_ids) > self._max_comparison_targets:
+            raise ValueError(
+                f"No more than {self._max_comparison_targets} endpoints can be compared"
+            )
         with self._mutation_lock:
             if any(self.registry.find(target_id) is None for target_id in target_ids):
                 raise ValueError("Every comparison endpoint must be registered")
@@ -428,8 +428,8 @@ class DashboardHttpServer:
         if (
             "/" in comparison_uid
             or len(target_ids) < MIN_COMPARISON_TARGETS
-            or len(target_ids) > self._max_comparison_targets
             or len(set(target_ids)) != len(target_ids)
+            or len(target_ids) > self._max_comparison_targets
             or self.monitoring.comparison_dashboard_id(target_ids) != comparison_uid
         ):
             self._json(request, HTTPStatus.NOT_FOUND, {"error": "Comparison not found"})
